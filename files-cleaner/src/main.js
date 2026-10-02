@@ -1,18 +1,19 @@
-const { invoke } = window.__TAURI__.core;
+// Shows one screen at a time. Each screen module exports `render(root, nav, ...args)`
+// and builds its own DOM inside `root`.
+import * as home from "./screens/home.js";
+import * as scanResults from "./screens/scan-results.js";
 
-let greetInputEl;
-let greetMsgEl;
+const root = document.querySelector("#app");
 
-async function greet() {
-  // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-  greetMsgEl.textContent = await invoke("greet", { name: greetInputEl.value });
+const nav = {
+  home: () => show(home),
+  scanResults: (result) => show(scanResults, result),
+};
+
+function show(screen, ...args) {
+  root.replaceChildren();
+  window.scrollTo(0, 0);
+  screen.render(root, nav, ...args);
 }
 
-window.addEventListener("DOMContentLoaded", () => {
-  greetInputEl = document.querySelector("#greet-input");
-  greetMsgEl = document.querySelector("#greet-msg");
-  document.querySelector("#greet-form").addEventListener("submit", (e) => {
-    e.preventDefault();
-    greet();
-  });
-});
+nav.home();

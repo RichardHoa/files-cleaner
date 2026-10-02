@@ -1,0 +1,68 @@
+﻿1. A short description of your project
+The project is a desktop productivity tool to help users clean up messy files and arrange them into neat, personally meaningful folders.
+2. Scope
+Included features
+* sort ALL FILES, delete REDUNDANT FILES, put them in their perspective folder in Download or other folder
+* Help users move files and folders into desired locations, with custom layouts.
+* Suggest sensible folders to group various files together based on user preference (user write the rules, and the app will behave like their wishes).
+* Move all files to a desired cloud drive location if the user has a cloud drive set up.
+* Remove file duplications even if they have different name.
+* Include an easy undo (Ctrl+Z) function with no damage.
+* Show a before/after tree for every move, allowing the user to approve, edit, or reject items.
+* Keep a timeline of past sessions, so clean-ups can be undone days later.
+* Allow users to mark specific folders or files to never be touched.
+* Schedule weekly or daily cleanup
+* Support looking and organizing .zip file (with permission of user to decompress them)
+* Support audio and video content
+* Voice mode
+* Support Windows (Windows 10 64-bit and above), Linux (2022 or newer), and macOS (Catalina 10.15 and above).
+Excluded features
+* No voice mode; all inputs must be typed.
+* No touching system, app, or program folders (e.g., Program Files, AppData, /Library, node_modules, .git).
+* No permanent deletion without explicit confirmation.
+* No editing or modifying of file contents; the tool only moves and renames.
+* No cloud uploading of file contents 
+* No syncing or backup functions.
+* No moving email attachments or app libraries (like Photos, iTunes, Lightroom)
+* No multi-user or shared-drive reorganization.
+* No mobile app; this is a desktop-only tool.
+Dependencies
+* The tool runs locally as a standalone application.
+* It requires a compatible operating system: Windows 10 64-bit+, a recent Linux distribution (2022+), or macOS 10.15+.
+* On macOS, the app does not use a developer licence, meaning users will see a warning when installing.
+Other products (Competitors)
+* Sortio: A paid tool that costs $100 per year and covers most of our planned features.
+* AI File Sorter: An open-source tool that basically performs the same tasks as our project.
+3. Technical approach
+Estimates of scale
+The tool can process up to 50 files/minute. This is a standalone app work completely offline, so there is no server load, the speed of the app stays the same regardless how many users are using it.
+Research and expertise:
+We need to research how to use tauri for the application’s development and inno for compiling the app to window.
+Tentative architecture: 
+Tauri for building the app, also Tauri for creating the files for Linux and macOS, inno for creating the installation file for window. All data is stored inside the app, nothing ever leaves the user machine
+4. Resources
+Expected load: 
+* It will not be difficult since we already have an open-source repo doing the same, the main challenge would be to validate our app functions against the user to make sure the app suits their needs.
+Infrastructure needs:
+* We do not need cloud servers, but we need development machines running Windows, Linux, and macOS.
+Performance bottlenecks: 
+* Scanning and hashing thousands of files could be slow, so we must optimize local file reading.
+* Running LLM inside user machine could be slow, so there should be alternatives that fit the user’s machine power. 
+Cost/benefit tradeoff:
+There is no cost, the Claude is supported by the professor, the cost of distributing is zero. One benefit is people will use this product and feel it’s useful, improving their life. But there is also zero profit. 
+5. Schedule
+Estimation of task duration:
+We will keep track of many hours we spend on one task, compare it with our estimation. Before doing a task we’ll allocate it a specific amount of time (3 hours for examplex) to prevent the Parkinson's Law. 
+Milestones:
+Each feature will come with full test and corresponding documentation. I’ll plan first some metric each feature must accomplish to be considered a feature.
+6. Risks & alternatives
+* Risk 1: Accidental system damage. 
+   * Solution: Hardcode exclusions for programmatic and system folders like AppData and .git.
+* Risk 2: Do not run well across all platforms. 
+   * Solution: Test and check the application in all three operating systems to identify bugs. 
+* Risk 3: Corrupting app libraries. 
+   * Solution: Prevent the tool from touching Lightroom catalogues, iTunes, or Photos app libraries.
+* Risk 4: User rejection on macOS.
+   * Solution: Clearly document the installation warning caused by the macOS developer licence.
+* Risk 5: The LLM running inside the user machine is too heavy/compute-intensive
+   * Solution: If a suitable LLM cannot be installed on the user machine, have the option for them to run the LLM on the cloud, or do not use LLM at all.

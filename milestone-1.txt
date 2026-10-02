@@ -1,0 +1,11 @@
+Milestone 1: Scan, dedupe, preview, undo (one OS)
+
+What it does:
+
+Scans a folder the user picks, such as Downloads, and lists every file with its name, extension, size, dates, and path.
+Skips protected paths automatically (system folders, .git, node_modules, app libraries, .DS_Store) and lets the user pin their own "never touch" folders.
+Finds exact duplicates by comparing size, then a partial hash, then a full hash, and proposes keeping one copy under a simple default such as "keep the oldest."
+Supports a handful of hand-written rules in your rule format (e.g. .dmg → Trash, .pptx → Study folder). They're typed in a JSON file, with no UI needed yet.
+Shows the proposed plan as a before/after tree, and the user can approve, untick items, or cancel.
+Executes the plan by moving files to Trash and never deleting permanently. Each operation is written to a journal before it happens.
+Undoes the whole session from the journal, including after the app is closed and reopened.

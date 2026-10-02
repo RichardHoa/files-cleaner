@@ -10,9 +10,9 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "files-cleaner",
-        "width": 800,
-        "height": 600
+        "title": "Files Cleaner",
+        "width": 1100,
+        "height": 720
       }
     ],
     "security": {
