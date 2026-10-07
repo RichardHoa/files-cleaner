@@ -10,7 +10,7 @@ use tempfile::TempDir;
 ///
 /// It lives under the crate folder rather than the system temp dir: macOS
 /// puts that under `/private`, and `target/` sits next to a `Cargo.toml`,
-/// and both are Protected Paths the scanner would refuse.
+/// and both are Protected Paths that would hide the test's own files.
 pub fn scan_root() -> TempDir {
     let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("test-tmp");
     fs::create_dir_all(&base).unwrap();

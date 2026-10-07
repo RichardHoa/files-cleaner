@@ -11,15 +11,27 @@ The folder the user picks to clean; everything under it (recursively) is in scop
 _Avoid_: target dir, source folder
 
 **Protected Path**:
-A path the tool must never read into or change: built-in (system folders, app libraries, `.git`, `node_modules`, `.DS_Store`) or listed by the user as Never-Touch.
+A path the tool leaves alone: built-in (System Folders, Disk Roots, OS Metadata Files, app libraries, developer folders such as `.git`, `node_modules` or a `target` next to `Cargo.toml`) or listed by the user as Never-Touch. The user may still pick one, or a folder inside one, as the Scan Root after a warning; only the Protected Paths inside that Scan Root are then left alone.
 _Avoid_: excluded path, ignored folder
+
+**System Folder**:
+A Protected Path that belongs to the operating system or to installed apps' settings (e.g. `/System` and `~/Library` on macOS, `C:\Windows` and `AppData` on Windows, `/usr` and `~/.config` on Linux); everything inside it is protected too. Each OS has its own list.
+_Avoid_: OS folder, Library folder
+
+**Disk Root**:
+The top folder of a disk (`/`, a drive such as `C:\`, a mounted volume). Only the root itself is protected, not the folders on the disk.
+_Avoid_: volume, drive
+
+**OS Metadata File**:
+A file an operating system's file manager keeps inside ordinary folders (`.DS_Store`, `Thumbs.db`, `desktop.ini`, `.directory`). Every OS's metadata files are protected on every OS, since disks move between machines.
+_Avoid_: Finder metadata, junk file
 
 **Never-Touch Path**:
 A Protected Path the user added themselves.
 _Avoid_: pinned folder, whitelist
 
 **Package**:
-A folder that macOS presents as a single file (an `.app`, a `.pages` document); treated as one indivisible item.
+A folder whose contents only make sense together, such as an app bundle (`.app`) or a document saved as a folder (`.pages`, `.sparsebundle`); treated as one indivisible item on every OS, wherever the folder came from.
 _Avoid_: bundle
 
 ### Duplicates
@@ -55,8 +67,12 @@ Taking a file out of the user's way without destroying it, sending it to the Tra
 _Avoid_: delete, remove
 
 **Trash Destination**:
-A setting for where Trash sends files: the **System Trash** (the OS trash can) or a **Holding Folder** created inside the Scan Root.
+A setting for where Trash sends files: a **Holding Folder** created inside the Scan Root, or (not yet supported) the **System Trash**, the OS's own trash can.
 _Avoid_: recycle bin, quarantine
+
+**Clash Suffix**:
+The ` (1)`, ` (2)`, … added before the extension when a file's new name is already taken (`notes (1).pptx`); the same style on every OS. Names that differ only in letter case count as taken.
+_Avoid_: Finder-style suffix, copy suffix
 
 ### History
 

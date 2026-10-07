@@ -1,18 +1,23 @@
 mod common;
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use common::{empty_config, scan_root, write};
-use files_cleaner_core::{scan, ScanResult};
+use files_cleaner_core::{scan, scan_with_progress, ScanResult};
 
-/// Paths of the scanned entries relative to the Scan Root, sorted.
+/// Paths of the scanned entries relative to the Scan Root, sorted. Also
+/// checks each entry's `relative_path` names the same path.
 fn relative_paths(result: &ScanResult, root: &Path) -> Vec<String> {
     let root = fs::canonicalize(root).unwrap();
     let mut paths: Vec<String> = result
         .entries
         .iter()
-        .map(|e| e.path.strip_prefix(&root).unwrap().to_string_lossy().into_owned())
+        .map(|e| {
+            let relative = e.path.strip_prefix(&root).unwrap();
+            assert_eq!(relative, e.relative_path.iter().collect::<PathBuf>(), "{}", e.path.display());
+            relative.to_string_lossy().into_owned()
+        })
         .collect();
     paths.sort();
     paths
@@ -40,7 +45,6 @@ fn reports_name_extension_size_and_dates() {
     // 2024-03-05T10:00:00Z
     let modified = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_709_632_800);
     fs::File::options().write(true).open(&path).unwrap().set_modified(modified).unwrap();
-    write(dir.path(), "Makefile", "");
 
     let result = scan(dir.path(), &empty_config(dir.path())).unwrap();
 
@@ -50,10 +54,39 @@ fn reports_name_extension_size_and_dates() {
     assert_eq!(lecture.modified, 1_709_632_800_000);
     assert!(lecture.created.is_some());
     assert!(!lecture.is_package);
+}
 
-    let makefile = result.entries.iter().find(|e| e.name == "Makefile").unwrap();
-    assert_eq!(makefile.extension, "");
-    assert_eq!(makefile.size, 0);
+#[test]
+fn leaves_out_files_with_no_extension_and_counts_them() {
+    let dir = scan_root();
+    write(dir.path(), "notes.txt", "n");
+    write(dir.path(), "Makefile", "all:");
+    write(dir.path(), "bin/tool", "binary");
+    write(dir.path(), "trailing.", "dot");
+
+    let result = scan(dir.path(), &empty_config(dir.path())).unwrap();
+
+    assert_eq!(relative_paths(&result, dir.path()), ["notes.txt"]);
+    assert_eq!(result.no_extension, 3, "a name ending in a dot has no extension either");
+}
+
+#[test]
+fn reports_progress_ending_with_the_final_counts() {
+    let dir = scan_root();
+    write(dir.path(), "a.txt", "a");
+    write(dir.path(), "sub/b.txt", "b");
+    write(dir.path(), "sub/deeper/c.txt", "c");
+    write(dir.path(), "node_modules/x/index.js", "js");
+    let mut reports = Vec::new();
+
+    let result = scan_with_progress(dir.path(), &empty_config(dir.path()), |p| reports.push(p)).unwrap();
+
+    let last = reports.last().expect("at least one progress report");
+    assert_eq!(last.found, 3);
+    assert_eq!(last.folders, 3, "the Scan Root, sub and sub/deeper");
+    assert_eq!(last.skipped, 1);
+    assert_eq!(last.current, result.root);
+    assert_eq!(result.entries.len(), 3);
 }
 
 #[test]

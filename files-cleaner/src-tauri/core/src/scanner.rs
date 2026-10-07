@@ -2,7 +2,7 @@ use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 
@@ -23,6 +23,8 @@ pub struct ScanEntry {
     /// Milliseconds since the Unix epoch, if the file system records it.
     pub created: Option<i64>,
     pub path: PathBuf,
+    /// The names from the Scan Root down to this item, its own name last.
+    pub relative_path: Vec<String>,
     pub is_package: bool,
 }
 
@@ -35,21 +37,37 @@ pub struct ScanResult {
     pub root: PathBuf,
     /// How many Protected Paths were met and left alone.
     pub skipped: usize,
+    /// How many files were left out because they have no extension.
+    pub no_extension: usize,
     /// Files and folders that couldn't be read, so weren't scanned.
     pub unreadable: Vec<PathBuf>,
 }
 
+/// How far a scan has got, reported while it runs.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanProgress {
+    /// Files and Packages listed so far.
+    pub found: usize,
+    /// Folders walked into so far, the Scan Root included.
+    pub folders: usize,
+    /// Protected Paths left alone so far.
+    pub skipped: usize,
+    /// The folder being read.
+    pub current: PathBuf,
+}
+
+/// The longest a scan waits between progress reports.
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
+
 #[derive(Debug)]
 pub enum ScanError {
-    /// The Scan Root is, or is inside, a Protected Path or a Package.
-    ProtectedRoot { root: PathBuf, reason: String },
     Io(io::Error),
 }
 
 impl fmt::Display for ScanError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            ScanError::ProtectedRoot { reason, .. } => f.write_str(reason),
             ScanError::Io(e) => write!(f, "Couldn't read the folder: {e}"),
         }
     }
@@ -63,86 +81,114 @@ impl From<io::Error> for ScanError {
     }
 }
 
+/// Why the user should think twice before scanning `scan_root`, if they
+/// should: it is, or is inside, a Protected Path or a Package. Any folder can
+/// still be scanned.
+pub fn scan_root_warning(scan_root: &Path, config: &Config) -> Option<String> {
+    Protection::new(config).refusal(scan_root)
+}
+
 /// Walks `scan_root` recursively and lists every file and Package under it,
-/// skipping hidden entries, symlinks and Protected Paths.
+/// skipping hidden entries, symlinks, Protected Paths inside it and files with
+/// no extension. Protected Paths covering `scan_root` itself are waived: see
+/// `scan_root_warning`.
 pub fn scan(scan_root: &Path, config: &Config) -> Result<ScanResult, ScanError> {
-    let protection = Protection::new(config);
-    if let Some(reason) = protection.refusal(scan_root) {
-        return Err(ScanError::ProtectedRoot { root: scan_root.to_path_buf(), reason });
-    }
+    scan_with_progress(scan_root, config, |_| {})
+}
+
+/// Like `scan`, calling `on_progress` every `PROGRESS_INTERVAL` or so while it
+/// runs, and once more at the end with the final counts.
+pub fn scan_with_progress(
+    scan_root: &Path,
+    config: &Config,
+    mut on_progress: impl FnMut(ScanProgress),
+) -> Result<ScanResult, ScanError> {
     let root = fs::canonicalize(scan_root)?;
+    let protection = Protection::new(config);
     let mut result = ScanResult {
         entries: Vec::new(),
         skipped: 0,
+        no_extension: 0,
         unreadable: Vec::new(),
         root: root.clone(),
     };
-    // The Scan Root itself must be readable; anything below it that isn't
-    // is reported and passed over.
-    let mut folders = Vec::new();
-    let mut next = Some(fs::read_dir(&root)?);
-    while let Some(children) = next.take().or_else(|| open_next(&mut folders, &mut result.unreadable)) {
+    let mut folders_walked = 0;
+    let mut last_report = Instant::now();
+    let mut report = |result: &ScanResult, folders_walked: usize, current: &Path| {
+        on_progress(ScanProgress {
+            found: result.entries.len(),
+            folders: folders_walked,
+            skipped: result.skipped,
+            current: current.to_path_buf(),
+        })
+    };
+    let mut folders = vec![root.clone()];
+    while let Some(folder) = folders.pop() {
+        // The Scan Root itself must be readable; anything below it that
+        // isn't is reported and passed over.
+        let children = match fs::read_dir(&folder) {
+            Ok(children) => children,
+            Err(e) if folder == root => return Err(e.into()),
+            Err(_) => {
+                result.unreadable.push(folder);
+                continue;
+            }
+        };
+        folders_walked += 1;
         for child in children {
+            if last_report.elapsed() >= PROGRESS_INTERVAL {
+                report(&result, folders_walked, &folder);
+                last_report = Instant::now();
+            }
             let Ok(child) = child else { continue };
             let path = child.path();
-            if protection.reason(&path).is_some() {
+            // Never follows symlinks: the type is the link's own. Finder
+            // aliases are plain files, so they are listed but never resolved.
+            let Ok(kind) = child.file_type() else {
+                result.unreadable.push(path);
+                continue;
+            };
+            if kind.is_symlink() || !(kind.is_dir() || kind.is_file()) {
+                continue;
+            }
+            if protection.reason(&path, kind.is_dir()).is_some() {
                 result.skipped += 1;
                 continue;
             }
             if child.file_name().to_string_lossy().starts_with('.') {
                 continue;
             }
-            match visit(path.clone(), &mut folders) {
-                Ok(Some(entry)) => result.entries.push(entry),
-                Ok(None) => {}
+            if kind.is_file() && path.extension().is_none_or(|e| e.is_empty()) {
+                result.no_extension += 1;
+                continue;
+            }
+            if kind.is_dir() && !is_package(&path) {
+                folders.push(path);
+                continue;
+            }
+            // What's left is a file, or a folder that is a Package.
+            match child.metadata().and_then(|metadata| entry(&path, &root, &metadata, kind.is_dir())) {
+                Ok(entry) => result.entries.push(entry),
                 Err(_) => result.unreadable.push(path),
             }
         }
     }
+    report(&result, folders_walked, &root);
     result.entries.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(result)
 }
 
-/// Opens the next queued folder, recording any that can't be read.
-fn open_next(folders: &mut Vec<PathBuf>, unreadable: &mut Vec<PathBuf>) -> Option<fs::ReadDir> {
-    while let Some(folder) = folders.pop() {
-        match fs::read_dir(&folder) {
-            Ok(children) => return Some(children),
-            Err(_) => unreadable.push(folder),
-        }
-    }
-    None
-}
-
-/// Lists a file or Package, or queues a folder to walk into.
-fn visit(path: PathBuf, folders: &mut Vec<PathBuf>) -> io::Result<Option<ScanEntry>> {
-    // Never follows symlinks. Finder aliases are plain files, so they are
-    // listed but never resolved either.
-    let metadata = fs::symlink_metadata(&path)?;
-    let kind = metadata.file_type();
-    if kind.is_dir() && is_package(&path) {
-        let size = total_size(&path);
-        Ok(Some(entry(path, &metadata, size, true)?))
-    } else if kind.is_dir() {
-        folders.push(path);
-        Ok(None)
-    } else if kind.is_file() {
-        Ok(Some(entry(path, &metadata, metadata.len(), false)?))
-    } else {
-        Ok(None)
-    }
-}
-
-fn entry(path: PathBuf, metadata: &fs::Metadata, size: u64, is_package: bool) -> io::Result<ScanEntry> {
-    let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
-    let extension = path.extension().unwrap_or_default().to_string_lossy().into_owned();
+/// Lists a file, or a Package with the total size of what's inside it.
+fn entry(path: &Path, root: &Path, metadata: &fs::Metadata, is_package: bool) -> io::Result<ScanEntry> {
+    let relative = path.strip_prefix(root).expect("the scanner only walks inside the Scan Root");
     Ok(ScanEntry {
-        name,
-        extension,
-        size,
+        name: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+        extension: path.extension().unwrap_or_default().to_string_lossy().into_owned(),
+        size: if is_package { total_size(path) } else { metadata.len() },
         modified: millis(metadata.modified()?),
         created: metadata.created().ok().map(millis),
-        path,
+        path: path.to_path_buf(),
+        relative_path: relative.iter().map(|name| name.to_string_lossy().into_owned()).collect(),
         is_package,
     })
 }

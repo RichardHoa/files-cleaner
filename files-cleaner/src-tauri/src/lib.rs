@@ -4,8 +4,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use files_cleaner_core::{self as core, Config, ScanResult, EXAMPLE_CONFIG};
+use files_cleaner_core::{self as core, Config, ScanProgress, ScanResult, EXAMPLE_CONFIG};
 use serde::Serialize;
+use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager};
 
 const CONFIG_FILE_NAME: &str = "config.json";
@@ -80,10 +81,28 @@ fn open_config(app: AppHandle) -> Result<(), CommandError> {
     tauri_plugin_opener::open_path(&path, None::<&str>).map_err(CommandError::new)
 }
 
+/// Why the user should think twice before scanning `scan_root`, if they
+/// should. Any folder can still be scanned.
 #[tauri::command]
-async fn scan(app: AppHandle, scan_root: PathBuf) -> Result<ScanResult, CommandError> {
+fn scan_root_warning(app: AppHandle, scan_root: PathBuf) -> Result<Option<String>, CommandError> {
     let loaded = read_config(&app)?;
-    tauri::async_runtime::spawn_blocking(move || core::scan(&scan_root, &loaded.config))
+    Ok(core::scan_root_warning(&scan_root, &loaded.config))
+}
+
+/// Scans off the UI thread, sending progress to `on_progress` as it goes.
+#[tauri::command]
+async fn scan(
+    app: AppHandle,
+    scan_root: PathBuf,
+    on_progress: Channel<ScanProgress>,
+) -> Result<ScanResult, CommandError> {
+    let loaded = read_config(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        // A closed window can't receive progress; the scan carries on.
+        core::scan_with_progress(&scan_root, &loaded.config, |progress| {
+            let _ = on_progress.send(progress);
+        })
+    })
         .await
         .map_err(CommandError::new)?
         .map_err(CommandError::new)
@@ -94,7 +113,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![load_config, open_config, scan])
+        .invoke_handler(tauri::generate_handler![load_config, open_config, scan_root_warning, scan])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -1,7 +1,7 @@
 // Home: pick a Scan Root, open the config, see whether the config is valid.
-import { describeError, loadConfig, openConfig, pickFolder, scan } from "../api.js";
+import { describeError, loadConfig, openConfig, pickFolder, scan, scanRootWarning } from "../api.js";
 import { el } from "../dom.js";
-import { plural } from "../format.js";
+import { count, plural } from "../format.js";
 
 export function render(root, nav) {
   const pick = el("button", { type: "button", className: "primary" }, "Pick folder");
@@ -23,9 +23,16 @@ export function render(root, nav) {
     const folder = await pickFolder();
     if (!folder) return;
     pick.disabled = true;
-    showMessage(status, `Scanning ${folder}…`);
     try {
-      nav.scanResults(await scan(folder));
+      // A protected folder can still be scanned, once the user has read why it's protected.
+      const warning = await scanRootWarning(folder);
+      if (warning && !(await confirmScan(status, warning))) {
+        status.replaceChildren();
+        pick.disabled = false;
+        return;
+      }
+      showMessage(status, `Scanning ${folder}…`);
+      nav.scanResults(await scan(folder, (progress) => showProgress(status, folder, progress)));
     } catch (error) {
       showMessage(status, describeError(error), true);
       pick.disabled = false;
@@ -56,6 +63,23 @@ async function showConfigStatus(node) {
   } catch (error) {
     showMessage(node, `Config error: ${describeError(error)}`, true);
   }
+}
+
+function showProgress(node, folder, { found, folders, skipped, current }) {
+  const counts = [`${plural(found, "file")} found`, `${plural(folders, "folder")} read`, `${count(skipped)} protected skipped`];
+  showMessage(node, `Scanning ${folder}…\n${counts.join(" · ")}\n${current}`);
+}
+
+/** Shows `warning` in `node` with "Scan anyway" and "Cancel"; resolves to whether to scan. */
+function confirmScan(node, warning) {
+  return new Promise((resolve) => {
+    const scanAnyway = el("button", { type: "button", className: "primary" }, "Scan anyway");
+    const cancel = el("button", { type: "button" }, "Cancel");
+    scanAnyway.addEventListener("click", () => resolve(true));
+    cancel.addEventListener("click", () => resolve(false));
+    node.classList.remove("error");
+    node.replaceChildren(el("span", { className: "warning" }, `${warning}.`), el("div", { className: "actions" }, scanAnyway, cancel));
+  });
 }
 
 function showMessage(node, text, isError = false) {

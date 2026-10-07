@@ -1,6 +1,6 @@
 # Write-ahead Journal per Session; the tool never deletes permanently
 
-Every Operation is appended to the Session's Journal (one JSON-lines file per Session, fsynced) as an intent *before* it touches the disk, and marked done, skipped or failed afterwards. Trash always moves files somewhere recoverable (System Trash or Holding Folder); nothing calls a permanent delete. This is the app's core safety guarantee: any Session can be undone after a crash or restart, and future features must not add "just delete it" shortcuts. SQLite was considered and deferred until the session-timeline feature needs querying.
+Every Operation is appended to the Session's Journal (one JSON-lines file per Session, fsynced) as an intent *before* it touches the disk, and marked done, skipped or failed afterwards. Trash always moves files somewhere recoverable (the Holding Folder; the System Trash once ADR-0001 is revived); nothing calls a permanent delete. This is the app's core safety guarantee: any Session can be undone after a crash or restart, and future features must not add "just delete it" shortcuts. SQLite was considered and deferred until the session-timeline feature needs querying.
 
 ## Consequences
 

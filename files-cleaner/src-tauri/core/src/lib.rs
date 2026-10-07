@@ -10,4 +10,4 @@ pub use config::{
     TrashDestination, EXAMPLE_CONFIG,
 };
 pub use protection::HOLDING_FOLDER_NAME;
-pub use scanner::{scan, ScanEntry, ScanError, ScanResult};
+pub use scanner::{scan, scan_root_warning, scan_with_progress, ScanEntry, ScanError, ScanProgress, ScanResult};

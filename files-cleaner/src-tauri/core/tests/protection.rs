@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use common::{config, empty_config, scan_root, write};
-use files_cleaner_core::{scan, ScanError, ScanResult};
+use files_cleaner_core::{scan, scan_root_warning, ScanResult};
 
 fn names(result: &ScanResult) -> Vec<String> {
     let mut names: Vec<String> = result.entries.iter().map(|e| e.name.clone()).collect();
@@ -27,6 +27,79 @@ fn skips_dev_folders_and_counts_them() {
 
     assert_eq!(names(&result), ["Cargo.toml", "keep.txt"]);
     assert_eq!(result.skipped, 5);
+}
+
+#[test]
+fn skips_developer_folders_for_many_languages() {
+    let dir = scan_root();
+    write(dir.path(), "keep.txt", "k");
+    for folder in [
+        "py/.tox", "py/.mypy_cache", "py/.pytest_cache", "py/mylib.egg-info", "py/htmlcov",
+        "web/.next", "web/.svelte-kit", "web/bower_components", "apple/DerivedData",
+        "apple/.build", "hs/.stack-work", "hs/dist-newstyle", "dart/.dart_tool", "zig/zig-cache",
+        "c/CMakeFiles", "c/cmake-build-debug", "infra/.terraform", "ide/.idea", "vcs/.hg",
+    ] {
+        write(dir.path(), &format!("{folder}/inside.txt"), "x");
+    }
+
+    let result = scan(dir.path(), &empty_config(dir.path())).unwrap();
+
+    assert_eq!(names(&result), ["keep.txt"]);
+    assert_eq!(result.skipped, 19);
+}
+
+#[test]
+fn skips_environments_and_browser_profiles_whatever_they_are_called() {
+    let dir = scan_root();
+    write(dir.path(), "project/main.py", "print()");
+    write(dir.path(), "project/my-env/pyvenv.cfg", "home = /usr/bin");
+    write(dir.path(), "project/my-env/lib/site.py", "py");
+    write(dir.path(), "conda/envs/science/conda-meta/history.json", "{}");
+    write(dir.path(), "scraper/google_profile/Local State", "{}");
+    write(dir.path(), "scraper/google_profile/Default/History.db", "db");
+
+    let result = scan(dir.path(), &empty_config(dir.path())).unwrap();
+
+    assert_eq!(names(&result), ["main.py"]);
+    assert_eq!(result.skipped, 3);
+}
+
+#[test]
+fn common_build_folder_names_are_skipped_only_next_to_a_project_file() {
+    let dir = scan_root();
+    write(dir.path(), "web/package.json", "{}");
+    write(dir.path(), "web/dist/app.js", "js");
+    write(dir.path(), "web/build/app.js", "js");
+    write(dir.path(), "go/go.mod", "module x");
+    write(dir.path(), "go/vendor/lib.go", "go");
+    write(dir.path(), "java/pom.xml", "<project/>");
+    write(dir.path(), "java/target/app.jar", "jar");
+    write(dir.path(), "dotnet/App.csproj", "<Project/>");
+    write(dir.path(), "dotnet/bin/App.dll", "dll");
+    write(dir.path(), "dotnet/obj/App.pdb", "pdb");
+    write(dir.path(), "photos/build/house.jpg", "jpg");
+    write(dir.path(), "photos/dist/plan.pdf", "pdf");
+    write(dir.path(), "photos/vendor/invoice.pdf", "pdf");
+    write(dir.path(), "photos/bin/old.zip", "zip");
+
+    let result = scan(dir.path(), &empty_config(dir.path())).unwrap();
+
+    assert_eq!(
+        names(&result),
+        ["App.csproj", "go.mod", "house.jpg", "invoice.pdf", "old.zip", "package.json", "plan.pdf", "pom.xml"]
+    );
+    assert_eq!(result.skipped, 6);
+}
+
+#[test]
+fn warns_about_a_python_environment_as_the_scan_root() {
+    let home = scan_root();
+    write(home.path(), "env/pyvenv.cfg", "home = /usr/bin");
+    write(home.path(), "env/lib/site.py", "py");
+
+    let reason = warning(&home.path().join("env/lib"), home.path());
+
+    assert!(reason.contains("pyvenv.cfg"), "{reason}");
 }
 
 #[test]
@@ -115,37 +188,36 @@ fn skips_never_touch_paths_from_the_config() {
     assert_eq!(result.skipped, 2);
 }
 
-fn refusal(root: &Path, home: &Path) -> String {
-    match scan(root, &empty_config(home)) {
-        Err(ScanError::ProtectedRoot { reason, .. }) => reason,
-        other => panic!("expected {} to be refused, got {other:?}", root.display()),
-    }
+/// The warning shown before scanning `root`, which must have one.
+fn warning(root: &Path, home: &Path) -> String {
+    scan_root_warning(root, &empty_config(home))
+        .unwrap_or_else(|| panic!("expected a warning about {}", root.display()))
 }
 
 #[test]
-fn refuses_system_folders_as_the_scan_root() {
+fn warns_about_system_folders_as_the_scan_root() {
     let home = scan_root();
     for root in ["/System", "/Library/Fonts", "/Applications", "/usr/bin", "/bin", "/sbin", "/private/etc", "/Volumes"] {
-        refusal(Path::new(root), home.path());
+        warning(Path::new(root), home.path());
     }
 }
 
 #[test]
-fn refuses_a_scan_root_that_reaches_a_system_folder_through_a_symlink() {
+fn warns_about_a_scan_root_that_reaches_a_system_folder_through_a_symlink() {
     // `/tmp` is a symlink to `/private/tmp`.
     let home = scan_root();
-    refusal(Path::new("/tmp"), home.path());
+    warning(Path::new("/tmp"), home.path());
 }
 
 #[test]
-fn refuses_a_volume_root_as_the_scan_root() {
+fn warns_about_a_volume_root_as_the_scan_root() {
     let home = scan_root();
     let volume = fs::read_dir("/Volumes").unwrap().next().unwrap().unwrap().path();
-    refusal(&volume, home.path());
+    warning(&volume, home.path());
 }
 
 #[test]
-fn refuses_protected_folders_and_anything_inside_them_as_the_scan_root() {
+fn warns_about_protected_folders_and_anything_inside_them_as_the_scan_root() {
     let home = scan_root();
     let project = home.path().join("project");
     write(&project, "node_modules/pkg/lib/index.js", "js");
@@ -154,28 +226,87 @@ fn refuses_protected_folders_and_anything_inside_them_as_the_scan_root() {
     write(home.path(), "Library/Caches/x", "x");
     write(home.path(), "Tool.app/Contents/Info.plist", "plist");
 
-    let reason = refusal(&project.join("node_modules/pkg/lib"), home.path());
+    let reason = warning(&project.join("node_modules/pkg/lib"), home.path());
     assert!(reason.contains("node_modules"), "{reason}");
-    refusal(&project.join("target/debug"), home.path());
-    refusal(&home.path().join("Library/Caches"), home.path());
-    refusal(&home.path().join("Tool.app/Contents"), home.path());
+    warning(&project.join("target/debug"), home.path());
+    warning(&home.path().join("Library/Caches"), home.path());
+    warning(&home.path().join("Tool.app/Contents"), home.path());
 }
 
 #[test]
-fn refuses_a_never_touch_path_as_the_scan_root() {
+fn warns_about_a_never_touch_path_as_the_scan_root_but_scans_it() {
     let home = scan_root();
     write(home.path(), "Downloads/Keep/a.txt", "a");
     let config = config(r#"{ "neverTouch": ["~/Downloads/Keep"], "rules": [] }"#, home.path());
+    let keep = home.path().join("Downloads/Keep");
 
-    let refused = scan(&home.path().join("Downloads/Keep"), &config);
+    let reason = scan_root_warning(&keep, &config).unwrap();
+    let result = scan(&keep, &config).unwrap();
 
-    assert!(matches!(refused, Err(ScanError::ProtectedRoot { .. })), "{refused:?}");
+    assert!(reason.contains("Never-Touch"), "{reason}");
+    assert_eq!(names(&result), ["a.txt"]);
+    assert_eq!(result.skipped, 0);
 }
 
 #[test]
-fn refuses_the_startup_disk_root_as_the_scan_root() {
+fn an_ordinary_folder_has_no_warning() {
     let home = scan_root();
-    refusal(Path::new("/"), home.path());
+    write(home.path(), "Downloads/a.txt", "a");
+    assert_eq!(scan_root_warning(&home.path().join("Downloads"), &empty_config(home.path())), None);
+}
+
+#[test]
+fn a_folder_inside_the_library_folder_can_be_scanned_after_its_warning() {
+    // Cloud drives such as OneDrive live in ~/Library/CloudStorage.
+    let home = scan_root();
+    let drive = home.path().join("Library/CloudStorage/OneDrive-Personal");
+    write(&drive, "Reports/q3.pdf", "pdf");
+    write(&drive, "photo.jpg", "jpg");
+
+    let reason = warning(&drive, home.path());
+    let result = scan(&drive, &empty_config(home.path())).unwrap();
+
+    assert!(reason.contains("Library"), "{reason}");
+    assert_eq!(names(&result), ["photo.jpg", "q3.pdf"]);
+    assert_eq!(result.skipped, 0);
+}
+
+#[test]
+fn protected_paths_further_inside_a_warned_scan_root_are_still_skipped() {
+    let home = scan_root();
+    let drive = home.path().join("Library/CloudStorage/OneDrive-Personal");
+    write(&drive, "notes.txt", "n");
+    write(&drive, "project/node_modules/left-pad/index.js", "js");
+    write(&drive, "Photos.photoslibrary/database/Photos.sqlite", "db");
+    let config = config(
+        r#"{ "neverTouch": ["~/Library/CloudStorage/OneDrive-Personal/Private"], "rules": [] }"#,
+        home.path(),
+    );
+    write(&drive, "Private/secret.txt", "s");
+
+    let result = scan(&drive, &config).unwrap();
+
+    assert_eq!(names(&result), ["notes.txt"]);
+    assert_eq!(result.skipped, 3);
+}
+
+#[test]
+fn a_folder_inside_a_package_can_be_scanned_after_its_warning() {
+    let home = scan_root();
+    write(home.path(), "Tool.app/Contents/Info.plist", "plist");
+    let contents = home.path().join("Tool.app/Contents");
+
+    let reason = warning(&contents, home.path());
+    let result = scan(&contents, &empty_config(home.path())).unwrap();
+
+    assert!(reason.contains("Package"), "{reason}");
+    assert_eq!(names(&result), ["Info.plist"]);
+}
+
+#[test]
+fn warns_about_the_startup_disk_root_as_the_scan_root() {
+    let home = scan_root();
+    warning(Path::new("/"), home.path());
 }
 
 #[test]

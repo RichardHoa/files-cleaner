@@ -1,4 +1,4 @@
-# Milestone 1: Scan, dedupe, preview, undo (macOS)
+# Milestone 1: Scan, dedupe, preview, undo (macOS, Windows, Linux)
 
 Status: ready-for-agent
 
@@ -8,28 +8,33 @@ My Downloads folder (and others like it) is a mess: installers I no longer need,
 
 ## Solution
 
-A macOS desktop app where I pick a folder, the app scans it, finds exact duplicates and applies rules I wrote myself (e.g. `.dmg` → Trash, `.pptx` → Study folder), and then shows me a before/after tree of every proposed change. I tick or untick individual changes, then run them. Nothing is ever permanently deleted: "trashed" files go either to the macOS Trash or to a Holding Folder inside the folder I picked, whichever I configured. Every change is written to a Journal before it happens, so I can undo a whole Session at any time, even after closing and reopening the app.
+A desktop app for macOS, Windows and Linux where I pick a folder, the app scans it, finds exact duplicates and applies rules I wrote myself (e.g. `.dmg` → Trash, `.pptx` → Study folder), and then shows me a before/after tree of every proposed change. I tick or untick individual changes, then run them. Nothing is ever permanently deleted: "trashed" files go to a Holding Folder inside the folder I picked. Every change is written to a Journal before it happens, so I can undo a whole Session at any time, even after closing and reopening the app.
 
 ## User Stories
 
 ### Picking and scanning
 
-1. As a user, I want to pick a folder with the native macOS folder picker, so that I can choose which Scan Root to clean.
+1. As a user, I want to pick a folder with the OS's native folder picker, so that I can choose which Scan Root to clean.
 2. As a user, I want the scan to include every subfolder of the Scan Root, so that duplicates and stray files hidden in nested folders are found.
 3. As a user, I want to see every scanned file with its name, extension, size, modified date, created date and path, so that I know exactly what the app found.
 4. As a user, I want the scan to never follow symlinks or aliases, so that it never wanders outside the folder I picked or loops forever.
-5. As a user, I want hidden files and folders (dot-files) skipped, so that app and tool state inside my folders is never disturbed.
-6. As a user, I want macOS Packages (`.app`, `.pages`, …) treated as one item with their total size, so that the app never reaches inside them and breaks them.
+5. As a user, I want hidden files and folders skipped (names starting with a dot on every OS, plus entries with the Hidden or System attribute on Windows), so that app and tool state inside my folders is never disturbed.
+6. As a user, I want Packages (`.app`, `.pages`, `.sparsebundle`, …) treated as one item with their total size on every OS, even when they were copied from a Mac, so that the app never reaches inside them and breaks them.
 7. As a user, I want to see how many Protected Paths were skipped during the scan, so that I trust the app is respecting them.
-8. As a user, I want the app to refuse to use a Protected Path as the Scan Root and tell me why, so that I can't accidentally point it at a system folder.
+8. As a user, I want the app to warn me, and tell me why, before it scans a Protected Path (or a folder inside one) as the Scan Root, so that I can't accidentally point it at a system folder but can still scan any folder I choose, such as a OneDrive folder in `~/Library/CloudStorage` on macOS.
 9. As a user, I want the scan to stay responsive on folders with thousands of files, so that the app doesn't look frozen.
 
 ### Protected Paths
 
-10. As a user, I want system folders (`/System`, `/Library`, `/Applications`, `/usr`, `/bin`, `/sbin`, `/private`, the `/Volumes` roots, `~/Library`) never touched, so that cleaning can't damage my Mac.
-11. As a developer, I want `.git`, `node_modules`, `.venv`, `__pycache__` and a `target` folder next to a `Cargo.toml` never touched, so that my projects keep working.
-12. As a photographer or music listener, I want app libraries (`*.photoslibrary`, `*.musiclibrary`, `*.tvlibrary`, `iTunes/`, `Music/Music/`, `*.lrcat`, `*.lrdata`) never touched, so that my catalogues aren't corrupted.
-13. As a user, I want `.DS_Store`, `Icon\r` and `.localized` files never touched, so that Finder metadata stays intact.
+10. As a user, I want my OS's System Folders and Disk Roots never touched, so that cleaning can't damage my computer:
+    - macOS: `/System`, `/Library`, `/Applications`, `/usr`, `/bin`, `/sbin`, `/private`, `~/Library`; Disk Roots `/`, `/Volumes` and `/Volumes/<disk>`.
+    - Windows: `C:\Windows`, `C:\Program Files`, `C:\Program Files (x86)`, `C:\ProgramData`, `%USERPROFILE%\AppData`, `$Recycle.Bin`, `System Volume Information`; Disk Roots are drive roots such as `C:\`.
+    - Linux: `/usr`, `/etc`, `/bin`, `/sbin`, `/lib`, `/lib64`, `/boot`, `/proc`, `/sys`, `/dev`, `/run`, `/var`, `/opt`, `/snap`, `~/.config`, `~/.local`, `~/.cache`; Disk Roots `/`, `/media/<user>/<disk>`, `/mnt/<disk>`, `/run/media/<user>/<disk>`.
+    Only a Disk Root itself is protected, not the folders on the disk.
+11. As a developer, I want developer folders for common languages and tools never touched (version control, dependencies, build output, caches, IDE state, Python and Conda environments, browser profiles; e.g. `.git`, `node_modules`, `.venv`, `__pycache__`, and ambiguous names such as `target`, `build`, `dist`, `vendor` or `bin` only when they sit next to a project file like `Cargo.toml`, `package.json`, `go.mod` or a `.csproj`), so that my projects keep working. The full list lives in `core/src/protection/dev_folders.rs`.
+11a. As a user, I want files with no extension (e.g. `Makefile`, compiled binaries) left out of the scan and counted, so that the results only show documents and downloads I'd actually clean.
+12. As a photographer or music listener, I want app libraries (`*.photoslibrary`, `*.musiclibrary`, `*.tvlibrary`, `iTunes/`, `Music/Music/`, `*.lrcat`, `*.lrdata`) never touched on every OS, so that my catalogues aren't corrupted.
+13. As a user, I want OS Metadata Files from every OS (`.DS_Store`, `Icon\r`, `.localized`, `Thumbs.db`, `desktop.ini`, `.directory`) never touched on any OS, so that file-manager state stays intact even on disks shared between machines.
 14. As a user, I want to list my own Never-Touch Paths in the config, so that folders I care about are left exactly as they are.
 15. As a user, I want the app's own Holding Folder treated as a Protected Path, so that trashed files are never re-scanned or re-planned.
 
@@ -64,18 +69,18 @@ A macOS desktop app where I pick a folder, the app scans it, finds exact duplica
 36. As a user, I want to tick or untick a whole folder in the tree, so that I can accept or reject many items at once.
 37. As a user, I want to see totals (number of Operations by type, bytes to be trashed), so that I can judge the size of the cleanup.
 38. As a user, I want Create Folder Operations added automatically when a Rule's target folder doesn't exist, so that I don't have to create folders myself.
-39. As a user, I want name clashes resolved with Finder-style suffixes (`notes (1).pptx`), both against existing files and between items in the same Plan, so that nothing is ever overwritten.
+39. As a user, I want name clashes resolved with a Clash Suffix (`notes (1).pptx`), both against existing files and between items in the same Plan, with names that differ only in letter case counting as clashes on every OS, so that nothing is ever overwritten.
 40. As a user, I want folders that would be emptied by the Plan offered as "Trash empty folder" items, unticked by default, so that I decide whether leftover empty folders are removed.
 41. As a user, I want moves to a different disk shown as errors that can't be ticked, so that the app never silently copies and deletes.
 42. As a user, I want to cancel a Plan without anything happening, so that looking at a Plan is always safe.
 
 ### Running a Session
 
-43. As a user, I want to choose (in the config) whether Trash goes to the macOS System Trash or to a Holding Folder inside the Scan Root, so that I control where removed files end up.
+43. As a user, I want Trash to send files to a Holding Folder inside the Scan Root, and a `systemTrash` Trash Destination in my config rejected with a clear "not supported yet" error, so that removed files always end up somewhere I can find them and a setting is never silently ignored.
 44. As a user, I want the Holding Folder to be a visible `Files Cleaner Trash` folder, with one subfolder per Session that keeps each file's original relative path, so that I can find, inspect and empty it myself.
 45. As a user, I want every Operation written to the Journal before it happens, so that a crash or power loss never leaves the app unaware of what it did.
 46. As a user, I want each file checked right before its Operation (still exists, same size and modified date) and skipped if it changed, so that a file I edited or re-downloaded after planning isn't acted on blindly.
-47. As a user, I want an "empty folder" item trashed only if the folder is truly empty at run time (or holds only `.DS_Store`), so that nothing new placed there is lost.
+47. As a user, I want an "empty folder" item trashed only if the folder is truly empty at run time (or holds only OS Metadata Files), so that nothing new placed there is lost.
 48. As a user, I want a summary after the run showing done, skipped and failed Operations with reasons, so that I know exactly what happened.
 49. As a user, I want the app to never permanently delete anything, so that every cleanup is recoverable.
 
@@ -86,7 +91,7 @@ A macOS desktop app where I pick a folder, the app scans it, finds exact duplica
 52. As a user, I want Undo to work after closing and reopening the app, so that reversing a cleanup doesn't depend on the app staying open.
 53. As a user, I want Undo to reverse Operations in reverse order, so that moves, renames and folder creations unwind correctly.
 54. As a user, I want Undo to never overwrite a file that now sits at the original location, skipping and reporting that item instead, so that Undo itself can't destroy data.
-55. As a user, I want Undo to report items whose trashed copy is gone (e.g. I emptied the System Trash) as unrecoverable, without failing the rest of the Undo.
+55. As a user, I want Undo to report items whose trashed copy is gone (e.g. I emptied the Holding Folder) as unrecoverable, without failing the rest of the Undo.
 56. As a user, I want folders the Session created removed on Undo only if they're empty, so that files I added since are kept.
 57. As a user, I want a Session that crashed halfway through to still be undoable, with the app checking the disk for Operations that were journaled as started but never finished, so that a crash never leaves things stuck.
 58. As a user, I want Undo to use the Trash Destination recorded in the Session, so that changing the setting later doesn't break undoing older Sessions.
@@ -94,18 +99,20 @@ A macOS desktop app where I pick a folder, the app scans it, finds exact duplica
 
 ## Implementation Decisions
 
-- **Target OS:** macOS only for this milestone. OS-specific parts (built-in Protected Paths, System Trash, created-date lookup, Package detection) sit behind small modules so Windows and Linux can be added later.
+- **Target OS:** macOS, Windows and Linux desktop (no mobile). OS-specific parts (System Folders, Disk Roots, Hidden detection, created-date lookup, OS-assisted Package detection) sit behind one small module per OS; everything else, including the OS Metadata File list and the Package extension list, is shared and applies on every OS.
+- **Letter case:** Protected Path matching ignores letter case on every OS (erring towards protecting too much), and the Planner treats names that differ only in case as clashing on every OS (erring towards a needless suffix rather than an overwrite).
+- **Created date:** may be missing (some Linux file systems don't record it); the Keeper ordering then skips straight to the next tie-break and the UI shows a dash.
 - **Architecture (ADR-0003):** all logic lives in a Rust core library with no dependency on Tauri. Tauri commands are a thin layer that calls the core and serialises results. The UI is plain JS ES modules split by screen and component, with no framework and no build step.
 - **Core modules** (each a deep module with a small interface):
   - **Config**: parses the config JSON into a validated Config. Errors carry line and column. Expands `~`, resolves relative `moveTo` against the Scan Root, and rejects targets that are Protected Paths.
-  - **Protection**: answers "is this path protected?" using the built-in macOS list, the Never-Touch Paths and the Holding Folder name. It also detects Packages and app-library Packages.
-  - **Scanner**: walks the Scan Root recursively. Does not follow symlinks, skips hidden entries and Protected Paths, and treats Packages as single items. Returns a ScanResult: a list of entries (name, extension, size, modified, created, path, isPackage) plus a count of skipped paths.
+  - **Protection**: answers "is this path protected?" using the current OS's System Folders and Disk Roots, the shared OS Metadata File, app-library and developer-folder lists, the Never-Touch Paths and the Holding Folder name. It also detects Packages: by the shared extension list on every OS, and on macOS also by asking the OS (`NSURLIsPackageKey`).
+  - **Scanner**: walks the Scan Root recursively. Does not follow symlinks, skips hidden entries and Protected Paths, and treats Packages as single items. Leaves out files with no extension. Returns a ScanResult: a list of entries (name, extension, size, modified, created, path, isPackage) plus a count of skipped paths and of files with no extension, and reports progress (files found, folders read, skipped, current folder) while it runs.
   - **Duplicates**: groups entries by size, then partial hash (start and end of the file), then full hash with BLAKE3. Excludes 0-byte files and Packages. Picks the Keeper by modified date, then created date, then shortest path, then alphabetical order.
   - **Rules**: a small hand-written glob matcher plus an extension matcher, first match wins, and rename templating (`{name}`, `{ext}`, `{modified}` as YYYY-MM-DD) with no date library.
-  - **Planner**: combines Duplicates, Duplicate Handling and Rules into a Plan of Operations with stable IDs. Adds Create Folder Operations for missing targets and unticked "trash empty folder" items for folders the Plan would empty. Resolves name clashes with Finder-style suffixes. Marks cross-volume moves as non-tickable errors. Exposes a before/after tree view of the Plan.
-  - **Journal**: one append-only JSON-lines file per Session in the app data folder, flushed to disk with fsync after every record. The header record holds the Session ID, Scan Root, start time and Trash Destination. Each Operation is written as `intent` before it runs, then `done`, `skipped` or `failed` with a reason, plus any data Undo needs (e.g. the path the System Trash returned). Undo records go in the same file.
+  - **Planner**: combines Duplicates, Duplicate Handling and Rules into a Plan of Operations with stable IDs. Adds Create Folder Operations for missing targets and unticked "trash empty folder" items for folders the Plan would empty. Resolves name clashes with Clash Suffixes. Marks cross-volume moves as non-tickable errors. Exposes a before/after tree view of the Plan.
+  - **Journal**: one append-only JSON-lines file per Session in the app data folder, flushed to disk with fsync after every record. The header record holds the Session ID, Scan Root, start time and Trash Destination. Each Operation is written as `intent` before it runs, then `done`, `skipped` or `failed` with a reason, plus any data Undo needs (e.g. the Holding Folder path). Undo records go in the same file.
   - **Executor**: runs the approved Operations in order. Before each one it writes the intent record, checks the source is unchanged (size and modified date) and the destination is free (recalculating the suffix if needed), then performs it with an atomic same-volume rename, and finally writes the outcome.
-  - **Trash backends:** a Holding Folder backend (`<Scan Root>/Files Cleaner Trash/<session>/<original relative path>`) and a System Trash backend (ADR-0001) that calls NSFileManager `trashItemAtURL:resultingItemURL:` and journals the resulting path.
+  - **Trash backend:** a Holding Folder backend (`<Scan Root>/Files Cleaner Trash/<session>/<original relative path>`). The System Trash backend is deferred (ADR-0001).
   - **Undo**: reads a Session's Journal and reverses completed Operations in reverse order. Never overwrites, removes created folders only if they're empty, and resolves Operations left at `intent` by checking the disk. Returns an UndoSummary (restored, skipped and unrecoverable items, each with a reason).
   - **Sessions**: lists Sessions from the Journal folder with their status (completed, crashed, undone, partly undone).
 - **Core public API (the test seam):** `load_config(text)`, `scan(scan_root, config)`, `build_plan(scan_result, config)`, `run(plan, approved_operation_ids, journal_dir)`, `undo(session_id, journal_dir)`, `list_sessions(journal_dir)`. The Tauri commands mirror these one-to-one.
@@ -123,10 +130,10 @@ A macOS desktop app where I pick a folder, the app scans it, finds exact duplica
     ]
   }
   ```
-  `trashDestination` is `holdingFolder` (the default) or `systemTrash`. `duplicates` is `trash` (the default), `followRules` or `leave`. In `match`, `extensions` and `nameGlob` must both match when both are given. `then` is either `trash: true` or `moveTo` with an optional `rename`.
+  `trashDestination` is `holdingFolder` (the default); `systemTrash` is reserved and rejected with a "not supported yet" error. `duplicates` is `trash` (the default), `followRules` or `leave`. In `match`, `extensions` and `nameGlob` must both match when both are given. `then` is either `trash: true` or `moveTo` with an optional `rename`.
 - **Precedence:** if a file is a non-Keeper duplicate and Duplicate Handling is `trash`, it is trashed. If it is `leave`, the file is left out of the Plan. If it is `followRules`, or the file isn't a duplicate, the first matching Rule applies.
 - **Journal safety (ADR-0002):** nothing in the codebase permanently deletes a file. A cross-volume move is refused at planning time.
-- **Dependencies:** add `blake3`, `objc2` + `objc2-foundation`, `tauri-plugin-dialog`, and `tempfile` (tests only). No frontend dependencies, no glob or date crates.
+- **Dependencies:** add `blake3`, `tauri-plugin-dialog`, `objc2` + `objc2-foundation` (macOS only, for Package detection), and `tempfile` (tests only). No frontend dependencies, no glob or date crates.
 - **UI screens:** Home (pick folder, Open config, Session list with Undo), Scan results (file table plus skipped count, then Build Plan), Plan (before/after tree with tick boxes per Operation and per folder, totals, Run and Cancel), Summary (done, skipped and failed with reasons, plus Undo). Long-running scans and runs report progress to the UI through events.
 - **One Session at a time:** the app doesn't start a run or an Undo while another is in progress.
 
@@ -138,17 +145,18 @@ A macOS desktop app where I pick a folder, the app scans it, finds exact duplica
   - Duplicate detection: renamed copies, same size with different contents, empty files, Keeper ordering and tie-breaks.
   - Each Duplicate Handling mode.
   - Rule matching and first-match-wins; rename placeholders; relative, `~` and absolute targets; Protected targets rejected; invalid JSON reports its line.
-  - Planning: Create Folder insertion, Finder-style suffixes (against disk and within the Plan), emptied-folder items unticked by default, cross-volume moves marked as errors.
+  - Planning: Create Folder insertion, Clash Suffixes (against disk and within the Plan, including names differing only in case), emptied-folder items unticked by default, cross-volume moves marked as errors.
   - Running: only approved Operations run; a source changed after planning is skipped; a destination taken after planning gets a new suffix; Holding Folder layout.
   - Undo round-trip: restores the exact original tree; works with a fresh call that only gets the Journal folder (the restart case); skips instead of overwriting; reports a missing trashed copy as unrecoverable; leaves non-empty created folders; handles a crashed Session from a hand-written Journal whose disk state matches.
   - Undoing an older Session after a newer one touched the same files.
-- **System Trash:** one macOS-only test, ignored by default (`cargo test -- --ignored`), because it writes to the real `~/.Trash`. It checks the round trip of trashing a file, recording its new path, and undoing.
+- **Per-OS lists:** each OS module's System Folders, Disk Roots and Hidden detection have tests that run on that OS (`#[cfg(target_os = ...)]`); shared lists are tested on every OS. The core test suite passes on macOS, Windows and Linux.
 - **Not tested automatically:** the Tauri command layer and the plain-JS screens. Check them by hand: pick a folder, see the scan table, build the Plan, untick items, run, see the Summary, quit, reopen, and undo from Home.
 - **Prior art:** none yet. The repo is a fresh Tauri scaffold. These tests set the pattern: Rust integration tests in the core library using `tempfile` folders.
 
 ## Out of Scope
 
-- Windows and Linux support, and packaging with Inno Setup.
+- Mobile (iOS, Android), and packaging installers (e.g. Inno Setup).
+- The System Trash (macOS Trash, Windows Recycle Bin, freedesktop Trash) as a Trash Destination; see ADR-0001.
 - A UI for editing Rules or Never-Touch Paths, and a toggle for the Trash Destination (all of these are set in the config file for now).
 - Editing a Plan item's destination in the tree. The user can only approve or untick.
 - A Ctrl+Z keyboard shortcut for Undo.
@@ -160,6 +168,6 @@ A macOS desktop app where I pick a folder, the app scans it, finds exact duplica
 
 ## Further Notes
 
-- Domain vocabulary lives in `CONTEXT.md`. Decisions are recorded in `docs/adr/0001` (System Trash via NSFileManager), `0002` (write-ahead Journal, never delete) and `0003` (plain JS UI, Rust core).
-- Implementation is split into five tickets under `issues/` (01 → 02 → 03 → 04, with 05 able to start once 02 is done).
+- Domain vocabulary lives in `CONTEXT.md`. Decisions are recorded in `docs/adr/0001` (System Trash via NSFileManager, deferred), `0002` (write-ahead Journal, never delete) and `0003` (plain JS UI, Rust core).
+- Implementation is split into six tickets under `issues/` (01 → 02 → 03 → 04, with 05 able to start once 02 is done, and 06 porting ticket 01's macOS-only code to Windows and Linux once 01 is done).
 - Commits are made by the developer, not the agent.
