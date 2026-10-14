@@ -1,8 +1,9 @@
 // Scan results: every scanned file and Package, plus what was left alone.
 // Scans can list 100,000+ items, so the table only builds the rows in view.
-import { describeError, pathSeparator, revealInFinder } from "../api.js";
+import { buildPlan, describeError, pathSeparator, revealInFinder } from "../api.js";
 import { el } from "../dom.js";
 import { count, fitTail, formatDate, formatSize, plural } from "../format.js";
+import { icon } from "../icons.js";
 import { defaultDirection, matchesSearch, parseSearch, sortRows } from "../scan-query.js";
 
 // `track` is the column's default width; `min` is the least an `fr` track shrinks to.
@@ -34,6 +35,20 @@ const MIN_SIZES = [
 export function render(root, nav, result) {
   const back = el("button", { type: "button" }, "Back");
   back.addEventListener("click", () => nav.home());
+  const plan = el("button", { type: "button", className: "primary" }, "Build Plan");
+  const planStatus = el("p", { className: "status" });
+  plan.addEventListener("click", async () => {
+    plan.disabled = true;
+    planStatus.classList.remove("error");
+    planStatus.textContent = "Looking for duplicates…";
+    try {
+      nav.plan(result, await buildPlan());
+    } catch (error) {
+      planStatus.textContent = describeError(error);
+      planStatus.classList.add("error");
+      plan.disabled = false;
+    }
+  });
 
   const totalSize = result.entries.reduce((sum, entry) => sum + entry.size, 0);
   const summary = [
@@ -68,9 +83,10 @@ export function render(root, nav, result) {
   const screen = el(
     "div",
     { className: "scan-screen" },
-    el("div", { className: "actions" }, back),
+    el("div", { className: "actions" }, back, plan),
+    planStatus,
     el("h1", {}, "Scan results"),
-    el("p", { className: "path" }, result.root),
+    el("p", { className: "path root-path" }, icon("folder"), result.root),
     el("p", { className: "lead" }, summary.join(" · ")),
   );
   if (result.unreadable.length > 0) {
@@ -315,7 +331,7 @@ function rowNode({ entry, path }, index, selected, fitPath) {
       "div",
       { className: "scan-cell", title: entry.name },
       entry.name,
-      entry.isPackage ? el("span", { className: "tag" }, "Package") : "",
+      entry.isPackage ? el("span", { className: "pill" }, "Package") : "",
     ),
     el("div", { className: "scan-cell", title: entry.extension }, entry.extension),
     textCell(formatSize(entry.size), "number"),

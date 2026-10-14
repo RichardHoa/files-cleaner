@@ -1,45 +1,72 @@
-// Home: pick a Scan Root, open the config, see whether the config is valid.
-import { describeError, loadConfig, openConfig, pickFolder, scan, scanRootWarning } from "../api.js";
+// Home: rescan a Recent Scan Root or pick a folder, open the config, and see the latest Sessions.
+import {
+  describeError,
+  listSessions,
+  loadConfig,
+  openConfig,
+  pathSeparator,
+  pickFolder,
+  recentScanRoots,
+  removeRecentScanRoot,
+  scan,
+  scanRootWarning,
+} from "../api.js";
 import { el } from "../dom.js";
-import { count, plural } from "../format.js";
+import { count, plural, relativeTime, splitPath } from "../format.js";
+import { icon } from "../icons.js";
+import { noSessions, sessionList } from "../session-row.js";
+import { undoSections } from "./summary.js";
+
+const LATEST_SESSIONS = 3;
 
 export function render(root, nav) {
-  const pick = el("button", { type: "button", className: "primary" }, "Pick folder");
-  const open = el("button", { type: "button" }, "Open config");
+  const badge = el("button", { type: "button", className: "config-badge" });
+  const configError = el("p", { className: "status error" });
+  const tiles = el("div", { className: "tiles" });
   const status = el("p", { className: "status" });
-  const configStatus = el("p", { className: "status" });
+  const sessions = el("div");
+  const seeAll = el("button", { type: "button", className: "link", hidden: true });
+  seeAll.addEventListener("click", () => nav.history(1));
 
   root.append(
-    el("h1", {}, "Files Cleaner"),
+    el("header", { className: "home-header" }, el("h1", {}, "Files Cleaner"), badge),
+    configError,
     el("p", { className: "lead" }, "Pick a folder to scan. Nothing changes until you approve a Plan."),
-    el("div", { className: "actions" }, pick, open),
+    tiles,
     status,
-    configStatus,
+    el("div", { className: "section-head" }, el("h2", {}, "Sessions"), seeAll),
+    sessions,
   );
 
-  showConfigStatus(configStatus);
-
-  pick.addEventListener("click", async () => {
-    const folder = await pickFolder();
-    if (!folder) return;
-    pick.disabled = true;
+  let scanning = false;
+  /** Scans `folder`, after the protected-path warning if it has one, then shows the results. */
+  const startScan = async (folder) => {
+    if (scanning) return;
+    scanning = true;
+    tiles.classList.add("busy");
     try {
       // A protected folder can still be scanned, once the user has read why it's protected.
       const warning = await scanRootWarning(folder);
       if (warning && !(await confirmScan(status, warning))) {
         status.replaceChildren();
-        pick.disabled = false;
+      } else {
+        showMessage(status, `Scanning ${folder}…`);
+        nav.scanResults(await scan(folder, (progress) => showProgress(status, folder, progress)));
         return;
       }
-      showMessage(status, `Scanning ${folder}…`);
-      nav.scanResults(await scan(folder, (progress) => showProgress(status, folder, progress)));
     } catch (error) {
       showMessage(status, describeError(error), true);
-      pick.disabled = false;
     }
-  });
+    scanning = false;
+    tiles.classList.remove("busy");
+  };
 
-  open.addEventListener("click", async () => {
+  const pick = async () => {
+    const folder = await pickFolder();
+    if (folder) startScan(folder);
+  };
+
+  badge.addEventListener("click", async () => {
     try {
       await openConfig();
     } catch (error) {
@@ -47,22 +74,115 @@ export function render(root, nav) {
     }
   });
 
+  showConfig(badge, configError);
+  showTiles(tiles, startScan, pick);
+  showSessions(sessions, seeAll, nav);
+
   // The config is re-read on every use, so refresh this when the user comes
   // back from editing it.
   const refresh = () => {
-    if (configStatus.isConnected) showConfigStatus(configStatus);
+    if (badge.isConnected) showConfig(badge, configError);
     else window.removeEventListener("focus", refresh);
   };
   window.addEventListener("focus", refresh);
 }
 
-async function showConfigStatus(node) {
+/** The config badge: the Rule count, or that the config has an error, which is spelt out below. */
+async function showConfig(badge, errorLine) {
   try {
     const { path, config } = await loadConfig();
-    showMessage(node, `Config: ${plural(config.rules.length, "Rule")} in ${path}`);
+    badge.classList.remove("error");
+    badge.title = `Open the config: ${path}`;
+    badge.replaceChildren(icon("settings"), plural(config.rules.length, "Rule"));
+    errorLine.textContent = "";
   } catch (error) {
-    showMessage(node, `Config error: ${describeError(error)}`, true);
+    badge.classList.add("error");
+    badge.title = "Open the config to fix it";
+    badge.replaceChildren(icon("settings"), "Config error");
+    errorLine.textContent = describeError(error);
   }
+}
+
+/** A tile per Recent Scan Root, then the "Pick folder" tile. */
+async function showTiles(node, startScan, pick) {
+  const pickTile = el(
+    "button",
+    { type: "button", className: "tile pick-tile" },
+    icon("plus", "tile-icon"),
+    el("span", { className: "tile-name" }, "Pick folder"),
+    el("span", { className: "tile-detail" }, "Choose any folder to clean"),
+  );
+  pickTile.addEventListener("click", pick);
+
+  let recent = [];
+  try {
+    recent = await recentScanRoots();
+  } catch {
+    // Only the shortcut is lost; picking still works.
+  }
+  const redraw = () => showTiles(node, startScan, pick);
+  node.replaceChildren(...recent.map((folder) => recentTile(folder, startScan, redraw)), pickTile);
+  if (recent.length === 0) {
+    node.append(el("p", { className: "tiles-empty" }, "Folders you scan show up here, so you can clean them again in one click."));
+  }
+}
+
+function recentTile({ path, lastScanned, exists }, startScan, redraw) {
+  const { name, parent } = splitPath(path, pathSeparator);
+  const remove = el("button", { type: "button", className: "tile-remove", title: "Remove from this list" }, icon("close"));
+  remove.ariaLabel = `Remove ${name} from this list`;
+  remove.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    try {
+      await removeRecentScanRoot(path);
+    } finally {
+      redraw();
+    }
+  });
+  const tile = el(
+    "div",
+    { className: exists ? "tile" : "tile missing", title: exists ? `Scan ${path}` : `Not found: ${path}` },
+    icon("folder", "tile-icon"),
+    el("span", { className: "tile-name" }, name),
+    el("span", { className: "tile-detail path" }, parent),
+    el("span", { className: "tile-detail" }, exists ? relativeTime(lastScanned) : "Folder not found"),
+    remove,
+  );
+  // Not a <button>: it holds the remove button, and buttons can't nest.
+  tile.role = "button";
+  tile.ariaDisabled = String(!exists);
+  tile.tabIndex = exists ? 0 : -1;
+  if (exists) {
+    tile.addEventListener("click", () => startScan(path));
+    tile.addEventListener("keydown", (event) => {
+      if ((event.key === "Enter" || event.key === " ") && event.target === tile) {
+        event.preventDefault();
+        startScan(path);
+      }
+    });
+  }
+  return tile;
+}
+
+/** The latest Sessions, with "See all" once there are any; an Undo's result shows above them. */
+async function showSessions(node, seeAll, nav, undoResult = null) {
+  let page;
+  try {
+    page = await listSessions(0, LATEST_SESSIONS);
+  } catch (error) {
+    node.replaceChildren(el("p", { className: "status error" }, describeError(error)));
+    return;
+  }
+  seeAll.hidden = page.total === 0;
+  seeAll.textContent = `See all (${count(page.total)})`;
+  const list =
+    page.sessions.length > 0
+      ? sessionList(page.sessions, {
+          open: (id) => nav.session(id),
+          undone: (result) => showSessions(node, seeAll, nav, result),
+        })
+      : noSessions();
+  node.replaceChildren(...(undoResult ? undoSections(undoResult) : []), list);
 }
 
 function showProgress(node, folder, { found, folders, skipped, current }) {
@@ -86,4 +206,3 @@ function showMessage(node, text, isError = false) {
   node.textContent = text;
   node.classList.toggle("error", isError);
 }
-

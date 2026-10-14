@@ -4,14 +4,14 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] The core library exposes `load_config` and `scan` and has integration tests against temp directories (`tempfile`, dev-dependency only)
-- [ ] The scan includes every subfolder, never follows symlinks or aliases, and skips hidden files and folders
-- [ ] Packages (`.app`, `.pages`, …) appear as one item with their total size and are never looked inside
-- [ ] Built-in macOS Protected Paths (system folders, dev folders, app libraries, Finder metadata files, the `Files Cleaner Trash` Holding Folder) and the config's Never-Touch Paths are skipped, and the skipped count is reported
-- [ ] Picking a Protected Path as the Scan Root is refused with an explanation
-- [ ] The config file is created in the app data folder with the example from the spec on first launch, and is re-read on every use
-- [ ] Invalid config JSON produces an error with line and column; unknown `trashDestination` or `duplicates` values and Rule targets inside Protected Paths are rejected
-- [ ] The Home screen has Pick folder and Open config buttons; the Scan results screen shows the table and the skipped count
-- [ ] The scaffold's greet demo is removed
+- [x] The core library exposes `load_config` and `scan` and has integration tests against temp directories (`tempfile`, dev-dependency only)
+- [x] The scan includes every subfolder, never follows symlinks or aliases, and skips hidden files and folders
+- [x] Packages (`.app`, `.pages`, …) appear as one item with their total size and are never looked inside
+- [x] Built-in macOS Protected Paths (system folders, dev folders, app libraries, Finder metadata files, the `Files Cleaner Trash` Holding Folder) and the config's Never-Touch Paths are skipped, and the skipped count is reported
+- [x] Picking a Protected Path (or a folder inside one) as the Scan Root shows a warning explaining why, with "Scan anyway" and "Cancel"; only the Protected Paths inside that Scan Root are then skipped (changed from "refused" in spec user story 8)
+- [x] The config file is created in the app data folder with the example from the spec on first launch, and is re-read on every use
+- [x] Invalid config JSON produces an error with line and column; unknown `trashDestination` or `duplicates` values and Rule targets inside Protected Paths are rejected
+- [x] The Home screen has Pick folder and Open config buttons; the Scan results screen shows the table and the skipped count
+- [x] The scaffold's greet demo is removed

@@ -1,13 +1,22 @@
 // Shows one screen at a time. Each screen module exports `render(root, nav, ...args)`
 // and builds its own DOM inside `root`.
+import * as history from "./screens/history.js";
 import * as home from "./screens/home.js";
+import * as plan from "./screens/plan.js";
 import * as scanResults from "./screens/scan-results.js";
+import * as session from "./screens/session.js";
+import * as summary from "./screens/summary.js";
 
 const root = document.querySelector("#app");
 
 const nav = {
   home: () => show(home),
   scanResults: (result) => show(scanResults, result),
+  plan: (result, built) => show(plan, result, built),
+  summary: (outcome) => show(summary, outcome),
+  history: (page) => show(history, page),
+  /** `from` is `{ page }` when opened from that History page, so Back returns there. */
+  session: (sessionId, from = null) => show(session, sessionId, from),
 };
 
 function show(screen, ...args) {

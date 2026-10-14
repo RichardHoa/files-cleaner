@@ -60,3 +60,29 @@ function firstFitting(sorted, ok) {
   }
   return sorted[low];
 }
+
+const RELATIVE_UNITS = [
+  ["year", 365 * 24 * 60 * 60_000],
+  ["month", 30 * 24 * 60 * 60_000],
+  ["day", 24 * 60 * 60_000],
+  ["hour", 60 * 60_000],
+  ["minute", 60_000],
+];
+
+/** How long before `now` the time `millis` was: "just now", "5 minutes ago", "2 days ago", … */
+export function relativeTime(millis, now = Date.now()) {
+  const elapsed = now - millis;
+  for (const [unit, length] of RELATIVE_UNITS) {
+    const n = Math.floor(elapsed / length);
+    if (n >= 1) return `${plural(n, unit)} ago`;
+  }
+  return "just now";
+}
+
+/** "/Users/me/Downloads" → `{ name: "Downloads", parent: "/Users/me" }`; a disk root is its own name. */
+export function splitPath(path, separator) {
+  const trimmed = path.length > 1 && path.endsWith(separator) ? path.slice(0, -1) : path;
+  const at = trimmed.lastIndexOf(separator);
+  if (at === -1 || at === trimmed.length - 1) return { name: path, parent: "" };
+  return { name: trimmed.slice(at + 1), parent: at === 0 ? separator : trimmed.slice(0, at) };
+}

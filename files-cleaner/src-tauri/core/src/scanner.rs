@@ -196,7 +196,7 @@ fn entry(path: &Path, root: &Path, metadata: &fs::Metadata, is_package: bool) ->
 /// Total bytes of every file inside `folder`, hidden ones included, without
 /// following symlinks. Anything inside that can't be read is left out, so
 /// the Package is still listed.
-fn total_size(folder: &Path) -> u64 {
+pub(crate) fn total_size(folder: &Path) -> u64 {
     let mut total = 0;
     let mut folders = vec![folder.to_path_buf()];
     while let Some(folder) = folders.pop() {
@@ -213,7 +213,7 @@ fn total_size(folder: &Path) -> u64 {
     total
 }
 
-fn millis(time: SystemTime) -> i64 {
+pub(crate) fn millis(time: SystemTime) -> i64 {
     match time.duration_since(UNIX_EPOCH) {
         Ok(after) => after.as_millis() as i64,
         Err(before) => -(before.duration().as_millis() as i64),

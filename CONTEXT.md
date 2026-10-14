@@ -10,6 +10,10 @@ A desktop tool that tidies a messy folder (such as Downloads) by finding duplica
 The folder the user picks to clean; everything under it (recursively) is in scope unless protected.
 _Avoid_: target dir, source folder
 
+**Recent Scan Root**:
+One of the last three folders the user started a scan of (most recent first, no repeats), offered so they can scan it again without picking. Picking a folder and then cancelling at the protected-path warning doesn't make it recent.
+_Avoid_: recent folder, favourite, bookmark
+
 **Protected Path**:
 A path the tool leaves alone: built-in (System Folders, Disk Roots, OS Metadata Files, app libraries, developer folders such as `.git`, `node_modules` or a `target` next to `Cargo.toml`) or listed by the user as Never-Touch. The user may still pick one, or a folder inside one, as the Scan Root after a warning; only the Protected Paths inside that Scan Root are then left alone.
 _Avoid_: excluded path, ignored folder
@@ -62,6 +66,10 @@ _Avoid_: preview, proposal
 One atomic file-system change: Move, Rename, Trash, or Create Folder. The tool never edits file contents and never deletes permanently.
 _Avoid_: action, step, task
 
+**Reason**:
+Why the Plan proposes an Operation: either a **Duplicate** (naming the Keeper it leaves in place) or a **Rule** (naming that Rule). The Plan is grouped by Reason.
+_Avoid_: cause, source, explanation
+
 **Trash** (Operation):
 Taking a file out of the user's way without destroying it, sending it to the Trash Destination.
 _Avoid_: delete, remove
@@ -85,5 +93,9 @@ The record of a Session's Operations, each written down before it happens, so th
 _Avoid_: log, history file
 
 **Undo**:
-Reversing every completed Operation of a Session, in reverse order, using its Journal.
+Reversing completed Operations of a Session, in reverse order, using its Journal: all of them at once, or only the ones the user picks.
 _Avoid_: rollback, revert
+
+**Redo**:
+Carrying out an undone Operation again, putting the item back where its Session put it; skipped if the item changed since Undo put it back.
+_Avoid_: reapply, replay
