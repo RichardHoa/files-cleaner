@@ -4,7 +4,7 @@
 
 **Blocked by:** 01: Look and feel, Home tiles, History (reuses its colour tokens, icons, status pills and History navigation)
 
-**Status:** ready-for-agent
+**Status:** wontfix (replaced by `plan-review` and `session-review`)
 
 ### Session detail
 - [ ] The header shows the Scan Root with a folder icon and the status pill
@@ -30,3 +30,7 @@
 ### Verification
 - [ ] `cargo test` for the core and `npm test` pass
 - [ ] Checked by running the app in light and dark appearance, including a Partly undone Session
+
+## Comments
+
+Closed on 2026-10-16 without being built. `.scratch/plan-review/spec.md` replaces the Plan part (cards and list instead of By Reason plus Tree tabs; the tree is dropped). `.scratch/session-review/` replaces the Session detail part (state cards, list and pane instead of stat cards and per-row buttons). Both are built.

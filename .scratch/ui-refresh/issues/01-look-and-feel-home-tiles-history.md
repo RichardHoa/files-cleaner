@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-human (only the visual check in the real app is left)
+**Status:** resolved
 
 ### Styling base
 - [x] Every colour (neutrals, accent, one per Operation kind, one per Session status, Operation states) is a CSS custom property; a dark set applies under the system's dark appearance
@@ -37,4 +37,4 @@
 
 ### Verification
 - [x] `cargo test` for the core and `npm test` pass
-- [ ] Checked by running the app in light and dark appearance (the frontend was checked in headless Chrome with stubbed Tauri commands, light and dark; the real window still needs a look)
+- [x] Checked by running the app in light and dark appearance (the frontend was checked in headless Chrome with stubbed Tauri commands, light and dark; the real window still needs a look)

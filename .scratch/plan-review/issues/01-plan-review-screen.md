@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 ### Core
 - [x] `Operation` gains `destination: Vec<String>` (holding folder / This Session / relative path for Trash) and `keeper: Option<Vec<String>>` (set for duplicates); `reason` stays
@@ -25,7 +25,7 @@
 - [x] Detail pane: name, size, "An exact copy of a newer file, so this one goes to Files Cleaner Trash.", "Original: {root}/{keeper}", "Move this copy" tick box in step with the list; opens on the first file
 - [x] Keyboard: ↑/↓ move the selection, Space ticks, Tab reaches every control; every tick box has an accessible name
 - [x] Empty Plan message, Cancel and Run behave as today
-- [ ] Visual direction followed: existing tokens only, flat surfaces, hairline dividers, colour only where it means something; checked in light and dark
+- [x] Visual direction followed: existing tokens only, flat surfaces, hairline dividers, colour only where it means something; checked in light and dark
 
 ### Clean-up
 - [x] Tree styles removed from `styles/plan.css`
@@ -34,5 +34,5 @@
 
 ### Verification
 - [x] `cargo test` for the core and `npm test` pass
-- [ ] Checked by running the app on a small and a 100+ duplicate folder, in light and dark appearance
+- [x] Checked by running the app on a small and a 100+ duplicate folder, in light and dark appearance
 - [x] Not committed: left for the developer to review and commit
