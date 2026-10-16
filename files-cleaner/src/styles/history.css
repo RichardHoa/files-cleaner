@@ -1,0 +1,24 @@
+/* History */
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 16px 0;
+}
+
+.page-link {
+  min-width: 32px;
+  padding: 4px 8px;
+}
+
+.page-link.current {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.page-gap {
+  padding: 0 4px;
+  color: var(--muted);
+}

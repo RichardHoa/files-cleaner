@@ -4,7 +4,7 @@ import { el } from "../dom.js";
 import { count, plural } from "../format.js";
 import { pageCount, pageNumbers } from "../paging.js";
 import { noSessions, sessionList } from "../session-row.js";
-import { undoSections } from "./summary.js";
+import { undoSections } from "../outcomes.js";
 
 const PER_PAGE = 10;
 

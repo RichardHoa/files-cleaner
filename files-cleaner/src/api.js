@@ -23,16 +23,16 @@ export function scan(scanRoot, onProgress) {
 /** Plans the latest scan with the config as it is now: `{ root, operations, before, after }`. */
 export const buildPlan = () => invoke("build_plan");
 
-/** Runs the ticked Operations of the latest Plan as a new Session: `{ sessionId, done, skipped, failed }`. */
+// Running, undoing and redoing resolve to a summary: `{ sessionId, done, skipped, failed, unrecoverable }`,
+// each a list of `{ operationId, kind, source, destination, reason }`.
+
+/** Runs the ticked Operations of the latest Plan as a new Session. */
 export const runPlan = (approved) => invoke("run_plan", { approved });
 
-/** Undoes Session `sessionId`: `{ sessionId, restored, skipped, unrecoverable }`. */
-export const undo = (sessionId) => invoke("undo", { sessionId });
+/** Undoes the done `operationIds` of Session `sessionId`, or every done Operation if they're left out. */
+export const undo = (sessionId, operationIds) => invoke("undo", { sessionId, operationIds });
 
-/** Undoes only `operationIds` of Session `sessionId`: `{ sessionId, restored, skipped, unrecoverable }`. */
-export const undoOperations = (sessionId, operationIds) => invoke("undo_operations", { sessionId, operationIds });
-
-/** Carries out again the undone `operationIds` of Session `sessionId`: `{ sessionId, redone, skipped }`. */
+/** Carries out again the undone `operationIds` of Session `sessionId`. */
 export const redoOperations = (sessionId, operationIds) => invoke("redo_operations", { sessionId, operationIds });
 
 /** Session `sessionId` and its Operations: `{ info, operations: [{ id, kind, source, destination, size, state, reason }] }`. */

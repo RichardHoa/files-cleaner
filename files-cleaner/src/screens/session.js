@@ -1,10 +1,12 @@
 // Session: one past Session's Operations, each with its state, and Undo or Redo for each
 // Operation or for all of them at once.
-import { describeError, pathSeparator, redoOperations, revealInFinder, sessionDetails, undoOperations } from "../api.js";
+import { describeError, pathSeparator, redoOperations, revealInFinder, sessionDetails, undo as undoOperations } from "../api.js";
 import { el } from "../dom.js";
 import { formatDate, formatSize, plural } from "../format.js";
 import { kindPill } from "../kinds.js";
+import { describeSummary } from "../outcomes.js";
 import { statusPill } from "../session-row.js";
+import { busy, showStatus } from "../status.js";
 
 const STATE_LABELS = {
   started: "Stopped part-way",
@@ -34,25 +36,13 @@ async function show(node, sessionId, message = null) {
   }
   const { info, operations } = details;
   const status = el("p", { className: "status" });
-  if (message) {
-    status.textContent = message.text;
-    status.classList.toggle("error", message.isError);
-  }
+  if (message) showStatus(status, message);
 
   const buttons = [];
   /** Runs `action` with every button disabled, then redraws with its result. */
-  const act = async (action) => {
-    for (const button of buttons) button.disabled = true;
-    status.classList.remove("error");
-    status.textContent = "Working…";
-    try {
-      show(node, sessionId, { text: await action(), isError: false });
-    } catch (error) {
-      show(node, sessionId, { text: describeError(error), isError: true });
-    }
-  };
-  const undo = (ids) => act(async () => describeUndo(await undoOperations(sessionId, ids)));
-  const redo = (ids) => act(async () => describeRedo(await redoOperations(sessionId, ids)));
+  const act = (action) => busy(status, buttons, "Working…", async () => show(node, sessionId, await action()));
+  const undo = (ids) => act(async () => describeSummary(await undoOperations(sessionId, ids), "restored"));
+  const redo = (ids) => act(async () => describeSummary(await redoOperations(sessionId, ids), "trashed again"));
 
   const idsIn = (state) => operations.filter((op) => op.state === state).map((op) => op.id);
   const undoAll = el("button", { type: "button" }, "Undo all");
@@ -77,10 +67,7 @@ async function show(node, sessionId, message = null) {
       // Where the item is now: in the Holding Folder while trashed, back in place once undone.
       const reveal = el("button", { type: "button" }, "Show in Finder");
       reveal.addEventListener("click", () =>
-        revealInFinder(isDone ? op.destination : op.source).catch((error) => {
-          status.textContent = describeError(error);
-          status.classList.add("error");
-        }),
+        revealInFinder(isDone ? op.destination : op.source).catch((error) => showStatus(status, describeError(error), true)),
       );
       buttons.push(button, reveal);
       actions.push(reveal, button);
@@ -94,7 +81,7 @@ async function show(node, sessionId, message = null) {
         el("span", { className: "path", title: op.source }, relative(op.source)),
         kindPill(op.kind),
         el("span", { className: `pill state-pill state-${op.state}` }, STATE_LABELS[op.state] ?? op.state),
-        op.size != null ? el("span", { className: "muted" }, formatSize(op.size)) : "",
+        el("span", { className: "muted" }, formatSize(op.size)),
         el("span", { className: "row-actions" }, ...actions),
       ),
       op.state === "done" ? el("div", { className: "reason" }, `In ${relative(op.destination)}`) : "",
@@ -115,12 +102,4 @@ async function show(node, sessionId, message = null) {
     status,
     rows.length > 0 ? el("ul", { className: "outcomes" }, ...rows) : el("p", { className: "status" }, "No Operations."),
   );
-}
-
-function describeUndo({ restored, skipped, unrecoverable }) {
-  return [`${plural(restored.length, "item")} restored`, `${skipped.length} skipped`, `${unrecoverable.length} unrecoverable`].join(" · ");
-}
-
-function describeRedo({ redone, skipped }) {
-  return [`${plural(redone.length, "item")} trashed again`, `${skipped.length} skipped`].join(" · ");
 }

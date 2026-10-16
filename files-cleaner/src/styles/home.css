@@ -1,0 +1,132 @@
+/* Home */
+.home-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.config-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.config-badge.error {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.tiles.busy .tile {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tile:hover,
+.tile:focus-visible {
+  border-color: var(--accent);
+}
+
+.tile-icon {
+  width: 24px;
+  height: 24px;
+  margin-bottom: 6px;
+  color: var(--accent);
+}
+
+.tile-name {
+  max-width: 100%;
+  font-size: 16px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tile-detail {
+  max-width: 100%;
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tile.missing {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.tile.missing:hover {
+  border-color: var(--border);
+}
+
+.tile.missing .tile-icon {
+  color: var(--muted);
+}
+
+.pick-tile {
+  border-style: dashed;
+  font: inherit;
+}
+
+.tile-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  padding: 3px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  visibility: hidden;
+}
+
+.tile:hover .tile-remove,
+.tile:focus-within .tile-remove {
+  visibility: visible;
+}
+
+.tile-remove:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+.tiles-empty {
+  align-self: center;
+  margin: 0;
+  color: var(--muted);
+}
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}

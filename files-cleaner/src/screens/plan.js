@@ -1,10 +1,11 @@
 // Plan: the proposed Operations as a before/after tree. The user ticks or unticks each
 // Operation or whole folders, then runs the ticked ones or cancels. Nothing changes until Run.
-import { describeError, runPlan } from "../api.js";
+import { runPlan } from "../api.js";
 import { el } from "../dom.js";
 import { formatSize, plural } from "../format.js";
 import { kindLabel, kindPill } from "../kinds.js";
 import { folderState, toggleFolder, totals } from "../plan-selection.js";
+import { busy } from "../status.js";
 
 export function render(root, nav, result, plan) {
   const byId = new Map(plan.operations.map((op) => [op.id, op]));
@@ -90,18 +91,8 @@ export function render(root, nav, result, plan) {
   };
 
   run.addEventListener("click", async () => {
-    run.disabled = true;
-    cancel.disabled = true;
-    status.classList.remove("error");
-    status.textContent = `Running ${plural(ticked.size, "Operation")}…`;
-    try {
-      nav.summary({ session: await runPlan([...ticked]) });
-    } catch (error) {
-      status.textContent = describeError(error);
-      status.classList.add("error");
-      cancel.disabled = false;
-      run.disabled = false;
-    }
+    const session = await busy(status, [run, cancel], `Running ${plural(ticked.size, "Operation")}…`, () => runPlan([...ticked]));
+    if (session) nav.summary({ session });
   });
 
   root.append(

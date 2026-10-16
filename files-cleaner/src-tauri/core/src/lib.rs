@@ -9,19 +9,20 @@ mod planner;
 mod protection;
 mod recent;
 mod scanner;
+mod session_id;
 mod sessions;
 
 pub use config::{
     load_config, Config, ConfigError, DuplicateHandling, Rule, RuleOperation, RuleTarget,
     TrashDestination, EXAMPLE_CONFIG,
 };
-pub use executor::{run, Outcome, SourceState, Summary};
+pub use executor::{redo_operations, run, undo, undo_operations, Outcome, Summary};
 pub use journal::{lock_sessions, SessionError, SessionLock};
-pub use planner::{build_plan, Operation, OperationKind, Plan, TreeNode, THIS_SESSION_FOLDER};
+pub use planner::{build_plan, Operation, OperationKind, Plan, SourceState, TreeNode, THIS_SESSION_FOLDER};
 pub use protection::HOLDING_FOLDER_NAME;
 pub use recent::{recent_scan_roots, record_recent_scan_root, remove_recent_scan_root, RecentScanRoot};
 pub use scanner::{scan, scan_root_warning, scan_with_progress, ScanEntry, ScanError, ScanProgress, ScanResult};
 pub use sessions::{
-    list_sessions, redo_operations, session_details, undo, undo_operations, OperationState, RedoSummary,
-    SessionDetails, SessionInfo, SessionOperation, SessionPage, SessionStatus, UndoSummary,
+    list_sessions, session_details, OperationState, SessionDetails, SessionInfo, SessionOperation, SessionPage,
+    SessionStatus,
 };

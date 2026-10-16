@@ -1,0 +1,161 @@
+/* Pieces shared by several screens: secondary text, Operation lists, icons, pills and links. */
+.muted {
+  color: var(--muted);
+}
+
+.reason {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+
+.outcomes,
+.sessions {
+  list-style: none;
+  padding: 0;
+}
+
+.outcomes li,
+.sessions li {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.row-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.kind-trash {
+  --kind: var(--kind-trash);
+}
+
+.kind-move {
+  --kind: var(--kind-move);
+}
+
+.kind-rename {
+  --kind: var(--kind-rename);
+}
+
+.kind-createFolder {
+  --kind: var(--kind-createFolder);
+}
+
+.icon[class*="kind-"] {
+  color: var(--kind);
+}
+
+/* A filled, coloured label: Operation kinds, Session statuses, Operation states. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--border);
+  color: var(--text);
+}
+
+.pill .icon {
+  width: 12px;
+  height: 12px;
+}
+
+.kind-pill {
+  background: var(--kind);
+  color: var(--on-kind);
+}
+
+.status-completed {
+  background: var(--status-completed);
+  color: var(--on-status-completed);
+}
+
+.status-undone {
+  background: var(--status-undone);
+  color: var(--on-status-undone);
+}
+
+.status-partlyUndone {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--status-undone) 0 6px,
+    var(--status-partly-stripe) 6px 12px
+  );
+  color: var(--on-status-undone);
+}
+
+.status-crashed {
+  background: var(--status-crashed);
+  color: var(--on-status-crashed);
+}
+
+.state-done {
+  background: var(--state-done);
+  color: var(--on-state);
+}
+
+.state-undone {
+  background: var(--state-undone);
+  color: var(--on-state-undone);
+}
+
+.state-skipped {
+  background: var(--state-skipped);
+  color: var(--on-state);
+}
+
+.state-failed,
+.state-unrecoverable,
+.state-started {
+  background: var(--state-failed);
+  color: var(--on-state);
+}
+
+.lead .pill {
+  margin: 0 6px 0 0;
+}
+
+.root-path {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.empty {
+  margin: 8px 0;
+  padding: 16px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  color: var(--muted);
+  text-align: center;
+}
+
+button.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+}
+
+button.link:hover {
+  text-decoration: underline;
+}

@@ -38,13 +38,24 @@ pub struct Operation {
     pub source: PathBuf,
     /// The names from the Scan Root down to the source, its own name last.
     pub relative_path: Vec<String>,
-    /// The source's size and modified date when scanned; it is skipped if
-    /// either has changed when the Plan runs.
-    pub size: u64,
-    pub modified: i64,
-    pub is_package: bool,
+    /// The source when scanned; it is skipped if it has changed when the
+    /// Plan runs.
+    #[serde(flatten)]
+    pub planned: SourceState,
     /// Why the Plan proposes it, for the user.
     pub reason: String,
+}
+
+/// What an Operation's source was like when planned: if it differs when
+/// the Operation runs, or is redone, the Operation is skipped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceState {
+    /// Bytes; for a Package, the total of everything inside it.
+    pub size: u64,
+    /// Milliseconds since the Unix epoch.
+    pub modified: i64,
+    pub is_package: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -111,9 +122,7 @@ fn trash(entry: &ScanEntry, reason: String) -> Operation {
         kind: OperationKind::Trash,
         source: entry.path.clone(),
         relative_path: entry.relative_path.clone(),
-        size: entry.size,
-        modified: entry.modified,
-        is_package: entry.is_package,
+        planned: SourceState { size: entry.size, modified: entry.modified, is_package: entry.is_package },
         reason,
     }
 }

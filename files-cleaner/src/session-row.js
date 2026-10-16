@@ -1,8 +1,9 @@
 // The Session rows shared by Home and History: date, Scan Root, status, what was done, Undo.
-import { describeError, pathSeparator, undo } from "./api.js";
+import { pathSeparator, undo } from "./api.js";
 import { el } from "./dom.js";
 import { count, formatDate, formatSize, splitPath } from "./format.js";
 import { kindIcon, kindLabel } from "./kinds.js";
+import { busy } from "./status.js";
 
 const STATUS_LABELS = {
   completed: "Completed",
@@ -35,16 +36,8 @@ function sessionRow(session, open, undone) {
   button.disabled = session.leftToUndo === 0;
   const message = el("p", { className: "status" });
   button.addEventListener("click", async () => {
-    button.disabled = true;
-    message.classList.remove("error");
-    message.textContent = "Undoing…";
-    try {
-      undone(await undo(session.id));
-    } catch (error) {
-      message.textContent = describeError(error);
-      message.classList.add("error");
-      button.disabled = false;
-    }
+    const result = await busy(message, [button], "Undoing…", () => undo(session.id));
+    if (result) undone(result);
   });
 
   const kinds = Object.entries(session.kindCounts).map(([kind, n]) =>

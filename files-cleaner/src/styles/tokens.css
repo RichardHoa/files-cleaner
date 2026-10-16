@@ -1,0 +1,74 @@
+:root {
+  color-scheme: light dark;
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text);
+  background-color: var(--background);
+  -webkit-font-smoothing: antialiased;
+
+  /* Neutrals: body text is near-black; --muted is only for secondary details such as paths and dates. */
+  --text: #111113;
+  --muted: #6e6e73;
+  --background: #f5f5f7;
+  --surface: #ffffff;
+  --border: #d2d2d7;
+  --shadow: rgb(0 0 0 / 0.18);
+  --accent: #0a66d8;
+  --on-accent: #ffffff;
+  --error: #c4162a;
+  --warning: #9a5600;
+
+  /* One colour per Operation kind. Trash is red but always reversible ("moved to Trash"). */
+  --kind-trash: #d92d20;
+  --kind-move: #1f6fe0;
+  --kind-rename: #7a4ae0;
+  --kind-createFolder: #1d8a45;
+  --on-kind: #ffffff;
+
+  /* One colour per Session status, with the text colour that reads on it. */
+  --status-completed: #1d8a45;
+  --on-status-completed: #ffffff;
+  --status-undone: #f0a020;
+  --on-status-undone: #2a1a00;
+  --status-partly-stripe: #f7c766;
+  --status-crashed: #d92d20;
+  --on-status-crashed: #ffffff;
+
+  /* Operation states. */
+  --state-done: #1d8a45;
+  --state-undone: #f0a020;
+  --state-skipped: #8e8e93;
+  --state-failed: #d92d20;
+  --on-state: #ffffff;
+  --on-state-undone: #2a1a00;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #f2f2f4;
+    --muted: #a1a1a6;
+    --background: #1c1c1e;
+    --surface: #2c2c2e;
+    --border: #3a3a3c;
+    --shadow: rgb(0 0 0 / 0.5);
+    --accent: #3b8cf5;
+    --error: #ff6b6b;
+    --warning: #ffb340;
+
+    --kind-trash: #e5484d;
+    --kind-move: #3b8cf5;
+    --kind-rename: #9a7af0;
+    --kind-createFolder: #30a46c;
+
+    --status-completed: #30a46c;
+    --status-undone: #f5b13d;
+    --status-partly-stripe: #b97f17;
+    --status-crashed: #e5484d;
+
+    --state-done: #30a46c;
+    --state-undone: #f5b13d;
+    --state-skipped: #6e6e73;
+    --state-failed: #e5484d;
+  }
+}

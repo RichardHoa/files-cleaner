@@ -6,62 +6,80 @@ use std::fmt;
 use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
 use crate::config::TrashDestination;
-use crate::executor::SourceState;
-use crate::planner::OperationKind;
+use crate::planner::{OperationKind, SourceState};
+use crate::scanner::millis;
+use crate::session_id;
 
 const EXTENSION: &str = "jsonl";
 const LOCK_FILE_NAME: &str = "sessions.lock";
 
-/// One line of a Journal.
+/// The first line of a Journal.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionHeader {
+    pub id: String,
+    pub scan_root: PathBuf,
+    pub trash_destination: TrashDestination,
+    /// Milliseconds since the Unix epoch.
+    pub started_at: i64,
+}
+
+/// Which pass over a Session's Operations a record belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Phase {
+    /// The Session itself: source to destination.
+    Run,
+    /// Destination back to source.
+    Undo,
+    /// Source to destination again, after an Undo.
+    Redo,
+}
+
+/// How one Operation's pass ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OutcomeKind {
+    /// The item moved.
+    Done,
+    /// Not moved, but nothing is wrong with the Operation: it can be tried
+    /// again later.
+    Skipped,
+    /// The Run's move failed.
+    Failed,
+    /// Undo found the trashed copy gone.
+    Unrecoverable,
+}
+
+/// Every line of a Journal after the header.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "record", rename_all = "camelCase")]
 pub enum Record {
-    /// Always the first line.
+    /// Written before the Run touches the item, with everything Undo and
+    /// Redo need: the Run's intent.
     #[serde(rename_all = "camelCase")]
-    Session { id: String, scan_root: PathBuf, trash_destination: TrashDestination, started_at: i64 },
-    /// Written before the Operation touches the disk, with everything Undo
-    /// needs to reverse it.
-    #[serde(rename_all = "camelCase")]
-    Intent {
+    Operation {
         operation_id: String,
         kind: OperationKind,
         source: PathBuf,
         destination: PathBuf,
-        /// The source as planned, which Redo checks it against. Missing
-        /// from Journals written before Redo existed.
-        #[serde(default)]
-        planned: Option<SourceState>,
+        /// The source as planned, which Redo checks it against.
+        planned: SourceState,
     },
+    /// Written before an Undo or a Redo touches the item.
     #[serde(rename_all = "camelCase")]
-    Done { operation_id: String },
+    Intent { operation_id: String, phase: Phase },
+    /// How the last intent for the Operation ended. An intent with no
+    /// outcome after it was cut short by a crash.
     #[serde(rename_all = "camelCase")]
-    Skipped { operation_id: String, reason: String },
-    #[serde(rename_all = "camelCase")]
-    Failed { operation_id: String, reason: String },
-    /// The last Operation has been recorded.
+    Outcome { operation_id: String, phase: Phase, outcome: OutcomeKind, reason: Option<String> },
+    /// The Run has recorded its last Operation.
     Finished,
-    UndoStarted,
-    /// Written before Undo reverses the Operation.
-    #[serde(rename_all = "camelCase")]
-    UndoIntent { operation_id: String },
-    #[serde(rename_all = "camelCase")]
-    Restored { operation_id: String },
-    #[serde(rename_all = "camelCase")]
-    UndoSkipped { operation_id: String, reason: String },
-    #[serde(rename_all = "camelCase")]
-    Unrecoverable { operation_id: String, reason: String },
-    UndoFinished,
-    /// Written before Redo carries the Operation out again.
-    #[serde(rename_all = "camelCase")]
-    RedoIntent { operation_id: String },
-    #[serde(rename_all = "camelCase")]
-    Redone { operation_id: String },
-    #[serde(rename_all = "camelCase")]
-    RedoSkipped { operation_id: String, reason: String },
 }
 
 #[derive(Debug)]
@@ -117,11 +135,27 @@ pub struct Journal {
 }
 
 impl Journal {
-    /// Starts the Journal for a new Session; fails if `id` is taken.
-    pub fn create(journal_dir: &Path, id: &str) -> io::Result<Journal> {
-        let file = OpenOptions::new().create_new(true).append(true).open(path(journal_dir, id))?;
-        sync_folder(journal_dir)?;
-        Ok(Journal { file })
+    /// Starts the Journal of a new Session of `scan_root`, starting now,
+    /// and writes its header.
+    pub fn create(
+        journal_dir: &Path,
+        scan_root: PathBuf,
+        trash_destination: TrashDestination,
+    ) -> io::Result<(SessionHeader, Journal)> {
+        let now = SystemTime::now();
+        for id in session_id::candidates(now) {
+            let file = match OpenOptions::new().create_new(true).append(true).open(path(journal_dir, &id)) {
+                Ok(file) => file,
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(e),
+            };
+            sync_folder(journal_dir)?;
+            let header = SessionHeader { id, scan_root, trash_destination, started_at: millis(now) };
+            let mut journal = Journal { file };
+            journal.append_line(&header)?;
+            return Ok((header, journal));
+        }
+        unreachable!("there is always another Session ID to try")
     }
 
     /// Reopens an existing Session's Journal to add to it.
@@ -132,18 +166,21 @@ impl Journal {
 
     /// Writes `record` and waits until it is on disk.
     pub fn append(&mut self, record: &Record) -> io::Result<()> {
-        let mut line = serde_json::to_vec(record).expect("records always serialise");
+        self.append_line(record)
+    }
+
+    fn append_line(&mut self, value: &impl Serialize) -> io::Result<()> {
+        let mut line = serde_json::to_vec(value).expect("records always serialise");
         line.push(b'\n');
         self.file.write_all(&line)?;
         self.file.sync_data()
     }
 }
 
-/// Every record of Session `id`'s Journal. A last line cut short by a
-/// crash is ignored.
-pub fn read(journal_dir: &Path, id: &str) -> Result<Vec<Record>, SessionError> {
-    // IDs come from the UI; only the app's own ID shape can name a Journal.
-    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+/// Session `id`'s header and every record after it. A last line cut
+/// short by a crash is ignored.
+pub fn read(journal_dir: &Path, id: &str) -> Result<(SessionHeader, Vec<Record>), SessionError> {
+    if !session_id::is_valid(id) {
         return Err(SessionError::UnknownSession(id.to_string()));
     }
     let path = path(journal_dir, id);
@@ -152,19 +189,21 @@ pub fn read(journal_dir: &Path, id: &str) -> Result<Vec<Record>, SessionError> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Err(SessionError::UnknownSession(id.to_string())),
         Err(e) => return Err(e.into()),
     };
+    let bad = |problem: String| SessionError::BadJournal { path: path.clone(), problem };
     let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
-    let mut records = Vec::with_capacity(lines.len());
-    for (i, line) in lines.iter().enumerate() {
+    let Some((first, rest)) = lines.split_first() else {
+        return Err(bad("it is empty".into()));
+    };
+    let header = serde_json::from_str(first).map_err(|e| bad(format!("its first line isn't a Session header: {e}")))?;
+    let mut records = Vec::with_capacity(rest.len());
+    for (i, line) in rest.iter().enumerate() {
         match serde_json::from_str(line) {
             Ok(record) => records.push(record),
-            Err(_) if i + 1 == lines.len() && !text.ends_with('\n') => {}
-            Err(e) => return Err(SessionError::BadJournal { path, problem: format!("line {}: {e}", i + 1) }),
+            Err(_) if i + 1 == rest.len() && !text.ends_with('\n') => {}
+            Err(e) => return Err(bad(format!("line {}: {e}", i + 2))),
         }
     }
-    if !matches!(records.first(), Some(Record::Session { .. })) {
-        return Err(SessionError::BadJournal { path, problem: "it doesn't start with a Session record".into() });
-    }
-    Ok(records)
+    Ok((header, records))
 }
 
 /// The IDs of every Session with a Journal in `journal_dir`.

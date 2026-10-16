@@ -1,0 +1,259 @@
+/* Scan results fill the window; only the table scrolls. */
+.scan-screen {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 48px);
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.filters input,
+.filters select {
+  font: inherit;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: inherit;
+}
+
+.filters .search {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.shown {
+  margin: 0;
+  color: var(--muted);
+}
+
+.scan-table {
+  position: relative;
+  flex: 1;
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+/* Scrolls both ways: sideways once the columns are wider than the table. */
+.scan-viewport {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+}
+
+.scan-body {
+  position: relative;
+  min-width: var(--scan-min-width);
+}
+
+.scan-window {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
+/* Fixed height of two lines: the table works out which rows are in view from it. */
+.scan-row {
+  display: grid;
+  grid-template-columns: var(--scan-columns);
+  min-width: var(--scan-min-width);
+  height: 44px;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Long text wraps onto a second line, then ends in "…". */
+.scan-cell {
+  padding: 3px 8px;
+  line-height: 18px;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.scan-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: auto;
+  background: var(--surface);
+  font-weight: 600;
+}
+
+.scan-head .scan-cell {
+  display: flex;
+  align-items: center;
+  position: relative;
+  padding: 0;
+  overflow: visible;
+}
+
+.scan-head .sort {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font-weight: inherit;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.scan-head .number .sort {
+  justify-content: flex-end;
+}
+
+.sort-arrow {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+/* The drag handle on a header's right edge: a divider that is always shown, wider to grab. */
+.resizer {
+  position: absolute;
+  top: 0;
+  right: -6px;
+  bottom: 0;
+  width: 12px;
+  z-index: 2;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+/* Keep the last handle inside the table so it doesn't add a sideways scroll. */
+.scan-head .scan-cell:last-child .resizer {
+  right: 0;
+}
+
+.resizer::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 5px;
+  width: 1px;
+  background: var(--border);
+}
+
+/* The table's own border already marks the last column's edge. */
+.scan-head .scan-cell:last-child .resizer::after {
+  left: auto;
+  right: 0;
+  background: none;
+}
+
+.resizer:hover::after,
+.resizer.dragging::after {
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  margin-left: -1px;
+  background: var(--accent);
+}
+
+.scan-head .scan-cell:last-child .resizer:hover::after,
+.scan-head .scan-cell:last-child .resizer.dragging::after {
+  margin-left: 0;
+}
+
+/* Shown only while dragging a column edge. */
+.resize-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  z-index: 3;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.resize-guide[hidden] {
+  display: none;
+}
+
+.scan-row .number {
+  text-align: right;
+}
+
+.scan-row .path {
+  font-size: 12px;
+}
+
+/* An off-screen path cell, without the line clamp, used to measure how much of a path fits. */
+.scan-measure {
+  position: absolute;
+  top: 0;
+  left: 0;
+  visibility: hidden;
+  pointer-events: none;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.scan-empty {
+  padding: 12px;
+  color: var(--muted);
+}
+
+.path-list {
+  padding-left: 20px;
+}
+
+.scan-row.selected {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+/* The menu that opens on a clicked row. */
+.row-menu {
+  position: absolute;
+  z-index: 4;
+  min-width: 160px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px var(--shadow);
+}
+
+.row-menu[hidden] {
+  display: none;
+}
+
+.row-menu button {
+  display: block;
+  width: 100%;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  text-align: left;
+}
+
+.row-menu button:hover,
+.row-menu button:focus-visible {
+  background: var(--accent);
+  color: var(--on-accent);
+  outline: none;
+}
+
+.row-menu .status {
+  margin: 4px 8px;
+  max-width: 320px;
+}

@@ -1,18 +1,14 @@
-//! Past Sessions as their Journals tell them, plus Undo and Redo of a whole
-//! Session or of chosen Operations.
+//! Past Sessions as their Journals tell them.
 
 use std::collections::{BTreeMap, HashSet};
-use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
 use crate::config::TrashDestination;
-use crate::executor::{move_without_overwriting, unchanged, Outcome, SourceState};
-use crate::journal::{self, lock_sessions, Journal, Record, SessionError};
-use crate::planner::OperationKind;
-use crate::protection::HOLDING_FOLDER_NAME;
+use crate::executor::Outcome;
+use crate::journal::{self, OutcomeKind, Phase, Record, SessionError, SessionHeader};
+use crate::planner::{OperationKind, SourceState};
 
 /// One past Session, for the Session list.
 #[derive(Debug, Clone, Serialize)]
@@ -31,7 +27,7 @@ pub struct SessionInfo {
     /// Of those, how many Undo could still reverse: not undone, and not
     /// found gone by an earlier Undo.
     pub left_to_undo: usize,
-    /// Bytes of the Operations carried out; unknown sizes count as nothing.
+    /// Bytes of the Operations carried out.
     pub total_size: u64,
     /// How many Operations of each kind were carried out.
     pub kind_counts: BTreeMap<OperationKind, usize>,
@@ -80,8 +76,7 @@ pub struct SessionOperation {
     pub source: PathBuf,
     /// Where the Operation put it.
     pub destination: PathBuf,
-    /// Unknown in Journals written before Redo existed.
-    pub size: Option<u64>,
+    pub size: u64,
     pub state: OperationState,
     /// Why it was skipped or failed, or why the last Undo or Redo of it
     /// didn't happen.
@@ -104,43 +99,44 @@ pub enum OperationState {
     Unrecoverable,
 }
 
-/// What happened when Operations were undone.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UndoSummary {
-    pub session_id: String,
-    pub restored: Vec<Outcome>,
-    /// Not reversed, but could be later: something now sits at the
-    /// original location, or the move failed.
-    pub skipped: Vec<Outcome>,
-    /// Not reversed, and never can be: the trashed copy is gone.
-    pub unrecoverable: Vec<Outcome>,
-}
-
-/// What happened when undone Operations were carried out again.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RedoSummary {
-    pub session_id: String,
-    pub redone: Vec<Outcome>,
-    /// Not carried out: the item changed since Undo put it back, or its
-    /// destination is taken.
-    pub skipped: Vec<Outcome>,
-}
-
 /// One Operation as its Journal records tell it.
-struct JournaledOperation {
-    id: String,
-    kind: OperationKind,
-    source: PathBuf,
-    destination: PathBuf,
-    planned: Option<SourceState>,
-    state: OperationState,
-    reason: Option<String>,
+pub(crate) struct JournaledOperation {
+    pub id: String,
+    pub kind: OperationKind,
+    pub source: PathBuf,
+    pub destination: PathBuf,
+    pub planned: SourceState,
+    pub state: OperationState,
+    pub reason: Option<String>,
+    /// Set while the last intent for it has no outcome: that pass was cut
+    /// short by a crash, maybe after the item moved.
+    pub interrupted: Option<Phase>,
 }
 
 impl JournaledOperation {
-    fn outcome(&self, reason: Option<String>) -> Outcome {
+    /// The record written before `phase` touches the item.
+    pub fn intent(&self, phase: Phase) -> Record {
+        match phase {
+            Phase::Run => Record::Operation {
+                operation_id: self.id.clone(),
+                kind: self.kind,
+                source: self.source.clone(),
+                destination: self.destination.clone(),
+                planned: self.planned,
+            },
+            Phase::Undo | Phase::Redo => Record::Intent { operation_id: self.id.clone(), phase },
+        }
+    }
+
+    /// Where `phase` moves the item from, and to.
+    pub fn route(&self, phase: Phase) -> (&Path, &Path) {
+        match phase {
+            Phase::Run | Phase::Redo => (&self.source, &self.destination),
+            Phase::Undo => (&self.destination, &self.source),
+        }
+    }
+
+    pub fn outcome(&self, reason: Option<String>) -> Outcome {
         Outcome {
             operation_id: self.id.clone(),
             kind: self.kind,
@@ -151,69 +147,71 @@ impl JournaledOperation {
     }
 }
 
+/// The state an Operation is in once `phase` ended with `outcome`.
+fn next_state(state: OperationState, phase: Phase, outcome: OutcomeKind) -> OperationState {
+    match (phase, outcome) {
+        (Phase::Run | Phase::Redo, OutcomeKind::Done) => OperationState::Done,
+        (Phase::Undo, OutcomeKind::Done) => OperationState::Undone,
+        (Phase::Run, OutcomeKind::Skipped) => OperationState::Skipped,
+        (_, OutcomeKind::Failed) => OperationState::Failed,
+        (_, OutcomeKind::Unrecoverable) => OperationState::Unrecoverable,
+        // A skipped Undo or Redo leaves the Operation as it was.
+        (Phase::Undo | Phase::Redo, OutcomeKind::Skipped) => state,
+    }
+}
+
 /// A Session's Journal, read.
-struct SessionJournal {
-    id: String,
-    scan_root: PathBuf,
-    trash_destination: TrashDestination,
-    started_at: i64,
-    finished: bool,
+pub(crate) struct SessionJournal {
+    pub header: SessionHeader,
+    pub finished: bool,
     /// In the order they ran.
-    operations: Vec<JournaledOperation>,
+    pub operations: Vec<JournaledOperation>,
 }
 
 impl SessionJournal {
-    fn read(journal_dir: &Path, id: &str) -> Result<SessionJournal, SessionError> {
-        let records = journal::read(journal_dir, id)?;
-        let Some(Record::Session { id, scan_root, trash_destination, started_at }) = records.first().cloned() else {
-            unreachable!("journal::read checks the first record");
-        };
-        let mut session =
-            SessionJournal { id, scan_root, trash_destination, started_at, finished: false, operations: Vec::new() };
-        for record in records {
-            // An outcome with no intent before it is ignored.
-            let (operation_id, state, reason) = match record {
-                Record::Intent { operation_id, kind, source, destination, planned } => {
-                    session.operations.push(JournaledOperation {
-                        id: operation_id,
-                        kind,
-                        source,
-                        destination,
-                        planned,
-                        state: OperationState::Started,
-                        reason: None,
-                    });
-                    continue;
-                }
-                Record::Finished => {
-                    session.finished = true;
-                    continue;
-                }
-                Record::Done { operation_id } | Record::Redone { operation_id } => {
-                    (operation_id, Some(OperationState::Done), None)
-                }
-                Record::Skipped { operation_id, reason } => (operation_id, Some(OperationState::Skipped), Some(reason)),
-                Record::Failed { operation_id, reason } => (operation_id, Some(OperationState::Failed), Some(reason)),
-                Record::Restored { operation_id } => (operation_id, Some(OperationState::Undone), None),
-                Record::Unrecoverable { operation_id, reason } => {
-                    (operation_id, Some(OperationState::Unrecoverable), Some(reason))
-                }
-                // The state stays as it was; the reason says why.
-                Record::UndoSkipped { operation_id, reason } | Record::RedoSkipped { operation_id, reason } => {
-                    (operation_id, None, Some(reason))
-                }
-                Record::Session { .. }
-                | Record::UndoStarted
-                | Record::UndoIntent { .. }
-                | Record::UndoFinished
-                | Record::RedoIntent { .. } => continue,
-            };
-            if let Some(op) = session.operations.iter_mut().rev().find(|op| op.id == operation_id) {
-                op.state = state.unwrap_or(op.state);
-                op.reason = reason;
-            }
+    pub fn read(journal_dir: &Path, id: &str) -> Result<SessionJournal, SessionError> {
+        let (header, records) = journal::read(journal_dir, id)?;
+        let mut session = SessionJournal { header, finished: false, operations: Vec::new() };
+        for record in &records {
+            session.apply(record);
         }
         Ok(session)
+    }
+
+    /// Brings the Session up to date with `record`, as just read or written.
+    pub fn apply(&mut self, record: &Record) {
+        match record {
+            Record::Operation { operation_id, kind, source, destination, planned } => {
+                self.operations.push(JournaledOperation {
+                    id: operation_id.clone(),
+                    kind: *kind,
+                    source: source.clone(),
+                    destination: destination.clone(),
+                    planned: *planned,
+                    state: OperationState::Started,
+                    reason: None,
+                    interrupted: Some(Phase::Run),
+                });
+            }
+            Record::Intent { operation_id, phase } => {
+                if let Some(op) = self.operation(operation_id) {
+                    op.interrupted = Some(*phase);
+                }
+            }
+            Record::Outcome { operation_id, phase, outcome, reason } => {
+                if let Some(op) = self.operation(operation_id) {
+                    op.state = next_state(op.state, *phase, *outcome);
+                    op.reason = reason.clone();
+                    op.interrupted = None;
+                }
+            }
+            Record::Finished => self.finished = true,
+        }
+    }
+
+    /// The Operation `id`; a record about any other is ignored.
+    fn operation(&mut self, id: &str) -> Option<&mut JournaledOperation> {
+        self.operations.iter_mut().rev().find(|op| op.id == id)
     }
 
     fn info(&self) -> SessionInfo {
@@ -225,7 +223,7 @@ impl SessionJournal {
         let mut kind_counts = BTreeMap::new();
         for op in carried_out {
             done += 1;
-            total_size += op.planned.map_or(0, |p| p.size);
+            total_size += op.planned.size;
             *kind_counts.entry(op.kind).or_insert(0) += 1;
         }
         let in_state = |state| self.operations.iter().filter(|op| op.state == state).count();
@@ -241,10 +239,10 @@ impl SessionJournal {
             SessionStatus::Crashed
         };
         SessionInfo {
-            id: self.id.clone(),
-            scan_root: self.scan_root.clone(),
-            trash_destination: self.trash_destination,
-            started_at: self.started_at,
+            id: self.header.id.clone(),
+            scan_root: self.header.scan_root.clone(),
+            trash_destination: self.header.trash_destination,
+            started_at: self.header.started_at,
             status,
             done,
             restored,
@@ -255,7 +253,7 @@ impl SessionJournal {
     }
 
     /// The Operations in `state`, limited to `only` if given.
-    fn in_state<'a>(
+    pub fn in_state<'a>(
         &'a self,
         state: OperationState,
         only: Option<&'a HashSet<&str>>,
@@ -273,7 +271,7 @@ impl SessionJournal {
 /// left out, so it doesn't hide the others; its page is one short.
 pub fn list_sessions(journal_dir: &Path, offset: usize, limit: usize) -> Result<SessionPage, SessionError> {
     let mut ids = journal::session_ids(journal_dir)?;
-    ids.sort_by(|a, b| start_order(b).cmp(&start_order(a)));
+    ids.sort_unstable_by(|a, b| b.cmp(a));
     let mut sessions = Vec::new();
     for id in ids.iter().skip(offset).take(limit) {
         match SessionJournal::read(journal_dir, id) {
@@ -283,17 +281,6 @@ pub fn list_sessions(journal_dir: &Path, offset: usize, limit: usize) -> Result<
         }
     }
     Ok(SessionPage { total: ids.len(), sessions })
-}
-
-/// Sorts Session IDs by when they started: `<time>Z`, then `<time>Z-2`,
-/// `<time>Z-3`, … for Sessions started in the same millisecond.
-fn start_order(id: &str) -> (&str, u64) {
-    if let Some((time, n)) = id.rsplit_once("Z-") {
-        if let Ok(n) = n.parse() {
-            return (time, n);
-        }
-    }
-    (id.strip_suffix('Z').unwrap_or(id), 1)
 }
 
 /// Session `session_id` and each of its Operations, from its Journal.
@@ -307,120 +294,10 @@ pub fn session_details(session_id: &str, journal_dir: &Path) -> Result<SessionDe
             kind: op.kind,
             source: op.source.clone(),
             destination: op.destination.clone(),
-            size: op.planned.map(|p| p.size),
+            size: op.planned.size,
             state: op.state,
             reason: op.reason.clone(),
         })
         .collect();
     Ok(SessionDetails { info: session.info(), operations })
-}
-
-/// Reverses every done Operation of Session `session_id`, newest first,
-/// using only its Journal in `journal_dir`. Never overwrites: an Operation
-/// whose original location is taken is skipped, and can be retried by
-/// undoing again.
-pub fn undo(session_id: &str, journal_dir: &Path) -> Result<UndoSummary, SessionError> {
-    undo_selected(session_id, None, journal_dir)
-}
-
-/// Like `undo`, for only the Operations in `operation_ids`. Operations that
-/// aren't done (say, already undone) are left alone.
-pub fn undo_operations(
-    session_id: &str,
-    operation_ids: &[String],
-    journal_dir: &Path,
-) -> Result<UndoSummary, SessionError> {
-    let only: HashSet<&str> = operation_ids.iter().map(String::as_str).collect();
-    undo_selected(session_id, Some(&only), journal_dir)
-}
-
-fn undo_selected(
-    session_id: &str,
-    only: Option<&HashSet<&str>>,
-    journal_dir: &Path,
-) -> Result<UndoSummary, SessionError> {
-    let _lock = lock_sessions(journal_dir)?;
-    let session = SessionJournal::read(journal_dir, session_id)?;
-    let mut journal = Journal::reopen(journal_dir, &session.id)?;
-    journal.append(&Record::UndoStarted)?;
-
-    let holding = session.scan_root.join(HOLDING_FOLDER_NAME);
-    let mut summary = UndoSummary {
-        session_id: session.id.clone(),
-        restored: Vec::new(),
-        skipped: Vec::new(),
-        unrecoverable: Vec::new(),
-    };
-    for op in session.in_state(OperationState::Done, only).rev() {
-        let operation_id = op.id.clone();
-        journal.append(&Record::UndoIntent { operation_id: operation_id.clone() })?;
-        let gone = matches!(fs::symlink_metadata(&op.destination), Err(e) if e.kind() == io::ErrorKind::NotFound);
-        if gone {
-            let reason = format!("The trashed copy at {} is gone", op.destination.display());
-            journal.append(&Record::Unrecoverable { operation_id, reason: reason.clone() })?;
-            summary.unrecoverable.push(op.outcome(Some(reason)));
-        } else if let Err(reason) = move_without_overwriting(&op.destination, &op.source) {
-            let reason = format!("{reason}; the trashed copy was left at {}", op.destination.display());
-            journal.append(&Record::UndoSkipped { operation_id, reason: reason.clone() })?;
-            summary.skipped.push(op.outcome(Some(reason)));
-        } else {
-            journal.append(&Record::Restored { operation_id })?;
-            remove_empty_folders(op.destination.parent(), &holding);
-            summary.restored.push(op.outcome(None));
-        }
-    }
-    journal.append(&Record::UndoFinished)?;
-    Ok(summary)
-}
-
-/// Carries out again the undone Operations of Session `session_id` that
-/// are in `operation_ids`, in the order they first ran, putting each item
-/// back where the Session put it. An item that changed since Undo put it
-/// back is skipped, as is one whose destination is taken; Operations that
-/// aren't undone are left alone.
-pub fn redo_operations(
-    session_id: &str,
-    operation_ids: &[String],
-    journal_dir: &Path,
-) -> Result<RedoSummary, SessionError> {
-    let _lock = lock_sessions(journal_dir)?;
-    let session = SessionJournal::read(journal_dir, session_id)?;
-    let mut journal = Journal::reopen(journal_dir, &session.id)?;
-    let only: HashSet<&str> = operation_ids.iter().map(String::as_str).collect();
-
-    let mut summary = RedoSummary { session_id: session.id.clone(), redone: Vec::new(), skipped: Vec::new() };
-    for op in session.in_state(OperationState::Undone, Some(&only)) {
-        let operation_id = op.id.clone();
-        journal.append(&Record::RedoIntent { operation_id: operation_id.clone() })?;
-        let redone = match &op.planned {
-            None => Err("This Session was recorded before Redo existed, so the app can't check the item".into()),
-            Some(planned) => unchanged(&op.source, planned, "since Undo put it back")
-                .and_then(|()| move_without_overwriting(&op.source, &op.destination)),
-        };
-        match redone {
-            Ok(()) => {
-                journal.append(&Record::Redone { operation_id })?;
-                summary.redone.push(op.outcome(None));
-            }
-            Err(reason) => {
-                journal.append(&Record::RedoSkipped { operation_id, reason: reason.clone() })?;
-                summary.skipped.push(op.outcome(Some(reason)));
-            }
-        }
-    }
-    Ok(summary)
-}
-
-/// Removes `folder` and the folders above it, up to and including
-/// `holding`, while they are empty. Only ever removes empty folders, so
-/// nothing in them can be lost.
-fn remove_empty_folders(folder: Option<&Path>, holding: &Path) {
-    let mut folder = folder;
-    while let Some(path) = folder.filter(|path| path.starts_with(holding)) {
-        match fs::remove_dir(path) {
-            Ok(()) => folder = path.parent(),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => folder = path.parent(),
-            Err(_) => return,
-        }
-    }
 }

@@ -5,6 +5,7 @@ import { el } from "../dom.js";
 import { count, fitTail, formatDate, formatSize, plural } from "../format.js";
 import { icon } from "../icons.js";
 import { defaultDirection, matchesSearch, parseSearch, sortRows } from "../scan-query.js";
+import { busy } from "../status.js";
 
 // `track` is the column's default width; `min` is the least an `fr` track shrinks to.
 const COLUMNS = [
@@ -38,16 +39,8 @@ export function render(root, nav, result) {
   const plan = el("button", { type: "button", className: "primary" }, "Build Plan");
   const planStatus = el("p", { className: "status" });
   plan.addEventListener("click", async () => {
-    plan.disabled = true;
-    planStatus.classList.remove("error");
-    planStatus.textContent = "Looking for duplicates…";
-    try {
-      nav.plan(result, await buildPlan());
-    } catch (error) {
-      planStatus.textContent = describeError(error);
-      planStatus.classList.add("error");
-      plan.disabled = false;
-    }
+    const built = await busy(planStatus, [plan], "Looking for duplicates…", buildPlan);
+    if (built) nav.plan(result, built);
   });
 
   const totalSize = result.entries.reduce((sum, entry) => sum + entry.size, 0);

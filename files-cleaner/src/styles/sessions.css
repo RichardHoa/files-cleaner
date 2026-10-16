@@ -1,0 +1,51 @@
+/* Session rows, on Home and History */
+.sessions li.session {
+  padding: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.sessions li.session:hover,
+.sessions li.session:focus-visible {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.session-row {
+  display: grid;
+  /* Fixed tracks, so the columns line up from row to row. */
+  grid-template-columns: 170px minmax(80px, 1fr) 120px 170px 80px 72px;
+  align-items: center;
+  gap: 12px;
+}
+
+.session-row .pill {
+  justify-self: start;
+  margin-left: 0;
+}
+
+.session-date {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.session-root {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kind-counts {
+  display: flex;
+  gap: 10px;
+}
+
+.kind-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.session-size {
+  text-align: right;
+}

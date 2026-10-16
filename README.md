@@ -58,3 +58,6 @@ The bundle is written to `files-cleaner/src-tauri/target/release/bundle/`.
 cd files-cleaner/src-tauri
 cargo build --release -p files-cleaner-core --bin bench-scan
 /usr/bin/time -l ./target/release/bench-scan ~/Downloads 3
+
+
+run the nuclear scan- then css best practices

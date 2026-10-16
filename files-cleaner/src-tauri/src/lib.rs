@@ -3,11 +3,12 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::convert::Infallible;
+use std::sync::{Arc, Mutex};
 
 use files_cleaner_core::{
-    self as core, Config, Plan, RecentScanRoot, RedoSummary, ScanProgress, ScanResult, SessionDetails, SessionPage,
-    Summary, UndoSummary, EXAMPLE_CONFIG,
+    self as core, Config, Plan, RecentScanRoot, ScanProgress, ScanResult, SessionDetails, SessionPage, Summary,
+    EXAMPLE_CONFIG,
 };
 use serde::Serialize;
 use tauri::ipc::Channel;
@@ -19,11 +20,14 @@ const SESSIONS_FOLDER_NAME: &str = "sessions";
 /// The Recent Scan Roots, inside the app data folder.
 const RECENT_FILE_NAME: &str = "recent-scan-roots.json";
 
-/// The latest scan and Plan, kept here so the UI doesn't send them back.
+/// The latest scan and, once built, its Plan, kept here so the UI doesn't
+/// send them back. One lock holds both, so a Plan never outlives its scan.
 #[derive(Default)]
-struct Latest {
-    scan: Mutex<Option<ScanResult>>,
-    plan: Mutex<Option<Plan>>,
+struct Latest(Mutex<Option<Scanned>>);
+
+struct Scanned {
+    scan: Arc<ScanResult>,
+    plan: Option<Plan>,
 }
 
 /// An error the UI can show: what went wrong and, for a config error,
@@ -42,6 +46,15 @@ impl CommandError {
     fn new(message: impl ToString) -> Self {
         CommandError { message: message.to_string(), config_path: None, line: None, column: None }
     }
+}
+
+/// Runs `work` off the UI thread.
+async fn blocking<T, E>(work: impl FnOnce() -> Result<T, E> + Send + 'static) -> Result<T, CommandError>
+where
+    T: Send + 'static,
+    E: ToString + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(work).await.map_err(CommandError::new)?.map_err(CommandError::new)
 }
 
 #[derive(Serialize)]
@@ -126,16 +139,14 @@ async fn scan(
     if let Err(e) = recorded {
         eprintln!("Couldn't save the Recent Scan Roots: {}", e.message);
     }
-    let result = tauri::async_runtime::spawn_blocking(move || {
+    let result = blocking(move || {
         // A closed window can't receive progress; the scan carries on.
         core::scan_with_progress(&scan_root, &loaded.config, |progress| {
             let _ = on_progress.send(progress);
         })
     })
-        .await
-        .map_err(CommandError::new)?
-        .map_err(CommandError::new)?;
-    *latest.scan.lock().unwrap() = Some(result.clone());
+    .await?;
+    *latest.0.lock().unwrap() = Some(Scanned { scan: Arc::new(result.clone()), plan: None });
     Ok(result)
 }
 
@@ -144,11 +155,14 @@ async fn scan(
 #[tauri::command]
 async fn build_plan(app: AppHandle, latest: State<'_, Latest>) -> Result<Plan, CommandError> {
     let loaded = read_config(&app)?;
-    let scan = latest.scan.lock().unwrap().clone().ok_or_else(|| CommandError::new("Scan a folder first"))?;
-    let plan = tauri::async_runtime::spawn_blocking(move || core::build_plan(&scan, &loaded.config))
-        .await
-        .map_err(CommandError::new)?;
-    *latest.plan.lock().unwrap() = Some(plan.clone());
+    let scan = latest.0.lock().unwrap().as_ref().map(|s| Arc::clone(&s.scan));
+    let scan = scan.ok_or_else(|| CommandError::new("Scan a folder first"))?;
+    let planned = Arc::clone(&scan);
+    let plan = blocking(move || Ok::<_, Infallible>(core::build_plan(&planned, &loaded.config))).await?;
+    // Kept only if no newer scan came in while planning.
+    if let Some(scanned) = latest.0.lock().unwrap().as_mut().filter(|s| Arc::ptr_eq(&s.scan, &scan)) {
+        scanned.plan = Some(plan.clone());
+    }
     Ok(plan)
 }
 
@@ -163,35 +177,21 @@ fn journal_dir(app: &AppHandle) -> Result<PathBuf, CommandError> {
 #[tauri::command]
 async fn run_plan(app: AppHandle, latest: State<'_, Latest>, approved: Vec<String>) -> Result<Summary, CommandError> {
     let journal_dir = journal_dir(&app)?;
-    let plan = latest.plan.lock().unwrap().clone().ok_or_else(|| CommandError::new("Build a Plan first"))?;
-    tauri::async_runtime::spawn_blocking(move || core::run(&plan, &approved, &journal_dir))
-        .await
-        .map_err(CommandError::new)?
-        .map_err(CommandError::new)
+    let plan = latest.0.lock().unwrap().as_ref().and_then(|s| s.plan.clone());
+    let plan = plan.ok_or_else(|| CommandError::new("Build a Plan first"))?;
+    blocking(move || core::run(&plan, &approved, &journal_dir)).await
 }
 
-/// Undoes a past Session off the UI thread.
+/// Undoes the chosen Operations of a past Session, or all of them if none
+/// are chosen.
 #[tauri::command]
-async fn undo(app: AppHandle, session_id: String) -> Result<UndoSummary, CommandError> {
+async fn undo(app: AppHandle, session_id: String, operation_ids: Option<Vec<String>>) -> Result<Summary, CommandError> {
     let journal_dir = journal_dir(&app)?;
-    tauri::async_runtime::spawn_blocking(move || core::undo(&session_id, &journal_dir))
-        .await
-        .map_err(CommandError::new)?
-        .map_err(CommandError::new)
-}
-
-/// Undoes only the chosen Operations of a past Session.
-#[tauri::command]
-async fn undo_operations(
-    app: AppHandle,
-    session_id: String,
-    operation_ids: Vec<String>,
-) -> Result<UndoSummary, CommandError> {
-    let journal_dir = journal_dir(&app)?;
-    tauri::async_runtime::spawn_blocking(move || core::undo_operations(&session_id, &operation_ids, &journal_dir))
-        .await
-        .map_err(CommandError::new)?
-        .map_err(CommandError::new)
+    blocking(move || match operation_ids {
+        Some(ids) => core::undo_operations(&session_id, &ids, &journal_dir),
+        None => core::undo(&session_id, &journal_dir),
+    })
+    .await
 }
 
 /// Carries out again the chosen undone Operations of a past Session.
@@ -200,12 +200,9 @@ async fn redo_operations(
     app: AppHandle,
     session_id: String,
     operation_ids: Vec<String>,
-) -> Result<RedoSummary, CommandError> {
+) -> Result<Summary, CommandError> {
     let journal_dir = journal_dir(&app)?;
-    tauri::async_runtime::spawn_blocking(move || core::redo_operations(&session_id, &operation_ids, &journal_dir))
-        .await
-        .map_err(CommandError::new)?
-        .map_err(CommandError::new)
+    blocking(move || core::redo_operations(&session_id, &operation_ids, &journal_dir)).await
 }
 
 /// A past Session and each of its Operations, for the Session screen.
@@ -251,7 +248,6 @@ pub fn run() {
             build_plan,
             run_plan,
             undo,
-            undo_operations,
             redo_operations,
             session_details,
             list_sessions,

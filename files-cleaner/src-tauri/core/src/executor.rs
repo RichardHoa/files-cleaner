@@ -1,30 +1,52 @@
-//! Runs the approved Operations of a Plan as one Session, journaling each
-//! one before it touches the disk.
+//! Changes the disk, journaling every step before it happens: runs the
+//! approved Operations of a Plan as a new Session, and undoes or redoes the
+//! Operations of a past one.
 
 use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
-use crate::journal::{lock_sessions, Journal, Record, SessionError};
-use crate::planner::{Operation, OperationKind, Plan};
+use crate::journal::{lock_sessions, Journal, OutcomeKind, Phase, Record, SessionError};
+use crate::planner::{OperationKind, Plan, SourceState};
 use crate::protection::HOLDING_FOLDER_NAME;
 use crate::scanner::{millis, total_size};
+use crate::sessions::{JournaledOperation, OperationState, SessionJournal};
 
-/// What happened when a Session ran.
+/// What happened to each Operation in one Run, Undo or Redo.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Summary {
     pub session_id: String,
+    /// Moved: trashed by a Run or a Redo, restored by an Undo.
     pub done: Vec<Outcome>,
+    /// Not moved, but could be later: the item changed, or something is in
+    /// the way.
     pub skipped: Vec<Outcome>,
+    /// Run only: the move failed.
     pub failed: Vec<Outcome>,
+    /// Undo only: the trashed copy is gone, so it never can be undone.
+    pub unrecoverable: Vec<Outcome>,
 }
 
-/// One Operation's outcome, in a Session or an Undo.
+impl Summary {
+    fn new(session_id: String) -> Self {
+        Summary { session_id, done: Vec::new(), skipped: Vec::new(), failed: Vec::new(), unrecoverable: Vec::new() }
+    }
+
+    fn push(&mut self, kind: OutcomeKind, outcome: Outcome) {
+        match kind {
+            OutcomeKind::Done => self.done.push(outcome),
+            OutcomeKind::Skipped => self.skipped.push(outcome),
+            OutcomeKind::Failed => self.failed.push(outcome),
+            OutcomeKind::Unrecoverable => self.unrecoverable.push(outcome),
+        }
+    }
+}
+
+/// One Operation's outcome, in a Run, an Undo or a Redo.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Outcome {
@@ -32,21 +54,12 @@ pub struct Outcome {
     pub kind: OperationKind,
     pub source: PathBuf,
     pub destination: PathBuf,
-    /// Why it was skipped or failed.
+    /// Why it wasn't done.
     pub reason: Option<String>,
 }
 
-/// What an Operation's source was like when planned: if it differs when
-/// the Operation runs, or is redone, the Operation is skipped.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SourceState {
-    /// Bytes; for a Package, the total of everything inside it.
-    pub size: u64,
-    /// Milliseconds since the Unix epoch.
-    pub modified: i64,
-    pub is_package: bool,
-}
+/// Why an Operation's pass didn't move the item.
+type NotDone = (OutcomeKind, String);
 
 /// Runs the Operations of `plan` whose IDs are in `approved`, in Plan
 /// order, as a new Session journaled in `journal_dir`. Trashed items go to
@@ -54,98 +67,154 @@ pub struct SourceState {
 pub fn run(plan: &Plan, approved: &[String], journal_dir: &Path) -> Result<Summary, SessionError> {
     let _lock = lock_sessions(journal_dir)?;
     let approved: HashSet<&str> = approved.iter().map(String::as_str).collect();
-    let (session_id, mut journal) = start_journal(journal_dir)?;
-    journal.append(&Record::Session {
-        id: session_id.clone(),
-        scan_root: plan.root.clone(),
-        trash_destination: plan.trash_destination,
-        started_at: millis(SystemTime::now()),
-    })?;
+    let (header, mut journal) = Journal::create(journal_dir, plan.root.clone(), plan.trash_destination)?;
 
-    let holding = plan.root.join(HOLDING_FOLDER_NAME).join(&session_id);
-    let mut summary = Summary { session_id, done: Vec::new(), skipped: Vec::new(), failed: Vec::new() };
-    for op in plan.operations.iter().filter(|op| approved.contains(op.id.as_str())) {
-        let destination = holding.join(op.relative_path.iter().collect::<PathBuf>());
-        journal.append(&Record::Intent {
-            operation_id: op.id.clone(),
+    let holding = plan.root.join(HOLDING_FOLDER_NAME).join(&header.id);
+    let operations: Vec<JournaledOperation> = plan
+        .operations
+        .iter()
+        .filter(|op| approved.contains(op.id.as_str()))
+        .map(|op| JournaledOperation {
+            id: op.id.clone(),
             kind: op.kind,
             source: op.source.clone(),
-            destination: destination.clone(),
-            planned: Some(planned(op)),
-        })?;
-        let mut outcome = Outcome {
-            operation_id: op.id.clone(),
-            kind: op.kind,
-            source: op.source.clone(),
-            destination: destination.clone(),
+            destination: holding.join(op.relative_path.iter().collect::<PathBuf>()),
+            planned: op.planned,
+            state: OperationState::Started,
             reason: None,
-        };
-        let operation_id = op.id.clone();
-        if let Err(reason) = unchanged(&op.source, &planned(op), "since the Plan was made") {
-            journal.append(&Record::Skipped { operation_id, reason: reason.clone() })?;
-            outcome.reason = Some(reason);
-            summary.skipped.push(outcome);
-        } else if let Err(reason) = move_without_overwriting(&op.source, &destination) {
-            journal.append(&Record::Failed { operation_id, reason: reason.clone() })?;
-            outcome.reason = Some(reason);
-            summary.failed.push(outcome);
-        } else {
-            journal.append(&Record::Done { operation_id })?;
-            summary.done.push(outcome);
-        }
-    }
+            interrupted: None,
+        })
+        .collect();
+
+    let mut summary = Summary::new(header.id);
+    apply_each(&mut journal, &mut summary, Phase::Run, operations.iter(), |op| {
+        unchanged(&op.source, &op.planned, "since the Plan was made").map_err(|r| (OutcomeKind::Skipped, r))?;
+        move_without_overwriting(&op.source, &op.destination).map_err(|r| (OutcomeKind::Failed, r))
+    })?;
     journal.append(&Record::Finished)?;
     Ok(summary)
 }
 
-/// A new Session ID (the UTC start time) and its Journal.
-fn start_journal(journal_dir: &Path) -> Result<(String, Journal), SessionError> {
-    let base = session_id(SystemTime::now());
-    for n in 1.. {
-        let id = if n == 1 { base.clone() } else { format!("{base}-{n}") };
-        match Journal::create(journal_dir, &id) {
-            Ok(journal) => return Ok((id, journal)),
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(e.into()),
+/// Reverses every done Operation of Session `session_id`, newest first,
+/// using only its Journal in `journal_dir`. Never overwrites: an Operation
+/// whose original location is taken is skipped, and can be retried by
+/// undoing again.
+pub fn undo(session_id: &str, journal_dir: &Path) -> Result<Summary, SessionError> {
+    undo_selected(session_id, None, journal_dir)
+}
+
+/// Like `undo`, for only the Operations in `operation_ids`. Operations that
+/// aren't done (say, already undone) are left alone.
+pub fn undo_operations(session_id: &str, operation_ids: &[String], journal_dir: &Path) -> Result<Summary, SessionError> {
+    let only: HashSet<&str> = operation_ids.iter().map(String::as_str).collect();
+    undo_selected(session_id, Some(&only), journal_dir)
+}
+
+fn undo_selected(session_id: &str, only: Option<&HashSet<&str>>, journal_dir: &Path) -> Result<Summary, SessionError> {
+    let _lock = lock_sessions(journal_dir)?;
+    let (session, mut journal) = reopen(journal_dir, session_id)?;
+
+    let mut summary = Summary::new(session.header.id.clone());
+    apply_each(&mut journal, &mut summary, Phase::Undo, session.in_state(OperationState::Done, only).rev(), |op| {
+        if !exists(&op.destination) {
+            return Err((OutcomeKind::Unrecoverable, format!("The trashed copy at {} is gone", op.destination.display())));
         }
+        move_without_overwriting(&op.destination, &op.source).map_err(|reason| {
+            (OutcomeKind::Skipped, format!("{reason}; the trashed copy was left at {}", op.destination.display()))
+        })?;
+        tidy_after_undo(&session, op);
+        Ok(())
+    })?;
+    Ok(summary)
+}
+
+/// Carries out again the undone Operations of Session `session_id` that
+/// are in `operation_ids`, in the order they first ran, putting each item
+/// back where the Session put it. An item that changed since Undo put it
+/// back is skipped, as is one whose destination is taken; Operations that
+/// aren't undone are left alone.
+pub fn redo_operations(session_id: &str, operation_ids: &[String], journal_dir: &Path) -> Result<Summary, SessionError> {
+    let _lock = lock_sessions(journal_dir)?;
+    let (session, mut journal) = reopen(journal_dir, session_id)?;
+    let only: HashSet<&str> = operation_ids.iter().map(String::as_str).collect();
+
+    let mut summary = Summary::new(session.header.id.clone());
+    apply_each(&mut journal, &mut summary, Phase::Redo, session.in_state(OperationState::Undone, Some(&only)), |op| {
+        unchanged(&op.source, &op.planned, "since Undo put it back")
+            .and_then(|()| move_without_overwriting(&op.source, &op.destination))
+            .map_err(|r| (OutcomeKind::Skipped, r))
+    })?;
+    Ok(summary)
+}
+
+/// Session `session_id`'s Journal, read and open to add to, with every
+/// pass a crash cut short settled first.
+fn reopen(journal_dir: &Path, session_id: &str) -> Result<(SessionJournal, Journal), SessionError> {
+    let mut session = SessionJournal::read(journal_dir, session_id)?;
+    let mut journal = Journal::reopen(journal_dir, &session.header.id)?;
+    settle_interrupted(&mut session, &mut journal)?;
+    Ok((session, journal))
+}
+
+/// A crash between a move and its outcome record leaves an intent with no
+/// outcome. If the item is where that pass would put it, the move happened:
+/// journal it as done (tidying up after an Undo, as it would have), so the
+/// Operation is in the state the disk is in. Otherwise the move never
+/// happened, and the Operation is as it was.
+fn settle_interrupted(session: &mut SessionJournal, journal: &mut Journal) -> io::Result<()> {
+    let mut settled = Vec::new();
+    for op in &session.operations {
+        let Some(phase) = op.interrupted else { continue };
+        let (from, to) = op.route(phase);
+        if exists(from) || !exists(to) {
+            continue;
+        }
+        if phase == Phase::Undo {
+            tidy_after_undo(session, op);
+        }
+        settled.push(Record::Outcome { operation_id: op.id.clone(), phase, outcome: OutcomeKind::Done, reason: None });
     }
-    unreachable!()
+    for record in &settled {
+        journal.append(record)?;
+        session.apply(record);
+    }
+    Ok(())
 }
 
-/// `2026-10-14_09-05-03-123Z`: sorts by time, and is a valid file name on
-/// every OS.
-fn session_id(time: SystemTime) -> String {
-    let ms = time.duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
-    let (secs, ms) = (ms / 1000, ms % 1000);
-    let (days, secs) = (secs / 86_400, secs % 86_400);
-    let (year, month, day) = civil_from_days(days as i64);
-    let (hour, minute, second) = (secs / 3600, secs / 60 % 60, secs % 60);
-    format!("{year:04}-{month:02}-{day:02}_{hour:02}-{minute:02}-{second:02}-{ms:03}Z")
+/// Removes the folders in the Holding Folder that Undo of `op` left empty.
+fn tidy_after_undo(session: &SessionJournal, op: &JournaledOperation) {
+    remove_empty_folders(op.destination.parent(), &session.header.scan_root.join(HOLDING_FOLDER_NAME));
 }
 
-/// The (year, month, day) `days` after 1970-01-01, in the proleptic
-/// Gregorian calendar (Howard Hinnant's `civil_from_days`).
-fn civil_from_days(days: i64) -> (i64, u32, u32) {
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    (year, month, day)
+/// For each of `operations`: journals `phase`'s intent, tries `attempt`,
+/// journals how it ended, and adds that to `summary`.
+fn apply_each<'a>(
+    journal: &mut Journal,
+    summary: &mut Summary,
+    phase: Phase,
+    operations: impl Iterator<Item = &'a JournaledOperation>,
+    mut attempt: impl FnMut(&JournaledOperation) -> Result<(), NotDone>,
+) -> io::Result<()> {
+    for op in operations {
+        journal.append(&op.intent(phase))?;
+        let (outcome, reason) = match attempt(op) {
+            Ok(()) => (OutcomeKind::Done, None),
+            Err((outcome, reason)) => (outcome, Some(reason)),
+        };
+        journal.append(&Record::Outcome { operation_id: op.id.clone(), phase, outcome, reason: reason.clone() })?;
+        summary.push(outcome, op.outcome(reason));
+    }
+    Ok(())
 }
 
-fn planned(op: &Operation) -> SourceState {
-    SourceState { size: op.size, modified: op.modified, is_package: op.is_package }
+fn exists(path: &Path) -> bool {
+    !matches!(fs::symlink_metadata(path), Err(e) if e.kind() == io::ErrorKind::NotFound)
 }
 
 /// Fails with the reason if `path` is gone or isn't the item `expected`
 /// describes: a different kind, size or modified date. `since` ends the
 /// reason ("since the Plan was made").
-pub(crate) fn unchanged(path: &Path, expected: &SourceState, since: &str) -> Result<(), String> {
+fn unchanged(path: &Path, expected: &SourceState, since: &str) -> Result<(), String> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Err("It no longer exists".into()),
@@ -167,7 +236,7 @@ pub(crate) fn unchanged(path: &Path, expected: &SourceState, since: &str) -> Res
 
 /// Moves `from` to `to` with a same-disk rename, creating `to`'s folders.
 /// Never replaces anything already at `to`, and never copies.
-pub(crate) fn move_without_overwriting(from: &Path, to: &Path) -> Result<(), String> {
+fn move_without_overwriting(from: &Path, to: &Path) -> Result<(), String> {
     if fs::symlink_metadata(to).is_ok() {
         return Err(format!("{} already exists", to.display()));
     }
@@ -178,3 +247,16 @@ pub(crate) fn move_without_overwriting(from: &Path, to: &Path) -> Result<(), Str
     })
 }
 
+/// Removes `folder` and the folders above it, up to and including
+/// `holding`, while they are empty. Only ever removes empty folders, so
+/// nothing in them can be lost.
+fn remove_empty_folders(folder: Option<&Path>, holding: &Path) {
+    let mut folder = folder;
+    while let Some(path) = folder.filter(|path| path.starts_with(holding)) {
+        match fs::remove_dir(path) {
+            Ok(()) => folder = path.parent(),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => folder = path.parent(),
+            Err(_) => return,
+        }
+    }
+}

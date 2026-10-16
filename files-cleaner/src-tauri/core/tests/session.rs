@@ -133,7 +133,7 @@ fn scan_plan_run_undo_restores_the_original_folder_exactly() {
     let journal_dir: PathBuf = journal.path().to_path_buf();
     let undone = undo(&summary.session_id, &journal_dir).unwrap();
 
-    assert_eq!(undone.restored.len(), 2);
+    assert_eq!(undone.done.len(), 2);
     assert!(undone.skipped.is_empty() && undone.unrecoverable.is_empty());
     assert_eq!(snapshot(dir.path()), before);
 }
@@ -151,7 +151,7 @@ fn undo_never_overwrites_a_file_now_at_the_original_location() {
     assert_eq!(fs::read_to_string(dir.path().join("a/copy.txt")).unwrap(), "something new");
     assert_eq!(undone.skipped.len(), 1);
     assert!(undone.skipped[0].reason.as_deref().unwrap().contains("already"));
-    assert_eq!(undone.restored.len(), 1, "the rest of the Session is still undone");
+    assert_eq!(undone.done.len(), 1, "the rest of the Session is still undone");
     let held = dir.path().join(HOLDING_FOLDER_NAME).join(&summary.session_id).join("a/copy.txt");
     assert_eq!(fs::read_to_string(held).unwrap(), "same contents", "the trashed copy stays put");
 }
@@ -168,7 +168,7 @@ fn undo_reports_a_trashed_copy_that_is_gone_as_unrecoverable() {
     let undone = undo(&summary.session_id, journal.path()).unwrap();
 
     assert_eq!(undone.unrecoverable.len(), 1);
-    assert_eq!(undone.restored.len(), 1);
+    assert_eq!(undone.done.len(), 1);
     assert!(dir.path().join("b/c/copy.txt").exists());
     let session = &all_sessions(journal.path())[0];
     assert_eq!(session.status, SessionStatus::PartlyUndone);
@@ -218,7 +218,7 @@ fn undoing_a_partly_undone_session_again_retries_what_was_skipped() {
 
     let again = undo(&summary.session_id, journal.path()).unwrap();
 
-    assert_eq!(again.restored.len(), 1);
+    assert_eq!(again.done.len(), 1);
     assert_eq!(snapshot(dir.path()), before);
     assert_eq!(all_sessions(journal.path())[0].status, SessionStatus::Undone);
 }
@@ -277,7 +277,7 @@ fn session_details_list_every_operation_with_its_state_size_and_reason() {
         states(journal.path(), dir.path(), &summary.session_id),
         [("a/copy.txt".to_string(), OperationState::Done), ("b/c/copy.txt".to_string(), OperationState::Skipped)]
     );
-    assert_eq!(details.operations[0].size, Some(13));
+    assert_eq!(details.operations[0].size, 13);
     assert_eq!(details.operations[0].destination, summary.done[0].destination);
     assert!(details.operations[1].reason.as_deref().unwrap().contains("no longer exists"));
 }
@@ -291,7 +291,7 @@ fn undoing_one_operation_restores_only_that_file() {
 
     let undone = undo_operations(&summary.session_id, &[id_of(&plan, "a/copy.txt")], journal.path()).unwrap();
 
-    assert_eq!(undone.restored.len(), 1);
+    assert_eq!(undone.done.len(), 1);
     assert_eq!(fs::read_to_string(dir.path().join("a/copy.txt")).unwrap(), "same contents");
     assert!(!dir.path().join("b/c/copy.txt").exists());
     assert_eq!(
@@ -312,7 +312,7 @@ fn redo_trashes_an_undone_file_again() {
 
     let redone = redo_operations(&summary.session_id, &all_ids(&plan), journal.path()).unwrap();
 
-    assert_eq!(redone.redone.len(), 2);
+    assert_eq!(redone.done.len(), 2);
     assert!(redone.skipped.is_empty());
     assert_eq!(snapshot(dir.path()), after_run, "each file is back where the Session put it");
     assert_eq!(all_sessions(journal.path())[0].status, SessionStatus::Completed);
@@ -348,7 +348,7 @@ fn redo_skips_a_file_that_changed_after_it_was_restored() {
 
     let redone = redo_operations(&summary.session_id, &all_ids(&plan), journal.path()).unwrap();
 
-    assert_eq!(redone.redone.len(), 1);
+    assert_eq!(redone.done.len(), 1);
     assert_eq!(redone.skipped.len(), 1);
     assert!(redone.skipped[0].reason.as_deref().unwrap().contains("changed"));
     assert_eq!(fs::read_to_string(dir.path().join("a/copy.txt")).unwrap(), "edited since");
@@ -362,23 +362,23 @@ fn undo_and_redo_leave_operations_in_the_wrong_state_alone() {
     let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
 
     let redone = redo_operations(&summary.session_id, &all_ids(&plan), journal.path()).unwrap();
-    assert!(redone.redone.is_empty() && redone.skipped.is_empty(), "nothing was undone yet");
+    assert!(redone.done.is_empty() && redone.skipped.is_empty(), "nothing was undone yet");
 
     undo(&summary.session_id, journal.path()).unwrap();
     let undone = undo_operations(&summary.session_id, &all_ids(&plan), journal.path()).unwrap();
-    assert!(undone.restored.is_empty() && undone.skipped.is_empty(), "everything is already undone");
+    assert!(undone.done.is_empty() && undone.skipped.is_empty(), "everything is already undone");
 }
 
 /// Writes a finished Journal for Session `id`, with one done Trash of
 /// `size` bytes, as `run` would have.
 fn fake_journal(journal: &Path, id: &str, size: u64) {
     let records = [
-        serde_json::json!({ "record": "session", "id": id, "scanRoot": "/root", "trashDestination": "holdingFolder", "startedAt": 0 }),
+        serde_json::json!({ "id": id, "scanRoot": "/root", "trashDestination": "holdingFolder", "startedAt": 0 }),
         serde_json::json!({
-            "record": "intent", "operationId": "op", "kind": "trash", "source": "/root/a", "destination": "/root/b",
+            "record": "operation", "operationId": "op", "kind": "trash", "source": "/root/a", "destination": "/root/b",
             "planned": { "size": size, "modified": 0, "isPackage": false },
         }),
-        serde_json::json!({ "record": "done", "operationId": "op" }),
+        serde_json::json!({ "record": "outcome", "operationId": "op", "phase": "run", "outcome": "done", "reason": null }),
         serde_json::json!({ "record": "finished" }),
     ];
     let lines: String = records.iter().map(|r| format!("{r}\n")).collect();
@@ -473,11 +473,95 @@ fn undone_operations_still_count_towards_the_session() {
 fn sessions_started_in_the_same_millisecond_keep_their_order() {
     let journal = TempDir::new().unwrap();
     let base = "2026-01-01_00-00-00-000Z";
-    let ids: Vec<String> = ["", "-2", "-10"].iter().map(|n| format!("{base}{n}")).collect();
+    let ids: Vec<String> = ["", "-002", "-010"].iter().map(|n| format!("{base}{n}")).collect();
     for id in &ids {
         fake_journal(journal.path(), id, 1);
     }
     fake_journal(journal.path(), "2026-01-01_00-00-00-001Z", 1);
 
     assert_eq!(page_ids(journal.path(), 0, 10), ["2026-01-01_00-00-00-001Z", &ids[2], &ids[1], &ids[0]]);
+}
+
+/// Appends `record` to Session `id`'s Journal, as a crash would leave it.
+fn append_record(journal: &Path, id: &str, record: serde_json::Value) {
+    let path = journal.join(format!("{id}.jsonl"));
+    let mut text = fs::read_to_string(&path).unwrap();
+    text.push_str(&format!("{record}\n"));
+    fs::write(path, text).unwrap();
+}
+
+#[test]
+fn an_undo_cut_short_after_the_move_counts_as_restored_not_unrecoverable() {
+    let dir = messy_folder();
+    let journal = TempDir::new().unwrap();
+    let before = snapshot(dir.path());
+    let plan = plan_for(dir.path());
+    let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
+    // Undo moved a/copy.txt back, then the app crashed before journaling it.
+    let id = id_of(&plan, "a/copy.txt");
+    let held = dir.path().join(HOLDING_FOLDER_NAME).join(&summary.session_id).join("a/copy.txt");
+    fs::rename(held, dir.path().join("a/copy.txt")).unwrap();
+    append_record(journal.path(), &summary.session_id, serde_json::json!({ "record": "intent", "operationId": id, "phase": "undo" }));
+
+    let undone = undo(&summary.session_id, journal.path()).unwrap();
+
+    assert!(undone.unrecoverable.is_empty(), "{:?}", undone.unrecoverable);
+    assert_eq!(undone.done.len(), 1, "only b/c/copy.txt was left to undo");
+    assert_eq!(snapshot(dir.path()), before);
+    assert_eq!(all_sessions(journal.path())[0].status, SessionStatus::Undone);
+}
+
+#[test]
+fn an_undo_cut_short_before_the_move_is_simply_undone_again() {
+    let dir = messy_folder();
+    let journal = TempDir::new().unwrap();
+    let before = snapshot(dir.path());
+    let plan = plan_for(dir.path());
+    let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
+    let id = id_of(&plan, "a/copy.txt");
+    append_record(journal.path(), &summary.session_id, serde_json::json!({ "record": "intent", "operationId": id, "phase": "undo" }));
+
+    let undone = undo(&summary.session_id, journal.path()).unwrap();
+
+    assert_eq!(undone.done.len(), 2);
+    assert_eq!(snapshot(dir.path()), before);
+}
+
+#[test]
+fn a_redo_cut_short_after_the_move_counts_as_done() {
+    let dir = messy_folder();
+    let journal = TempDir::new().unwrap();
+    let plan = plan_for(dir.path());
+    let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
+    undo(&summary.session_id, journal.path()).unwrap();
+    let id = id_of(&plan, "a/copy.txt");
+    let held = dir.path().join(HOLDING_FOLDER_NAME).join(&summary.session_id).join("a/copy.txt");
+    fs::create_dir_all(held.parent().unwrap()).unwrap();
+    fs::rename(dir.path().join("a/copy.txt"), &held).unwrap();
+    append_record(journal.path(), &summary.session_id, serde_json::json!({ "record": "intent", "operationId": &id, "phase": "redo" }));
+
+    let undone = undo_operations(&summary.session_id, &[id], journal.path()).unwrap();
+
+    assert_eq!(undone.done.len(), 1, "the redo was settled as done, so it can be undone");
+    assert!(dir.path().join("a/copy.txt").exists());
+}
+
+#[test]
+fn a_run_cut_short_after_the_move_can_still_be_undone() {
+    let dir = messy_folder();
+    let journal = TempDir::new().unwrap();
+    let before = snapshot(dir.path());
+    let plan = plan_for(dir.path());
+    let summary = run(&plan, &[id_of(&plan, "a/copy.txt")], journal.path()).unwrap();
+    // Rewrite the Journal as if the app crashed right after the move.
+    let path = journal.path().join(format!("{}.jsonl", summary.session_id));
+    let text = fs::read_to_string(&path).unwrap();
+    let kept: Vec<&str> = text.lines().filter(|l| !l.contains("\"outcome\"") && !l.contains("finished")).collect();
+    fs::write(&path, format!("{}\n", kept.join("\n"))).unwrap();
+    assert_eq!(all_sessions(journal.path())[0].status, SessionStatus::Crashed);
+
+    let undone = undo(&summary.session_id, journal.path()).unwrap();
+
+    assert_eq!(undone.done.len(), 1);
+    assert_eq!(snapshot(dir.path()), before);
 }

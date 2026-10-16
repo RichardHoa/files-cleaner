@@ -15,7 +15,8 @@ import { el } from "../dom.js";
 import { count, plural, relativeTime, splitPath } from "../format.js";
 import { icon } from "../icons.js";
 import { noSessions, sessionList } from "../session-row.js";
-import { undoSections } from "./summary.js";
+import { undoSections } from "../outcomes.js";
+import { showStatus } from "../status.js";
 
 const LATEST_SESSIONS = 3;
 
@@ -50,12 +51,12 @@ export function render(root, nav) {
       if (warning && !(await confirmScan(status, warning))) {
         status.replaceChildren();
       } else {
-        showMessage(status, `Scanning ${folder}…`);
+        showStatus(status, `Scanning ${folder}…`);
         nav.scanResults(await scan(folder, (progress) => showProgress(status, folder, progress)));
         return;
       }
     } catch (error) {
-      showMessage(status, describeError(error), true);
+      showStatus(status, describeError(error), true);
     }
     scanning = false;
     tiles.classList.remove("busy");
@@ -70,7 +71,7 @@ export function render(root, nav) {
     try {
       await openConfig();
     } catch (error) {
-      showMessage(status, describeError(error), true);
+      showStatus(status, describeError(error), true);
     }
   });
 
@@ -187,7 +188,7 @@ async function showSessions(node, seeAll, nav, undoResult = null) {
 
 function showProgress(node, folder, { found, folders, skipped, current }) {
   const counts = [`${plural(found, "file")} found`, `${plural(folders, "folder")} read`, `${count(skipped)} protected skipped`];
-  showMessage(node, `Scanning ${folder}…\n${counts.join(" · ")}\n${current}`);
+  showStatus(node, `Scanning ${folder}…\n${counts.join(" · ")}\n${current}`);
 }
 
 /** Shows `warning` in `node` with "Scan anyway" and "Cancel"; resolves to whether to scan. */
@@ -200,9 +201,4 @@ function confirmScan(node, warning) {
     node.classList.remove("error");
     node.replaceChildren(el("span", { className: "warning" }, `${warning}.`), el("div", { className: "actions" }, scanAnyway, cancel));
   });
-}
-
-function showMessage(node, text, isError = false) {
-  node.textContent = text;
-  node.classList.toggle("error", isError);
 }
