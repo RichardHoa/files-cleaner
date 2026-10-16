@@ -63,7 +63,7 @@ The full list of proposed Operations for one Scan Root, shown grouped by Reason,
 _Avoid_: preview, proposal
 
 **Operation**:
-One atomic file-system change: Move, Rename, Trash, or Create Folder. The tool never edits file contents and never deletes permanently.
+One atomic file-system change: Move (possibly under a new name, when a Rule renames), Trash, or Create Folder. A rename is never an Operation of its own. The tool never edits file contents and never deletes permanently.
 _Avoid_: action, step, task
 
 **Reason**:

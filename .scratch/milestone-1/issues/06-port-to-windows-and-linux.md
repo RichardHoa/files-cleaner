@@ -2,7 +2,7 @@
 
 **What to build:** Ticket 01 was built for macOS only: `core/src/protection/` has just a `macos.rs` module, so the core doesn't compile on Windows or Linux, and some names and labels still say "Finder". Make the existing scan path work on all three desktop OSes, using the OS-agnostic vocabulary in `CONTEXT.md` (System Folder, Disk Root, OS Metadata File, Package, Clash Suffix) and the per-OS lists in the spec (stories 5, 6, 10, 12, 13, and Implementation Decisions: Target OS, Letter case, Created date).
 
-**Blocked by:** 01
+**Blocked by:** 01, and the platform decision from `.scratch/content-grouping/issues/01-prototype.md`
 
 **Status:** ready-for-agent
 
@@ -18,3 +18,7 @@
 - [ ] Per-OS tests for System Folders, Disk Roots and Hidden detection, gated to their OS; shared-list tests run everywhere; `cargo test` passes on macOS, Windows and Linux (at least `cargo check --target` for the other two from a Mac)
 - [ ] `tauri.conf.json` bundle settings and icons work for Windows and Linux builds
 - [ ] Manual check on each OS: pick a folder, see the scan table and skipped count, "Show in folder" opens the file manager
+
+## Comments
+
+**Parked (2026-10-16).** Content grouping may use macOS-only frameworks (Vision OCR, `NLEmbedding`, Foundation Models) behind a swappable interface. Porting now risks doing the work twice. Pick this up once the content-grouping prototype has settled that choice and it is recorded in an ADR.

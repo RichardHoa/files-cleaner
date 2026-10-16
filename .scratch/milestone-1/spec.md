@@ -65,7 +65,7 @@ A desktop app for macOS, Windows and Linux where I pick a folder, the app scans 
 ### Plan
 
 34. As a user, I want to see the proposed Plan as a before/after tree, so that I understand how my folder will look afterwards.
-35. As a user, I want every Operation (Move, Rename, Trash, Create Folder) shown as a separate item with a tick box, so that I can approve or untick each one.
+35. As a user, I want every Operation (Move, Trash, Create Folder) shown as a separate item with a tick box, so that I can approve or untick each one. A Rule's rename is part of its Move, not a separate Operation.
 36. As a user, I want to tick or untick a whole folder in the tree, so that I can accept or reject many items at once.
 37. As a user, I want to see totals (number of Operations by type, bytes to be trashed), so that I can judge the size of the cleanup.
 38. As a user, I want Create Folder Operations added automatically when a Rule's target folder doesn't exist, so that I don't have to create folders myself.

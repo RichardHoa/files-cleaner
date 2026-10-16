@@ -4,10 +4,10 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] A small hand-written glob matcher (no glob crate) plus an extension matcher; first match wins; Rules never match folders
-- [ ] `trash` Rules produce Trash Operations; `moveTo` Rules produce Move Operations (plus Rename when `rename` is set)
+- [x] `trash` Rules produce Trash Operations; `moveTo` Rules produce Move Operations, whose destination carries the new name when `rename` is set
 - [x] Rename placeholders `{name}`, `{ext}` and `{modified}` (YYYY-MM-DD, with no date crate)
 - [x] Create Folder Operations are added for missing targets and appear in the tree; Undo removes them only if they're empty
 - [x] Name clashes, both with existing files and between items in the same Plan, get a Clash Suffix (`notes (1).pptx`), with names differing only in letter case counting as clashes on every OS, and the suffix is recalculated at run time if the destination was taken after planning; nothing is ever overwritten
@@ -30,3 +30,7 @@
 - An unticked Create Folder makes the Moves into that folder get skipped, with the Note "The folder … doesn't exist". Undo removes a created folder only if it is truly empty, so even a `.DS_Store` keeps it.
 - Redo doesn't recalculate Clash Suffixes. It is skipped if the journaled destination is taken.
 
+**Decision (2026-10-16): resolved.**
+
+- `moveTo` + `rename` stays **one** Move Operation whose destination has the new name, as built. Rename is not a separate Operation. The spec (story 35) and `CONTEXT.md` (**Operation**) were updated to match.
+- The relative `moveTo` that lands on a Protected Path or Package and silently proposes nothing moved to ticket 04, as a "blocked target" error item.
