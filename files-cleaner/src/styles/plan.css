@@ -1,15 +1,16 @@
 /* Plan: the before and after trees side by side. */
 .plan-trees {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 24px;
+  /* Side by side while each tree gets 320px, stacked below that. */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: var(--space-6);
 }
 
 .tree,
 .tree ul {
   list-style: none;
   margin: 0;
-  padding-left: 18px;
+  padding-left: var(--space-4);
 }
 
 .tree {
@@ -17,7 +18,7 @@
 }
 
 .tree li {
-  margin: 2px 0;
+  margin: var(--space-0-5) 0;
 }
 
 .tree summary {
@@ -28,7 +29,7 @@
 .tree-item {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1-5);
 }
 
 .tree-item.unticked {

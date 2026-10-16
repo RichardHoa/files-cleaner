@@ -2,23 +2,23 @@
 .scan-screen {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 48px);
+  height: calc(100vh - 2 * var(--app-pad-block));
 }
 
 .filters {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  margin: 8px 0 12px;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 var(--space-3);
 }
 
 .filters input,
 .filters select {
   font: inherit;
-  padding: 5px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
+  padding: var(--space-1-5) var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-control);
   background: var(--surface);
   color: inherit;
 }
@@ -52,7 +52,7 @@
 
 .scan-body {
   position: relative;
-  min-width: var(--scan-min-width);
+  min-width: var(--scan-min-width, 0);
 }
 
 .scan-window {
@@ -65,8 +65,8 @@
 /* Fixed height of two lines: the table works out which rows are in view from it. */
 .scan-row {
   display: grid;
-  grid-template-columns: var(--scan-columns);
-  min-width: var(--scan-min-width);
+  grid-template-columns: var(--scan-columns, 1fr);
+  min-width: var(--scan-min-width, 0);
   height: 44px;
   box-sizing: border-box;
   border-bottom: 1px solid var(--border);
@@ -74,7 +74,7 @@
 
 /* Long text wraps onto a second line, then ends in "…". */
 .scan-cell {
-  padding: 3px 8px;
+  padding: var(--space-0-5) var(--space-2);
   line-height: 18px;
   overflow: hidden;
   overflow-wrap: anywhere;
@@ -104,8 +104,8 @@
   flex: 1;
   min-width: 0;
   display: flex;
-  gap: 4px;
-  padding: 6px 8px;
+  gap: var(--space-1);
+  padding: var(--space-1-5) var(--space-2);
   border: 0;
   border-radius: 0;
   background: none;
@@ -115,12 +115,17 @@
   overflow: hidden;
 }
 
+/* Inset, so the cell next to it doesn't cover the ring. */
+.scan-head .sort:focus-visible {
+  outline-offset: -2px;
+}
+
 .scan-head .number .sort {
   justify-content: flex-end;
 }
 
 .sort-arrow {
-  font-size: 10px;
+  font-size: var(--font-2xs);
   color: var(--muted);
 }
 
@@ -137,7 +142,7 @@
 }
 
 /* Keep the last handle inside the table so it doesn't add a sideways scroll. */
-.scan-head .scan-cell:last-child .resizer {
+.resizer.last {
   right: 0;
 }
 
@@ -152,7 +157,7 @@
 }
 
 /* The table's own border already marks the last column's edge. */
-.scan-head .scan-cell:last-child .resizer::after {
+.resizer.last::after {
   left: auto;
   right: 0;
   background: none;
@@ -167,8 +172,8 @@
   background: var(--accent);
 }
 
-.scan-head .scan-cell:last-child .resizer:hover::after,
-.scan-head .scan-cell:last-child .resizer.dragging::after {
+.resizer.last:hover::after,
+.resizer.last.dragging::after {
   margin-left: 0;
 }
 
@@ -193,7 +198,12 @@
 }
 
 .scan-row .path {
-  font-size: 12px;
+  font-size: var(--font-sm);
+}
+
+/* After the file name in running text, where a gap can't reach it. */
+.package-pill {
+  margin-left: var(--space-1-5);
 }
 
 /* An off-screen path cell, without the line clamp, used to measure how much of a path fits. */
@@ -208,12 +218,12 @@
 }
 
 .scan-empty {
-  padding: 12px;
+  padding: var(--space-3);
   color: var(--muted);
 }
 
 .path-list {
-  padding-left: 20px;
+  padding-left: var(--space-5);
 }
 
 .scan-row.selected {
@@ -225,11 +235,11 @@
   position: absolute;
   z-index: 4;
   min-width: 160px;
-  padding: 4px;
+  padding: var(--space-1);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 6px 20px var(--shadow);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-menu);
 }
 
 .row-menu[hidden] {
@@ -239,9 +249,9 @@
 .row-menu button {
   display: block;
   width: 100%;
-  padding: 5px 10px;
+  padding: var(--space-1) var(--space-2-5);
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: none;
   text-align: left;
 }
@@ -254,6 +264,6 @@
 }
 
 .row-menu .status {
-  margin: 4px 8px;
+  margin: var(--space-1) var(--space-2);
   max-width: 320px;
 }

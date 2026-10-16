@@ -1,36 +1,46 @@
-body {
-  margin: 0;
+:root {
+  font-family: var(--font-sans);
+  line-height: 1.45;
+  color: var(--text);
+  background-color: var(--background);
+  -webkit-font-smoothing: antialiased;
 }
 
-#app {
-  padding: 24px 28px;
+body {
+  margin: 0;
+  /* On body, not :root, so rem stays the user's root size. */
+  font-size: var(--font-md);
+}
+
+.app {
+  padding: var(--app-pad-block) var(--app-pad-inline);
 }
 
 h1 {
-  font-size: 22px;
-  margin: 8px 0 4px;
+  font-size: var(--font-xl);
+  margin: var(--space-2) 0 var(--space-1);
 }
 
 h2 {
-  font-size: 16px;
-  margin: 24px 0 8px;
+  font-size: var(--font-lg);
+  margin: var(--space-6) 0 var(--space-2);
 }
 
 .lead {
-  margin: 4px 0 16px;
+  margin: var(--space-1) 0 var(--space-4);
 }
 
 .actions {
   display: flex;
-  gap: 8px;
-  margin: 12px 0;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
 }
 
 button {
   font: inherit;
-  padding: 6px 14px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
+  padding: var(--space-1-5) var(--space-3-5);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-control);
   background: var(--surface);
   color: inherit;
   cursor: pointer;
@@ -47,8 +57,14 @@ button:disabled {
   cursor: default;
 }
 
+/* One focus ring for everything focusable, at 3:1 or better on both page and surface. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .status {
-  margin: 8px 0;
+  margin: var(--space-2) 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -57,13 +73,13 @@ button:disabled {
   color: var(--error);
 }
 
-.status .warning {
+.warning {
   color: var(--warning);
 }
 
 .path {
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--font-sm);
   color: var(--muted);
   overflow-wrap: anywhere;
 }

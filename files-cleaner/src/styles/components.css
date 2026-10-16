@@ -5,10 +5,9 @@
 
 .reason {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--font-sm);
   overflow-wrap: anywhere;
 }
-
 
 .outcomes,
 .sessions {
@@ -18,14 +17,14 @@
 
 .outcomes li,
 .sessions li {
-  padding: 6px 0;
+  padding: var(--space-1-5) 0;
   border-bottom: 1px solid var(--border);
 }
 
 .row-actions {
   margin-left: auto;
   display: flex;
-  gap: 6px;
+  gap: var(--space-1-5);
 }
 
 .icon {
@@ -52,22 +51,23 @@
 }
 
 .kind-createFolder {
-  --kind: var(--kind-createFolder);
+  --kind: var(--kind-create-folder);
 }
 
 .icon[class*="kind-"] {
-  color: var(--kind);
+  color: var(--kind, currentColor);
 }
 
 /* A filled, coloured label: Operation kinds, Session statuses, Operation states. */
 .pill {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  margin-left: 6px;
-  padding: 1px 8px;
-  border-radius: 999px;
-  font-size: 11px;
+  gap: var(--space-1);
+  /* Keeps its own width as a grid item, so it doesn't stretch across its column. */
+  justify-self: start;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-xs);
   font-weight: 600;
   white-space: nowrap;
   background: var(--border);
@@ -80,7 +80,7 @@
 }
 
 .kind-pill {
-  background: var(--kind);
+  background: var(--kind, var(--border));
   color: var(--on-kind);
 }
 
@@ -130,21 +130,25 @@
   color: var(--on-state);
 }
 
-.lead .pill {
-  margin: 0 6px 0 0;
+/* A line that starts with a pill and runs on in text. */
+.pill-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1-5);
 }
 
 .root-path {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1-5);
 }
 
 .empty {
-  margin: 8px 0;
-  padding: 16px;
+  margin: var(--space-2) 0;
+  padding: var(--space-4);
   border: 1px dashed var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   color: var(--muted);
   text-align: center;
 }

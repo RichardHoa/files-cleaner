@@ -17,7 +17,7 @@ const COLUMNS = [
   { key: "path", label: "Path", track: "minmax(120px, 1fr)", min: 120 },
 ];
 const PATH_COLUMN = COLUMNS.findIndex((column) => column.key === "path");
-const ROW_HEIGHT = 44; // px; must match `.scan-row` in styles.css
+const ROW_HEIGHT = 44; // px; must match `.scan-row` in styles/scan-results.css
 const LINE_HEIGHT = 18; // px; must match `.scan-cell` in styles.css
 const CELL_PADDING = 16; // px of left plus right padding; must match `.scan-cell` in styles.css
 const MIN_COLUMN_WIDTH = 60; // px a dragged column can shrink to
@@ -142,7 +142,8 @@ function virtualList(sort, onSort) {
     const arrow = el("span", { className: "sort-arrow" });
     const button = el("button", { type: "button", className: "sort", title: column.label }, column.label, arrow);
     button.addEventListener("click", () => onSort(column.key));
-    const resizer = el("div", { className: "resizer", title: "Drag to resize, double-click to reset" });
+    const last = index === COLUMNS.length - 1;
+    const resizer = el("div", { className: last ? "resizer last" : "resizer", title: "Drag to resize, double-click to reset" });
     const cell = el("div", { role: "columnheader", className: `scan-cell ${column.className ?? ""}` }, button, resizer);
     makeResizable(resizer, cell, index);
     return { column, cell, arrow };
@@ -324,7 +325,7 @@ function rowNode({ entry, path }, index, selected, fitPath) {
       "div",
       { className: "scan-cell", title: entry.name },
       entry.name,
-      entry.isPackage ? el("span", { className: "pill" }, "Package") : "",
+      entry.isPackage ? el("span", { className: "pill package-pill" }, "Package") : "",
     ),
     el("div", { className: "scan-cell", title: entry.extension }, entry.extension),
     textCell(formatSize(entry.size), "number"),

@@ -1,12 +1,12 @@
 /* Session rows, on Home and History */
-.sessions li.session {
-  padding: 8px;
-  border-radius: 8px;
+.session {
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
   cursor: pointer;
 }
 
-.sessions li.session:hover,
-.sessions li.session:focus-visible {
+.session:hover,
+.session:focus-visible {
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
@@ -15,12 +15,27 @@
   /* Fixed tracks, so the columns line up from row to row. */
   grid-template-columns: 170px minmax(80px, 1fr) 120px 170px 80px 72px;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
-.session-row .pill {
-  justify-self: start;
-  margin-left: 0;
+/* Session rows (Home, History) and Operation rows (a Session) share the row grid. */
+.sessions,
+.outcomes {
+  container-type: inline-size;
+}
+
+/* Too narrow for the fixed tracks (about 770px with padding): let the row wrap instead. */
+@container (width < 780px) {
+  .session-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1-5) var(--space-3);
+  }
+
+  .session-root {
+    flex: 1 1 120px;
+    min-width: 0;
+  }
 }
 
 .session-date {
@@ -37,13 +52,13 @@
 
 .kind-counts {
   display: flex;
-  gap: 10px;
+  gap: var(--space-2-5);
 }
 
 .kind-count {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: var(--space-1);
 }
 
 .session-size {

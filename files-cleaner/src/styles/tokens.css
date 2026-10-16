@@ -1,19 +1,48 @@
 :root {
   color-scheme: light dark;
-  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-  font-size: 14px;
-  line-height: 1.45;
-  color: var(--text);
-  background-color: var(--background);
-  -webkit-font-smoothing: antialiased;
+
+  /* Type: rem, so sizes follow the user's root size (16px by default). */
+  --font-2xs: 0.625rem; /* 10px */
+  --font-xs: 0.6875rem; /* 11px */
+  --font-sm: 0.75rem; /* 12px */
+  --font-md: 0.875rem; /* 14px, body text */
+  --font-lg: 1rem; /* 16px */
+  --font-xl: 1.375rem; /* 22px */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, Menlo, monospace;
+
+  /* Spacing: --space-N is N × 4px. */
+  --space-0-5: 2px;
+  --space-1: 4px;
+  --space-1-5: 6px;
+  --space-2: 8px;
+  --space-2-5: 10px;
+  --space-3: 12px;
+  --space-3-5: 14px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+
+  /* The window's padding; the scan screen subtracts it to fill the window. */
+  --app-pad-block: var(--space-6);
+  --app-pad-inline: var(--space-7);
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
 
   /* Neutrals: body text is near-black; --muted is only for secondary details such as paths and dates. */
   --text: #111113;
-  --muted: #6e6e73;
+  --muted: #636366;
   --background: #f5f5f7;
   --surface: #ffffff;
+  /* --border is for dividers; --border-control outlines inputs and buttons, at 3:1 against the page. */
   --border: #d2d2d7;
+  --border-control: #86868b;
   --shadow: rgb(0 0 0 / 0.18);
+  --shadow-menu: 0 6px 20px var(--shadow);
   --accent: #0a66d8;
   --on-accent: #ffffff;
   --error: #c4162a;
@@ -23,11 +52,11 @@
   --kind-trash: #d92d20;
   --kind-move: #1f6fe0;
   --kind-rename: #7a4ae0;
-  --kind-createFolder: #1d8a45;
+  --kind-create-folder: #1a7f3f;
   --on-kind: #ffffff;
 
   /* One colour per Session status, with the text colour that reads on it. */
-  --status-completed: #1d8a45;
+  --status-completed: #1a7f3f;
   --on-status-completed: #ffffff;
   --status-undone: #f0a020;
   --on-status-undone: #2a1a00;
@@ -36,14 +65,15 @@
   --on-status-crashed: #ffffff;
 
   /* Operation states. */
-  --state-done: #1d8a45;
+  --state-done: #1a7f3f;
   --state-undone: #f0a020;
-  --state-skipped: #8e8e93;
+  --state-skipped: #6e6e73;
   --state-failed: #d92d20;
   --on-state: #ffffff;
   --on-state-undone: #2a1a00;
 }
 
+/* Dark fills are bright, so the text on them is dark ink rather than white. */
 @media (prefers-color-scheme: dark) {
   :root {
     --text: #f2f2f4;
@@ -51,24 +81,30 @@
     --background: #1c1c1e;
     --surface: #2c2c2e;
     --border: #3a3a3c;
+    --border-control: #7c7c80;
     --shadow: rgb(0 0 0 / 0.5);
     --accent: #3b8cf5;
+    --on-accent: #111113;
     --error: #ff6b6b;
     --warning: #ffb340;
 
     --kind-trash: #e5484d;
     --kind-move: #3b8cf5;
     --kind-rename: #9a7af0;
-    --kind-createFolder: #30a46c;
+    --kind-create-folder: #30a46c;
+    --on-kind: #111113;
 
     --status-completed: #30a46c;
+    --on-status-completed: #111113;
     --status-undone: #f5b13d;
     --status-partly-stripe: #b97f17;
     --status-crashed: #e5484d;
+    --on-status-crashed: #111113;
 
     --state-done: #30a46c;
     --state-undone: #f5b13d;
-    --state-skipped: #6e6e73;
+    --state-skipped: #8e8e93;
     --state-failed: #e5484d;
+    --on-state: #111113;
   }
 }

@@ -3,16 +3,16 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .config-badge {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 12px;
+  gap: var(--space-1-5);
+  padding: var(--space-1) var(--space-2-5);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-sm);
 }
 
 .config-badge.error {
@@ -23,8 +23,8 @@
 .tiles {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: 12px;
-  margin: 12px 0;
+  gap: var(--space-3);
+  margin: var(--space-3) 0;
 }
 
 .tiles.busy .tile {
@@ -37,11 +37,11 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
+  gap: var(--space-0-5);
   min-width: 0;
-  padding: 14px;
+  padding: var(--space-3-5);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--surface);
   color: var(--text);
   text-align: left;
@@ -56,13 +56,13 @@
 .tile-icon {
   width: 24px;
   height: 24px;
-  margin-bottom: 6px;
+  margin-bottom: var(--space-1-5);
   color: var(--accent);
 }
 
 .tile-name {
   max-width: 100%;
-  font-size: 16px;
+  font-size: var(--font-lg);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -71,16 +71,17 @@
 
 .tile-detail {
   max-width: 100%;
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* Muted rather than faded: opacity would drop "Folder not found" and the remove button below contrast. */
 .tile.missing {
   cursor: default;
-  opacity: 0.5;
+  color: var(--muted);
 }
 
 .tile.missing:hover {
@@ -98,20 +99,23 @@
 
 .tile-remove {
   position: absolute;
-  top: 6px;
-  right: 6px;
+  top: var(--space-1-5);
+  right: var(--space-1-5);
   display: flex;
-  padding: 3px;
+  padding: var(--space-1);
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: none;
   color: var(--muted);
-  visibility: hidden;
+  /* Transparent, not hidden, so it stays in the tab order. */
+  opacity: 0;
 }
 
+/* A missing tile can't be focused or scanned, so its only action is always shown. */
 .tile:hover .tile-remove,
-.tile:focus-within .tile-remove {
-  visibility: visible;
+.tile:focus-within .tile-remove,
+.tile.missing .tile-remove {
+  opacity: 1;
 }
 
 .tile-remove:hover {

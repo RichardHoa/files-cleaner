@@ -94,7 +94,7 @@ async function show(node, sessionId, message = null) {
     el("p", { className: "path" }, info.scanRoot),
     el(
       "p",
-      { className: "lead" },
+      { className: "lead pill-line" },
       statusPill(info.status),
       [`${plural(info.done, "Operation")} done`, `${info.restored} undone`].join(" · "),
     ),
