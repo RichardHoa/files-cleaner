@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::protection::Protection;
+use crate::rules::PLACEHOLDERS;
 
 /// The config written on first launch, as a working starting point.
 pub const EXAMPLE_CONFIG: &str = r#"{
@@ -199,6 +200,11 @@ fn validate_rule(
                 },
                 None => RuleTarget::RelativeToScanRoot(PathBuf::from(written)),
             };
+            if let Some(template) = &rename {
+                if let Some(problem) = rename_problem(template) {
+                    return fail(template, problem);
+                }
+            }
             RuleOperation::MoveTo { folder, rename }
         }
         _ => {
@@ -215,6 +221,26 @@ fn validate_rule(
         .map(|e| e.trim_start_matches('.').to_lowercase())
         .collect();
     Ok(Rule { name, extensions, name_glob: raw.matcher.name_glob, operation })
+}
+
+/// What is wrong with a rename template, if anything: it must give a
+/// non-empty name, with no folders, using only the known placeholders.
+fn rename_problem(template: &str) -> Option<String> {
+    if template.trim().is_empty() {
+        return Some("rename is empty".into());
+    }
+    if let Some(separator) = template.chars().find(|c| matches!(c, '/' | '\\')) {
+        return Some(format!("rename can't contain {separator}: it gives a name, not a folder"));
+    }
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        let placeholder = rest[open..].find('}').map_or(&rest[open..], |close| &rest[open..=open + close]);
+        if !PLACEHOLDERS.contains(&placeholder) {
+            return Some(format!("rename has {placeholder}, but only {} can be used", PLACEHOLDERS.join(", ")));
+        }
+        rest = &rest[open + placeholder.len()..];
+    }
+    None
 }
 
 /// The absolute path `written` names, or `None` if it is relative.

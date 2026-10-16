@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PAGE_SIZE, paging, selectedFile, visibleFiles } from "../src/plan-view.js";
-import { groupByState, paneSentence, sessionHeading } from "../src/session-view.js";
+import { groupByState, holdingName, paneSentence, sessionHeading } from "../src/session-view.js";
 
 const HOLDING = "Files Cleaner Trash";
 
@@ -91,4 +91,24 @@ test("when search hides the selected file, the first file still shown is selecte
   const shown = visibleFiles(ops, { query: "zoom", sort: "name" });
   assert.equal(selectedFile(shown, "trash:other.pdf"), shown[0]);
   assert.equal(selectedFile(shown, "trash:Zoom/notes.txt").id, "trash:Zoom/notes.txt");
+});
+
+/** A Session's Operation of `kind` for `path`, which went to the absolute `destination`. */
+function ruleOp(kind, path, destination, state = "done") {
+  const relativePath = path.split("/");
+  return { id: `${kind}:${path}`, kind, relativePath, relativeDestination: relativePath, destination, size: 0, state, note: null };
+}
+
+test("a Session that moved files into folders doesn't say they all went to the Holding Folder", () => {
+  const ops = [ruleOp("createFolder", "Study", "/r/Study"), ruleOp("move", "a.pptx", "/r/Study/a.pptx"), op("b.dmg")];
+  assert.equal(sessionHeading(ops, "completed"), "2 files moved, 1 folder created");
+  assert.equal(holdingName(ops), HOLDING, "named from a trashed file, not a created folder");
+  assert.equal(sessionHeading([ruleOp("move", "a.pptx", "/r/Study/a.pptx")], "completed"), "1 file moved");
+});
+
+test("the pane says where a file a Rule moved is, and what happened to a created folder", () => {
+  assert.equal(paneSentence(ruleOp("move", "a.pptx", "/Users/me/Study/a.pptx"), "Downloads", "/"), "In /Users/me/Study.");
+  assert.equal(paneSentence(ruleOp("move", "a.pptx", "C:\\Study\\a.pptx"), "Downloads", "\\"), "In C:\\Study.");
+  assert.equal(paneSentence(ruleOp("createFolder", "Study", "/r/Study"), "Downloads"), "Created by this Session.");
+  assert.equal(paneSentence(ruleOp("createFolder", "Study", "/r/Study", "undone"), "Downloads"), "Removed again.");
 });

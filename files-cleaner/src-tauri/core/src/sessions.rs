@@ -1,14 +1,14 @@
 //! Past Sessions as their Journals tell them.
 
 use std::collections::{BTreeMap, HashSet};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
 use crate::config::TrashDestination;
 use crate::executor::Outcome;
 use crate::journal::{self, OutcomeKind, Phase, Record, SessionError, SessionHeader};
-use crate::planner::{OperationKind, SourceState};
+use crate::planner::{names_below, OperationKind, SourceState};
 
 /// One past Session, for the Session list.
 #[derive(Debug, Clone, Serialize)]
@@ -309,16 +309,4 @@ pub fn session_details(session_id: &str, journal_dir: &Path) -> Result<SessionDe
         })
         .collect();
     Ok(SessionDetails { info: session.info(), operations })
-}
-
-/// The names from `root` down to `path`, its own name last. Every path a
-/// Session journals is inside its Scan Root; one that somehow isn't is
-/// given in full.
-fn names_below(root: &Path, path: &Path) -> Vec<String> {
-    let below = path.strip_prefix(root).unwrap_or(path);
-    below
-        .components()
-        .filter(|c| matches!(c, Component::Normal(_)))
-        .map(|c| c.as_os_str().to_string_lossy().into_owned())
-        .collect()
 }

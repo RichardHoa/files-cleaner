@@ -22,7 +22,9 @@ export function scan(scanRoot, onProgress) {
 
 /**
  * Plans the latest scan with the config as it is now: `{ root, trashDestination, operations }`, each
- * Operation `{ id, kind, source, relativePath, destination, keeper, size, modified, isPackage, reason }`.
+ * Operation `{ id, kind, source, relativePath, destination, destinationPath, size, modified, isPackage, reason }`,
+ * `kind` being "trash", "move" or "createFolder" and `reason` either `{ type: "duplicate", keeper }` or
+ * `{ type: "rule", rule }`.
  */
 export const buildPlan = () => invoke("build_plan");
 

@@ -5,7 +5,7 @@ use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
 
 use common::{config, empty_config, scan_root, write};
-use files_cleaner_core::{build_plan, scan, OperationKind, Plan};
+use files_cleaner_core::{build_plan, scan, OperationKind, Plan, Reason};
 
 /// Sets `path`'s modified date to `secs` after the epoch.
 fn set_modified(path: &Path, secs: u64) {
@@ -176,14 +176,17 @@ fn each_trashed_copy_names_where_it_goes_and_its_keeper() {
     set_modified(&newer, 2_000);
 
     let plan = plan_for(dir.path());
-    let summary: Vec<(String, String, Option<String>)> = plan
+    let summary: Vec<(String, String, String)> = plan
         .operations
         .iter()
-        .map(|op| (op.relative_path.join("/"), op.destination.join("/"), op.keeper.as_ref().map(|k| k.join("/"))))
+        .map(|op| {
+            let Reason::Duplicate { keeper } = &op.reason else { panic!("{:?} isn't a duplicate", op.reason) };
+            (op.relative_path.join("/"), op.destination.join("/"), keeper.join("/"))
+        })
         .collect();
 
     let trashed = |path: &str, keeper: &str| {
-        (path.to_string(), format!("Files Cleaner Trash/This Session/{path}"), Some(keeper.to_string()))
+        (path.to_string(), format!("Files Cleaner Trash/This Session/{path}"), keeper.to_string())
     };
     assert_eq!(
         summary,

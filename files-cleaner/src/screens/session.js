@@ -123,7 +123,9 @@ export function render(root, nav, sessionId, from, message) {
     function cardText({ group: name, operations: ops }) {
       if (name === "moved") {
         // The folder and its note are one item, so the note wraps with the folder's name.
-        const where = el("span", {}, el("strong", {}, holdingName(ops)), muted(`, a folder inside ${rootName}`));
+        const where = ops.every((op) => op.kind === "trash")
+          ? el("span", {}, el("strong", {}, holdingName(ops)), muted(`, a folder inside ${rootName}`))
+          : "where the Session put them";
         return [line(el("strong", {}, GROUP_COUNTS.moved(ops.length)), muted(" · "), sizeOf(ops), muted(" → "), where)];
       }
       if (name === "putBack") {
@@ -334,7 +336,7 @@ export function render(root, nav, sessionId, from, message) {
       pane.replaceChildren(
         el("h3", { className: "plan-pane-name" }, fileName(op)),
         el("p", { className: "muted" }, formatSize(op.size)),
-        el("p", {}, paneSentence(op, rootName)),
+        el("p", {}, paneSentence(op, rootName, pathSeparator)),
         buttons.length ? el("div", { className: "actions" }, ...buttons) : "",
       );
     }

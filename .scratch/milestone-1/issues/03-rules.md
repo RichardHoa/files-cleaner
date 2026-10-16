@@ -6,11 +6,27 @@
 
 **Status:** ready-for-agent
 
-- [ ] A small hand-written glob matcher (no glob crate) plus an extension matcher; first match wins; Rules never match folders
+- [x] A small hand-written glob matcher (no glob crate) plus an extension matcher; first match wins; Rules never match folders
 - [ ] `trash` Rules produce Trash Operations; `moveTo` Rules produce Move Operations (plus Rename when `rename` is set)
-- [ ] Rename placeholders `{name}`, `{ext}` and `{modified}` (YYYY-MM-DD, with no date crate)
-- [ ] Create Folder Operations are added for missing targets and appear in the tree; Undo removes them only if they're empty
-- [ ] Name clashes, both with existing files and between items in the same Plan, get a Clash Suffix (`notes (1).pptx`), with names differing only in letter case counting as clashes on every OS, and the suffix is recalculated at run time if the destination was taken after planning; nothing is ever overwritten
-- [ ] Duplicate Handling `trash` / `followRules` / `leave` behaves as described in the spec, with `trash` as the default
-- [ ] Undo restores moved and renamed files to their original names and locations, and skips instead of overwriting when the original location is now taken
-- [ ] Tests cover precedence, every Duplicate Handling mode, rename output, and relative, `~` and absolute targets
+- [x] Rename placeholders `{name}`, `{ext}` and `{modified}` (YYYY-MM-DD, with no date crate)
+- [x] Create Folder Operations are added for missing targets and appear in the tree; Undo removes them only if they're empty
+- [x] Name clashes, both with existing files and between items in the same Plan, get a Clash Suffix (`notes (1).pptx`), with names differing only in letter case counting as clashes on every OS, and the suffix is recalculated at run time if the destination was taken after planning; nothing is ever overwritten
+- [x] Duplicate Handling `trash` / `followRules` / `leave` behaves as described in the spec, with `trash` as the default
+- [x] Undo restores moved and renamed files to their original names and locations, and skips instead of overwriting when the original location is now taken
+- [x] Tests cover precedence, every Duplicate Handling mode, rename output, and relative, `~` and absolute targets
+
+## Comments
+
+**Implementation (2026-10-16), uncommitted.** Open decision: the `moveTo` + `rename` checkbox is left unticked.
+
+- `moveTo` with `rename` produces **one** Move Operation whose destination has the new name. There is no separate Rename Operation, so a rename can't be ticked apart from its move. That contradicts the "(plus Rename …)" wording above, story 35 and CONTEXT.md. Decide whether to split them, or update the spec and glossary.
+- A **relative** `moveTo` that lands on a Protected Path or Package below the Scan Root (e.g. `Files Cleaner Trash/x`, `proj/node_modules`) makes that Rule propose nothing, and the user is not told. Absolute and `~` targets are still rejected at config load. This may belong with ticket 04's non-tickable error items.
+- Other readings:
+  - A file already in its Rule's folder is left alone, so a rename template isn't applied again on every Plan.
+  - `{name}` is the name without its extension. The original extension is always kept, so `{name}.{ext}` gives `a.pdf.pdf`.
+  - `{modified}` is the UTC date.
+  - The glob supports only `*` and `?`, and ignores letter case.
+  - Config rejects rename templates that are empty, contain `/` or `\`, or use an unknown placeholder.
+- An unticked Create Folder makes the Moves into that folder get skipped, with the Note "The folder … doesn't exist". Undo removes a created folder only if it is truly empty, so even a `.DS_Store` keeps it.
+- Redo doesn't recalculate Clash Suffixes. It is skipped if the journaled destination is taken.
+

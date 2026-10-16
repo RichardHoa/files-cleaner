@@ -176,3 +176,21 @@ fn a_rule_error_points_at_that_rule_even_when_its_text_appears_earlier() {
     let err = load_config(&fixed, home.path()).unwrap_err();
     assert_eq!(err.line, Some(6), "{}", err.message);
 }
+
+#[test]
+fn a_rename_must_be_a_plain_name_using_known_placeholders() {
+    for (rename, problem) in [
+        ("{date} {name}", "{date}"),
+        ("sub/{name}", "/"),
+        ("sub\\\\{name}", "\\"),
+        ("", "empty"),
+        ("  ", "empty"),
+    ] {
+        let text = format!(
+            "{{ \"rules\": [\n  {{ \"name\": \"x\", \"match\": {{ \"nameGlob\": \"*\" }},\n    \"then\": {{ \"moveTo\": \"Old\", \"rename\": \"{rename}\" }} }}\n] }}"
+        );
+        let err = error(&text);
+        assert!(err.message.contains(problem), "{rename:?}: {}", err.message);
+        assert_eq!(err.line, Some(3), "{rename:?}");
+    }
+}

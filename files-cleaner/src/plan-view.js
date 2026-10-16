@@ -1,20 +1,47 @@
 // What the Plan screen shows: the Operations grouped by Reason, and one group's files searched,
-// sorted, filtered and paged. Operations are the Plan's, with `relativePath` and, for a
-// duplicate, `keeper` as names from the Scan Root down; the Session screen lists its own
-// Operations, which have `relativePath` too, with the same functions.
+// sorted, filtered and paged. Operations are the Plan's, with `relativePath` and `destination` as
+// names from the Scan Root down and `reason` either `{ type: "duplicate", keeper }` or
+// `{ type: "rule", rule }`; the Session screen lists its own Operations, which have `relativePath`
+// too, with the same functions.
 
-/** Which Reason an Operation is in. Rules are not planned yet; they would get their own group. */
-function reasonOf(op) {
-  return op.keeper ? "duplicates" : null;
+import { splitPath } from "./format.js";
+
+/**
+ * `[{ reason, operations }]`, one per Reason that has any Operations: the duplicates first
+ * (`reason: "duplicates"`), then one per Rule (`reason: "rule"`, with its name as `rule`) in the
+ * order the Plan first names it.
+ */
+export function groupByReason(operations) {
+  const duplicates = { reason: "duplicates", operations: [] };
+  const rules = new Map();
+  for (const op of operations) {
+    if (op.reason.type === "duplicate") duplicates.operations.push(op);
+    else {
+      if (!rules.has(op.reason.rule)) rules.set(op.reason.rule, { reason: "rule", rule: op.reason.rule, operations: [] });
+      rules.get(op.reason.rule).operations.push(op);
+    }
+  }
+  return [duplicates, ...rules.values()].filter((group) => group.operations.length > 0);
 }
 
-const REASONS = ["duplicates"];
+/**
+ * The folder the Operation puts its item in, for the user: `{ folder, insideRoot }`. Inside the
+ * Scan Root `root` it is the names from there down (just the Holding Folder for Trash), `/`-separated;
+ * elsewhere it is the full path. A folder to create is its own folder.
+ */
+export function destinationFolder(op, root, separator) {
+  if (op.kind === "trash") return { folder: op.destination[0], insideRoot: true };
+  const names = op.kind === "createFolder" ? op.destination : op.destination.slice(0, -1);
+  const full = op.kind === "createFolder" ? op.destinationPath : splitPath(op.destinationPath, separator).parent;
+  const insideRoot = op.destinationPath.startsWith(root + separator);
+  return insideRoot ? { folder: names.join("/"), insideRoot } : { folder: full, insideRoot };
+}
 
-/** `[{ reason, operations }]`, one per Reason that has any Operations, in a fixed order. */
-export function groupByReason(operations) {
-  return REASONS.map((reason) => ({ reason, operations: operations.filter((op) => reasonOf(op) === reason) })).filter(
-    (group) => group.operations.length > 0,
-  );
+/** The name a Move gives its file, if that isn't the name it has now; otherwise null. */
+export function newName(op) {
+  if (op.kind !== "move") return null;
+  const name = op.destination.at(-1);
+  return name === op.relativePath.at(-1) ? null : name;
 }
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
@@ -61,11 +88,14 @@ export function selectedFile(shown, id) {
   return shown.find((op) => op.id === id) ?? shown[0] ?? null;
 }
 
-/** How many copies a duplicate's Duplicate Group has, the Keeper included, given all of `operations`. */
+/**
+ * How many copies a duplicate's Duplicate Group has, the Keeper included, given all of
+ * `operations`; undefined for an Operation that isn't a duplicate's.
+ */
 export function copyCounts(operations) {
-  const key = (op) => op.keeper.join("/");
+  const key = (op) => (op.reason.type === "duplicate" ? op.reason.keeper.join("/") : null);
   const counts = new Map();
-  for (const op of operations) if (op.keeper) counts.set(key(op), (counts.get(key(op)) ?? 1) + 1);
+  for (const op of operations) if (key(op)) counts.set(key(op), (counts.get(key(op)) ?? 1) + 1);
   return (op) => counts.get(key(op));
 }
 

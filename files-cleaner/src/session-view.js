@@ -3,7 +3,7 @@
 // `relativePath` and `relativeDestination` as names from the Scan Root down. Searching, sorting
 // and paging a group's files are the Plan view's functions.
 
-import { count, plural } from "./format.js";
+import { count, plural, splitPath } from "./format.js";
 import { folderLabel } from "./plan-view.js";
 
 /** Which group each Operation state is in. */
@@ -25,9 +25,9 @@ export function groupByState(operations) {
   );
 }
 
-/** What the Holding Folder is called, from where the Session put its files. */
+/** What the Holding Folder is called, from where the Session put the files it trashed. */
 export function holdingName(operations) {
-  return operations[0]?.relativeDestination[0] ?? "Files Cleaner Trash";
+  return operations.find((op) => op.kind === "trash")?.relativeDestination[0] ?? "Files Cleaner Trash";
 }
 
 /**
@@ -45,8 +45,13 @@ export function sessionHeading(operations, status) {
       return `${count(putBack)} of ${files(carriedOut)} put back`;
     case "crashed":
       return `Stopped after ${count(carriedOut)} of ${files(operations.length)}`;
-    default:
-      return `${files(carriedOut)} moved to ${holdingName(operations)}`;
+    default: {
+      const done = operations.filter((op) => ["done", "undone", "unrecoverable"].includes(op.state));
+      if (done.every((op) => op.kind === "trash")) return `${files(carriedOut)} moved to ${holdingName(operations)}`;
+      const folders = done.filter((op) => op.kind === "createFolder").length;
+      const moved = `${files(carriedOut - folders)} moved`;
+      return folders ? `${moved}, ${plural(folders, "folder")} created` : moved;
+    }
   }
 }
 
@@ -60,17 +65,22 @@ const ATTENTION_LEADS = {
 
 /**
  * What the pane says about `op`: where it is now, or, under Needs attention, what happened to it.
- * Its `note` says why the last pass over it didn't happen. `rootName` is the Scan Root's name.
+ * Its `note` says why the last pass over it didn't happen. `rootName` is the Scan Root's name, and
+ * `separator` the OS's path separator.
  */
-export function paneSentence(op, rootName) {
+export function paneSentence(op, rootName, separator) {
   const note = op.note;
   switch (GROUP_OF[op.state]) {
     case "moved": {
-      const where = `In ${op.relativeDestination[0]}, inside ${rootName}.`;
+      const where = {
+        trash: () => `In ${op.relativeDestination[0]}, inside ${rootName}.`,
+        move: () => `In ${splitPath(op.destination, separator).parent}.`,
+        createFolder: () => "Created by this Session.",
+      }[op.kind]();
       return note ? `${where} Not put back: ${note}` : where;
     }
     case "putBack": {
-      const where = `Back in ${folderLabel(op, rootName)}.`;
+      const where = op.kind === "createFolder" ? "Removed again." : `Back in ${folderLabel(op, rootName)}.`;
       return note ? `${where} Not moved again: ${note}` : where;
     }
     default: {

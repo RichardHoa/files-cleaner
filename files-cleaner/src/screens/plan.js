@@ -8,18 +8,46 @@ import { formatSize, plural, splitPath } from "../format.js";
 import { kindIcon } from "../kinds.js";
 import { describeSummary } from "../outcomes.js";
 import { tickState, toggleAll, totals } from "../plan-selection.js";
-import { PAGE_SIZE, copyCounts, fileName, folderLabel, groupByReason, paging, selectedFile, visibleFiles } from "../plan-view.js";
+import {
+  PAGE_SIZE,
+  copyCounts,
+  destinationFolder,
+  fileName,
+  folderLabel,
+  groupByReason,
+  newName,
+  paging,
+  selectedFile,
+  visibleFiles,
+} from "../plan-view.js";
 import { busy } from "../status.js";
 
-/** What each Reason's card and detail pane say. `destination` is the folder its files go to. */
-const REASON_WORDS = {
-  duplicates: {
-    noun: "duplicate",
-    explain: "Exact copies. The newest copy of each file stays where it is.",
-    why: (destination) => `An exact copy of a newer file, so this one goes to ${destination}.`,
-    tickLabel: "Move this copy",
-  },
-};
+/**
+ * What a Reason group's card and detail pane say. `why` and `tickLabel` take one of its Operations
+ * and the folder it goes to.
+ */
+function reasonWords(group) {
+  if (group.reason === "duplicates") {
+    return {
+      noun: "duplicate",
+      explain: "Exact copies. The newest copy of each file stays where it is.",
+      why: (op, folder) => `An exact copy of a newer file, so this one goes to ${folder}.`,
+      tickLabel: () => "Move this copy",
+    };
+  }
+  const rule = `Your Rule “${group.rule}”`;
+  return {
+    noun: "item",
+    explain: `${rule} matched these files.`,
+    why: (op, folder) =>
+      ({
+        trash: () => `${rule} sends this file to ${folder}.`,
+        move: () => `${rule} moves this file to ${folder}${newName(op) ? `, renamed “${newName(op)}”` : ""}.`,
+        createFolder: () => `${rule} moves files into ${folder}, which doesn't exist yet, so it is created.`,
+      })[op.kind](),
+    tickLabel: (op) => (op.kind === "createFolder" ? "Create this folder" : "Move this file"),
+  };
+}
 
 const SORT_NAMES = { size: "biggest first", name: "by name", folder: "by folder" };
 
@@ -34,7 +62,7 @@ export function render(root, nav, result, plan) {
     root.append(
       el("h1", {}, "Plan"),
       el("p", { className: "path" }, plan.root),
-      el("p", { className: "lead" }, "Nothing to do: no duplicates were found."),
+      el("p", { className: "lead" }, "Nothing to do: no duplicates were found, and no Rules matched."),
       el("div", { className: "actions" }, cancel),
     );
     return;
@@ -64,9 +92,11 @@ export function render(root, nav, result, plan) {
   // Cards: where it is going, one per Reason; they also pick the listed group.
   const cards = groups.map((group) => card(group));
   function card(group) {
-    const words = REASON_WORDS[group.reason];
+    const words = reasonWords(group);
     const ids = group.operations.map((op) => op.id);
-    const destination = group.operations[0].destination[0];
+    // A Rule's folders to create come first; the card shows where its files go.
+    const first = group.operations.find((op) => op.kind !== "createFolder") ?? group.operations[0];
+    const { folder, insideRoot } = destinationFolder(first, plan.root, pathSeparator);
     const what = el("strong", {});
     const size = el("span", {});
     const pick = el(
@@ -75,13 +105,13 @@ export function render(root, nav, result, plan) {
       el(
         "span",
         { className: "plan-card-line" },
-        kindIcon(group.operations[0].kind),
+        kindIcon(first.kind),
         what,
         el("span", { className: "muted" }, " · "),
         size,
         el("span", { className: "muted" }, " → "),
         // One item, so the note wraps with the folder's name rather than on its own.
-        el("span", {}, el("strong", {}, destination), el("span", { className: "muted" }, `, a folder inside ${rootName}`)),
+        el("span", {}, el("strong", {}, folder), insideRoot ? el("span", { className: "muted" }, `, a folder inside ${rootName}`) : ""),
       ),
       el("span", { className: "plan-card-explain" }, words.explain),
     );
@@ -189,7 +219,8 @@ export function render(root, nav, result, plan) {
     row.addEventListener("contextmenu", (event) => {
       event.preventDefault();
       select(op);
-      menu.open(op.keeper ? [op.source, [plan.root, ...op.keeper].join(pathSeparator)] : [op.source], row, event);
+      const keeper = op.reason.type === "duplicate" ? [[plan.root, ...op.reason.keeper].join(pathSeparator)] : [];
+      menu.open([op.source, ...keeper], row, event);
     });
     return { op, row, box };
   }
@@ -209,7 +240,7 @@ export function render(root, nav, result, plan) {
   });
 
   function drawList() {
-    const words = REASON_WORDS[view.group.reason];
+    const words = reasonWords(view.group);
     listHeading.textContent = `${plural(view.group.operations.length, words.noun)}, ${SORT_NAMES[view.sort]}`;
     const files = visibleFiles(view.group.operations, view, ticked);
     const { shown } = paging(files.length, view.limit);
@@ -254,16 +285,18 @@ export function render(root, nav, result, plan) {
       return;
     }
     paneFile = op;
-    const words = REASON_WORDS[view.group.reason];
+    const words = reasonWords(view.group);
     const box = el("input", { type: "checkbox", checked: ticked.has(op.id) });
     box.addEventListener("change", () => setTicked(withTick(op.id, box.checked)));
     paneBox = box;
     pane.replaceChildren(
       el("h3", { className: "plan-pane-name" }, fileName(op)),
       el("p", { className: "muted" }, formatSize(op.size)),
-      el("p", {}, words.why(op.destination[0])),
-      op.keeper ? el("p", { className: "plan-original" }, "Original: ", el("span", { className: "path" }, [rootName, ...op.keeper].join("/"))) : "",
-      el("label", { className: "plan-include" }, box, words.tickLabel),
+      el("p", {}, words.why(op, destinationFolder(op, plan.root, pathSeparator).folder)),
+      op.reason.type === "duplicate"
+        ? el("p", { className: "plan-original" }, "Original: ", el("span", { className: "path" }, [rootName, ...op.reason.keeper].join("/")))
+        : "",
+      el("label", { className: "plan-include" }, box, words.tickLabel(op)),
     );
   }
 
