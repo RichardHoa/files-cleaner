@@ -1,0 +1,32 @@
+/* Session: laid out like the Plan (header, cards, list beside the selected file) and built from
+   its classes. What is here is only what a Session adds. */
+.session-meta {
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+  font-size: var(--font-sm);
+}
+
+/* No Include all under the card's line, so the button fills it all. */
+.session-card .plan-card-pick {
+  padding-bottom: var(--space-3);
+  border-radius: var(--radius-md);
+}
+
+/* The one place a state's colour shows. */
+.session-attention {
+  color: var(--warning);
+}
+
+.plan-include[hidden],
+.session-bulk[hidden] {
+  display: none;
+}
+
+/* Needs attention has no tick boxes. */
+.session-files.no-ticks .plan-file {
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr) 72px;
+}
+
+.session-bulk {
+  margin: var(--space-2) 0;
+}

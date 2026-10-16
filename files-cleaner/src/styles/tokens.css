@@ -53,7 +53,6 @@
   --kind-move: #1f6fe0;
   --kind-rename: #7a4ae0;
   --kind-create-folder: #1a7f3f;
-  --on-kind: #ffffff;
 
   /* One colour per Session status, with the text colour that reads on it. */
   --status-completed: #1a7f3f;
@@ -63,14 +62,6 @@
   --status-partly-stripe: #f7c766;
   --status-crashed: #d92d20;
   --on-status-crashed: #ffffff;
-
-  /* Operation states. */
-  --state-done: #1a7f3f;
-  --state-undone: #f0a020;
-  --state-skipped: #6e6e73;
-  --state-failed: #d92d20;
-  --on-state: #ffffff;
-  --on-state-undone: #2a1a00;
 }
 
 /* Dark fills are bright, so the text on them is dark ink rather than white. */
@@ -92,7 +83,6 @@
     --kind-move: #3b8cf5;
     --kind-rename: #9a7af0;
     --kind-create-folder: #30a46c;
-    --on-kind: #111113;
 
     --status-completed: #30a46c;
     --on-status-completed: #111113;
@@ -100,11 +90,5 @@
     --status-partly-stripe: #b97f17;
     --status-crashed: #e5484d;
     --on-status-crashed: #111113;
-
-    --state-done: #30a46c;
-    --state-undone: #f5b13d;
-    --state-skipped: #8e8e93;
-    --state-failed: #e5484d;
-    --on-state: #111113;
   }
 }

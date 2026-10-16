@@ -86,7 +86,7 @@ fn run_trashes_only_approved_operations_into_the_holding_folder() {
 }
 
 #[test]
-fn a_source_that_changed_after_planning_is_skipped_with_a_reason() {
+fn a_source_that_changed_after_planning_is_skipped_with_a_note() {
     let dir = messy_folder();
     let journal = TempDir::new().unwrap();
     let plan = plan_for(dir.path());
@@ -97,9 +97,9 @@ fn a_source_that_changed_after_planning_is_skipped_with_a_reason() {
 
     assert!(summary.done.is_empty());
     assert_eq!(summary.skipped.len(), 2);
-    let reasons: Vec<&str> = summary.skipped.iter().map(|o| o.reason.as_deref().unwrap()).collect();
-    assert!(reasons.iter().any(|r| r.contains("modified")), "{reasons:?}");
-    assert!(reasons.iter().any(|r| r.contains("no longer exists")), "{reasons:?}");
+    let notes: Vec<&str> = summary.skipped.iter().map(|o| o.note.as_deref().unwrap()).collect();
+    assert!(notes.iter().any(|n| n.contains("modified")), "{notes:?}");
+    assert!(notes.iter().any(|n| n.contains("no longer exists")), "{notes:?}");
     assert!(dir.path().join("a/copy.txt").exists());
 }
 
@@ -114,7 +114,7 @@ fn a_source_whose_size_changed_is_skipped() {
 
     let summary = run(&plan, &[id_of(&plan, "a/copy.txt")], journal.path()).unwrap();
 
-    assert!(summary.skipped[0].reason.as_deref().unwrap().contains("size"));
+    assert!(summary.skipped[0].note.as_deref().unwrap().contains("size"));
     assert!(path.exists());
 }
 
@@ -150,7 +150,7 @@ fn undo_never_overwrites_a_file_now_at_the_original_location() {
 
     assert_eq!(fs::read_to_string(dir.path().join("a/copy.txt")).unwrap(), "something new");
     assert_eq!(undone.skipped.len(), 1);
-    assert!(undone.skipped[0].reason.as_deref().unwrap().contains("already"));
+    assert!(undone.skipped[0].note.as_deref().unwrap().contains("already"));
     assert_eq!(undone.done.len(), 1, "the rest of the Session is still undone");
     let held = dir.path().join(HOLDING_FOLDER_NAME).join(&summary.session_id).join("a/copy.txt");
     assert_eq!(fs::read_to_string(held).unwrap(), "same contents", "the trashed copy stays put");
@@ -263,7 +263,7 @@ fn states(journal: &Path, root: &Path, id: &str) -> Vec<(String, OperationState)
 }
 
 #[test]
-fn session_details_list_every_operation_with_its_state_size_and_reason() {
+fn session_details_list_every_operation_with_its_state_size_and_note() {
     let dir = messy_folder();
     let journal = TempDir::new().unwrap();
     let plan = plan_for(dir.path());
@@ -279,7 +279,58 @@ fn session_details_list_every_operation_with_its_state_size_and_reason() {
     );
     assert_eq!(details.operations[0].size, 13);
     assert_eq!(details.operations[0].destination, summary.done[0].destination);
-    assert!(details.operations[1].reason.as_deref().unwrap().contains("no longer exists"));
+    assert!(details.operations[1].note.as_deref().unwrap().contains("no longer exists"));
+}
+
+fn names(path: &str) -> Vec<String> {
+    path.split('/').map(String::from).collect()
+}
+
+#[test]
+fn session_details_give_each_operation_its_paths_from_the_scan_root() {
+    let dir = scan_root();
+    set_modified(&write(dir.path(), "keep/top.txt", "same contents"), 3_000);
+    set_modified(&write(dir.path(), "top.txt", "same contents"), 2_000);
+    set_modified(&write(dir.path(), "a/b/copy.txt", "same contents"), 1_000);
+    let journal = TempDir::new().unwrap();
+    let plan = plan_for(dir.path());
+    let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
+
+    let details = session_details(&summary.session_id, journal.path()).unwrap();
+
+    let paths: Vec<(Vec<String>, Vec<String>)> =
+        details.operations.iter().map(|op| (op.relative_path.clone(), op.relative_destination.clone())).collect();
+    let held = |path: &str| names(&format!("{HOLDING_FOLDER_NAME}/{}/{path}", summary.session_id));
+    assert_eq!(paths, [(names("a/b/copy.txt"), held("a/b/copy.txt")), (names("top.txt"), held("top.txt"))]);
+    let root = fs::canonicalize(dir.path()).unwrap();
+    assert_eq!(details.operations[1].source, root.join("top.txt"), "the absolute paths stay");
+    assert_eq!(details.operations[1].destination, root.join(HOLDING_FOLDER_NAME).join(&summary.session_id).join("top.txt"));
+}
+
+#[test]
+fn a_journal_written_before_notes_still_reads_with_its_reason_as_the_note() {
+    let journal = TempDir::new().unwrap();
+    let id = "2026-01-01_00-00-00-000Z";
+    let held = format!("/root/{HOLDING_FOLDER_NAME}/{id}/a/x.txt");
+    let records = [
+        serde_json::json!({ "id": id, "scanRoot": "/root", "trashDestination": "holdingFolder", "startedAt": 0 }),
+        serde_json::json!({
+            "record": "operation", "operationId": "op", "kind": "trash", "source": "/root/a/x.txt", "destination": held,
+            "planned": { "size": 4, "modified": 0, "isPackage": false },
+        }),
+        serde_json::json!({ "record": "outcome", "operationId": "op", "phase": "run", "outcome": "skipped", "reason": "It no longer exists" }),
+        serde_json::json!({ "record": "finished" }),
+    ];
+    let lines: String = records.iter().map(|r| format!("{r}\n")).collect();
+    fs::write(journal.path().join(format!("{id}.jsonl")), lines).unwrap();
+
+    let details = session_details(id, journal.path()).unwrap();
+
+    let op = &details.operations[0];
+    assert_eq!(op.state, OperationState::Skipped);
+    assert_eq!(op.note.as_deref(), Some("It no longer exists"));
+    assert_eq!(op.relative_path, names("a/x.txt"));
+    assert_eq!(op.relative_destination, names(&format!("{HOLDING_FOLDER_NAME}/{id}/a/x.txt")));
 }
 
 #[test]
@@ -350,7 +401,7 @@ fn redo_skips_a_file_that_changed_after_it_was_restored() {
 
     assert_eq!(redone.done.len(), 1);
     assert_eq!(redone.skipped.len(), 1);
-    assert!(redone.skipped[0].reason.as_deref().unwrap().contains("changed"));
+    assert!(redone.skipped[0].note.as_deref().unwrap().contains("changed"));
     assert_eq!(fs::read_to_string(dir.path().join("a/copy.txt")).unwrap(), "edited since");
 }
 

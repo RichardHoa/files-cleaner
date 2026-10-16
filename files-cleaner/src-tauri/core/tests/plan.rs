@@ -162,25 +162,33 @@ fn operation_ids_are_stable_between_plans() {
 }
 
 #[test]
-fn the_tree_shows_each_trashed_file_before_and_after() {
+fn each_trashed_copy_names_where_it_goes_and_its_keeper() {
     let dir = scan_root();
-    let keeper = write(dir.path(), "keep.txt", "copy");
-    let copy = write(dir.path(), "sub/copy.txt", "copy");
-    set_modified(&keeper, 2_000);
-    set_modified(&copy, 1_000);
+    let keeper = write(dir.path(), "keep/report.pdf", "copy");
+    let copy = write(dir.path(), "sub/copy.pdf", "copy");
+    let top = write(dir.path(), "top.pdf", "copy");
+    set_modified(&keeper, 3_000);
+    set_modified(&copy, 2_000);
+    set_modified(&top, 1_000);
+    let older = write(dir.path(), "a.txt", "other");
+    let newer = write(dir.path(), "b.txt", "other");
+    set_modified(&older, 1_000);
+    set_modified(&newer, 2_000);
 
     let plan = plan_for(dir.path());
-    let id = &plan.operations[0].id;
+    let summary: Vec<(String, String, Option<String>)> = plan
+        .operations
+        .iter()
+        .map(|op| (op.relative_path.join("/"), op.destination.join("/"), op.keeper.as_ref().map(|k| k.join("/"))))
+        .collect();
 
-    let sub = plan.before.children.iter().find(|n| n.name == "sub").unwrap();
-    assert_eq!(sub.children[0].name, "copy.txt");
-    assert_eq!(sub.children[0].operation_id.as_ref(), Some(id));
-    assert_eq!(sub.operation_ids, std::slice::from_ref(id), "a folder lists every Operation under it");
-
-    let holding = plan.after.children.iter().find(|n| n.name == "Files Cleaner Trash").unwrap();
-    let leaf = &holding.children[0].children[0].children[0];
-    assert_eq!(leaf.name, "copy.txt");
-    assert_eq!(leaf.operation_id.as_ref(), Some(id));
+    let trashed = |path: &str, keeper: &str| {
+        (path.to_string(), format!("Files Cleaner Trash/This Session/{path}"), Some(keeper.to_string()))
+    };
+    assert_eq!(
+        summary,
+        [trashed("a.txt", "b.txt"), trashed("sub/copy.pdf", "keep/report.pdf"), trashed("top.pdf", "keep/report.pdf")]
+    );
 }
 
 #[test]

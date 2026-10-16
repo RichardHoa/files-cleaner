@@ -20,11 +20,14 @@ export function scan(scanRoot, onProgress) {
   return invoke("scan", { scanRoot, onProgress: channel });
 }
 
-/** Plans the latest scan with the config as it is now: `{ root, operations, before, after }`. */
+/**
+ * Plans the latest scan with the config as it is now: `{ root, trashDestination, operations }`, each
+ * Operation `{ id, kind, source, relativePath, destination, keeper, size, modified, isPackage, reason }`.
+ */
 export const buildPlan = () => invoke("build_plan");
 
 // Running, undoing and redoing resolve to a summary: `{ sessionId, done, skipped, failed, unrecoverable }`,
-// each a list of `{ operationId, kind, source, destination, reason }`.
+// each a list of `{ operationId, kind, source, destination, note }`, the note saying why it wasn't done.
 
 /** Runs the ticked Operations of the latest Plan as a new Session. */
 export const runPlan = (approved) => invoke("run_plan", { approved });
@@ -35,7 +38,10 @@ export const undo = (sessionId, operationIds) => invoke("undo", { sessionId, ope
 /** Carries out again the undone `operationIds` of Session `sessionId`. */
 export const redoOperations = (sessionId, operationIds) => invoke("redo_operations", { sessionId, operationIds });
 
-/** Session `sessionId` and its Operations: `{ info, operations: [{ id, kind, source, destination, size, state, reason }] }`. */
+/**
+ * Session `sessionId` and its Operations: `{ info, operations }`, each Operation
+ * `{ id, kind, source, destination, relativePath, relativeDestination, size, state, note }`.
+ */
 export const sessionDetails = (sessionId) => invoke("session_details", { sessionId });
 
 /**
@@ -53,7 +59,10 @@ export const removeRecentScanRoot = (scanRoot) => invoke("remove_recent_scan_roo
 /** The folder the user picked, or null if they cancelled. */
 export const pickFolder = () => dialog.open({ directory: true, multiple: false, title: "Pick a folder to clean" });
 
-/** Opens a Finder window on the folder holding `path`, with it selected. A Package is selected, not opened. */
+/**
+ * Opens a Finder window on the folder holding `path`, with it selected. A Package is selected, not opened.
+ * Given a list of paths, selects them all, with a window for each folder they are in.
+ */
 export const revealInFinder = (path) => opener.revealItemInDir(path);
 
 /** A command error as one line, with its config position when it has one. */

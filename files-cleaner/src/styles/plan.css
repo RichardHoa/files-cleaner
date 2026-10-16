@@ -1,38 +1,195 @@
-/* Plan: the before and after trees side by side. */
-.plan-trees {
+/* Plan: a header, one card per Reason, then the chosen group's files beside the selected one.
+   Flat surfaces and hairline dividers; colour only for the primary button, the selected row
+   and each card's one kind icon. */
+.plan-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  column-gap: var(--space-6);
+}
+
+.plan-head .lead {
+  margin-bottom: 0;
+  color: var(--muted);
+}
+
+.plan-head .actions {
+  margin-top: var(--space-2);
+}
+
+.plan-cards {
   display: grid;
-  /* Side by side while each tree gets 320px, stacked below that. */
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
-  gap: var(--space-6);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
+  gap: var(--space-2);
+  margin: var(--space-2) 0 var(--space-4);
 }
 
-.tree,
-.tree ul {
-  list-style: none;
-  margin: 0;
-  padding-left: var(--space-4);
+.plan-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
 }
 
-.tree {
-  padding-left: 0;
+/* Selected like a sidebar item: a quiet grey fill, not a coloured outline. */
+.plan-card.current {
+  background: color-mix(in srgb, var(--text) 7%, var(--surface));
 }
 
-.tree li {
-  margin: var(--space-0-5) 0;
+/* Fills the card above Include all, so most of the card picks it. */
+.plan-card-pick {
+  display: block;
+  width: 100%;
+  padding: var(--space-3) var(--space-3) var(--space-1);
+  border: 0;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  background: none;
+  text-align: left;
 }
 
-.tree summary {
-  cursor: default;
+.plan-card-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-1);
 }
 
-.tree-folder,
-.tree-item {
+.plan-card-line .icon {
+  margin-right: var(--space-1);
+}
+
+.plan-card-explain {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--muted);
+  font-size: var(--font-sm);
+}
+
+.plan-include {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1-5);
 }
 
-.tree-item.unticked {
+.plan-card .plan-include {
+  padding: var(--space-1) var(--space-3) var(--space-3);
+}
+
+/* The list, and the selected file's pane beside it once there is room for both. */
+.plan-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+}
+
+@media (min-width: 760px) {
+  .plan-split {
+    grid-template-columns: minmax(0, 1fr) minmax(220px, 300px);
+  }
+}
+
+.plan-list h2 {
+  margin-top: 0;
+}
+
+.plan-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+}
+
+.plan-file {
+  display: grid;
+  grid-template-columns: auto minmax(0, 3fr) minmax(0, 2fr) 72px;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1-5) var(--space-2);
+  border-bottom: 1px solid var(--border);
+  cursor: default;
+}
+
+.plan-file.selected {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.plan-file-name,
+.plan-file-folder {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Right to left, so a folder too long to fit loses its start and keeps its nearest folder. */
+.plan-file-folder {
+  direction: rtl;
+  text-align: left;
+  overflow-wrap: normal;
+}
+
+.plan-file-size {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
   color: var(--muted);
-  text-decoration: line-through;
+}
+
+.plan-left-out {
+  display: none;
+}
+
+.plan-file.unticked .plan-file-name {
+  color: var(--muted);
+}
+
+.plan-file.unticked .plan-left-out {
+  display: inline;
+}
+
+.plan-none {
+  padding: var(--space-4) var(--space-2);
+  color: var(--muted);
+}
+
+.plan-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-2) 0;
+}
+
+.plan-more:empty {
+  display: none;
+}
+
+/* Stays in view while the list scrolls. */
+.plan-pane {
+  position: sticky;
+  top: var(--space-4);
+  padding-left: var(--space-4);
+  border-left: 1px solid var(--border);
+}
+
+.plan-pane p {
+  margin: var(--space-2) 0;
+}
+
+.plan-pane-name {
+  margin: 0;
+  font-size: var(--font-lg);
+  overflow-wrap: anywhere;
+}
+
+.plan-pane-name + p {
+  margin-top: var(--space-0-5);
+}
+
+.plan-original {
+  font-size: var(--font-sm);
+  color: var(--muted);
+}
+
+.plan-pane .plan-include {
+  margin-top: var(--space-2);
 }

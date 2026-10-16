@@ -2,9 +2,9 @@
 import { el } from "./dom.js";
 import { plural } from "./format.js";
 
-/** "2 items restored · 1 skipped": `done` says what was done; failed and unrecoverable show only if any. */
+/** "2 files restored · 1 skipped": `done` says what was done; failed and unrecoverable show only if any. */
 export function describeSummary(summary, done) {
-  const parts = [`${plural(summary.done.length, "item")} ${done}`, `${summary.skipped.length} skipped`];
+  const parts = [`${plural(summary.done.length, "file")} ${done}`, `${summary.skipped.length} skipped`];
   if (summary.failed.length > 0) parts.push(`${summary.failed.length} failed`);
   if (summary.unrecoverable.length > 0) parts.push(`${summary.unrecoverable.length} unrecoverable`);
   return parts.join(" · ");
@@ -14,18 +14,12 @@ export function describeSummary(summary, done) {
 export function undoSections(summary) {
   return [
     el("p", { className: "lead" }, `Undo: ${describeSummary(summary, "restored")}`),
-    ...outcomeSections(summary, { skipped: "Skipped by Undo", unrecoverable: "Unrecoverable" }),
+    ...outcomeSection("Skipped by Undo", summary.skipped),
+    ...outcomeSection("Unrecoverable", summary.unrecoverable),
   ];
 }
 
-/**
- * A heading and a list of items with their reasons for each of `summary`'s outcome lists named in
- * `titles` (`{ skipped: "Skipped", … }`), in that order; nothing for an empty list.
- */
-export function outcomeSections(summary, titles) {
-  return Object.entries(titles).flatMap(([field, title]) => outcomeSection(title, summary[field]));
-}
-
+/** A heading and a list of `outcomes` with the note on each; nothing if there are none. */
 function outcomeSection(title, outcomes) {
   if (outcomes.length === 0) return [];
   return [
@@ -34,7 +28,7 @@ function outcomeSection(title, outcomes) {
       "ul",
       { className: "outcomes" },
       ...outcomes.map((outcome) =>
-        el("li", {}, el("span", { className: "path" }, outcome.source), outcome.reason ? el("div", { className: "reason" }, outcome.reason) : ""),
+        el("li", {}, el("span", { className: "path" }, outcome.source), outcome.note ? el("div", { className: "note" }, outcome.note) : ""),
       ),
     ),
   ];

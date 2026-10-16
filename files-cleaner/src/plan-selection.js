@@ -1,5 +1,4 @@
-// Which Plan Operations are ticked. `ticked` is a Set of Operation IDs; tree nodes carry
-// `operationIds`, every Operation at or under them.
+// Which Plan Operations are ticked. `ticked` is a Set of Operation IDs.
 
 /** Totals for the ticked Operations: how many, how many of each kind, and bytes to be trashed. */
 export function totals(operations, ticked) {
@@ -15,18 +14,18 @@ export function totals(operations, ticked) {
   return { count, byKind, trashBytes };
 }
 
-/** "all", "none" or "some": how many of the Operations under `node` are ticked. */
-export function folderState(node, ticked) {
-  const n = node.operationIds.filter((id) => ticked.has(id)).length;
+/** "all", "none" or "some": how many of the Operations `ids` are ticked. */
+export function tickState(ids, ticked) {
+  const n = ids.filter((id) => ticked.has(id)).length;
   if (n === 0) return "none";
-  return n === node.operationIds.length ? "all" : "some";
+  return n === ids.length ? "all" : "some";
 }
 
-/** A new set with everything under `node` ticked, or all of it unticked if it was all ticked. */
-export function toggleFolder(node, ticked) {
+/** A new set with all of `ids` ticked, or all of them unticked if they all were. */
+export function toggleAll(ids, ticked) {
   const next = new Set(ticked);
-  const untick = folderState(node, ticked) === "all";
-  for (const id of node.operationIds) {
+  const untick = tickState(ids, ticked) === "all";
+  for (const id of ids) {
     if (untick) next.delete(id);
     else next.add(id);
   }

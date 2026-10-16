@@ -55,7 +55,7 @@ pub struct Outcome {
     pub source: PathBuf,
     pub destination: PathBuf,
     /// Why it wasn't done.
-    pub reason: Option<String>,
+    pub note: Option<String>,
 }
 
 /// Why an Operation's pass didn't move the item.
@@ -81,7 +81,7 @@ pub fn run(plan: &Plan, approved: &[String], journal_dir: &Path) -> Result<Summa
             destination: holding.join(op.relative_path.iter().collect::<PathBuf>()),
             planned: op.planned,
             state: OperationState::Started,
-            reason: None,
+            note: None,
             interrupted: None,
         })
         .collect();
@@ -119,8 +119,8 @@ fn undo_selected(session_id: &str, only: Option<&HashSet<&str>>, journal_dir: &P
         if !exists(&op.destination) {
             return Err((OutcomeKind::Unrecoverable, format!("The trashed copy at {} is gone", op.destination.display())));
         }
-        move_without_overwriting(&op.destination, &op.source).map_err(|reason| {
-            (OutcomeKind::Skipped, format!("{reason}; the trashed copy was left at {}", op.destination.display()))
+        move_without_overwriting(&op.destination, &op.source).map_err(|note| {
+            (OutcomeKind::Skipped, format!("{note}; the trashed copy was left at {}", op.destination.display()))
         })?;
         tidy_after_undo(&session, op);
         Ok(())
@@ -197,12 +197,12 @@ fn apply_each<'a>(
 ) -> io::Result<()> {
     for op in operations {
         journal.append(&op.intent(phase))?;
-        let (outcome, reason) = match attempt(op) {
+        let (outcome, note) = match attempt(op) {
             Ok(()) => (OutcomeKind::Done, None),
-            Err((outcome, reason)) => (outcome, Some(reason)),
+            Err((outcome, note)) => (outcome, Some(note)),
         };
-        journal.append(&Record::Outcome { operation_id: op.id.clone(), phase, outcome, reason: reason.clone() })?;
-        summary.push(outcome, op.outcome(reason));
+        journal.append(&Record::Outcome { operation_id: op.id.clone(), phase, outcome, reason: note.clone() })?;
+        summary.push(outcome, op.outcome(note));
     }
     Ok(())
 }
@@ -211,9 +211,9 @@ fn exists(path: &Path) -> bool {
     !matches!(fs::symlink_metadata(path), Err(e) if e.kind() == io::ErrorKind::NotFound)
 }
 
-/// Fails with the reason if `path` is gone or isn't the item `expected`
+/// Fails with a note if `path` is gone or isn't the item `expected`
 /// describes: a different kind, size or modified date. `since` ends the
-/// reason ("since the Plan was made").
+/// note ("since the Plan was made").
 fn unchanged(path: &Path, expected: &SourceState, since: &str) -> Result<(), String> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,

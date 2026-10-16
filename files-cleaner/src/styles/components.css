@@ -1,9 +1,9 @@
-/* Pieces shared by several screens: secondary text, Operation lists, icons, pills and links. */
+/* Pieces shared by several screens: secondary text, outcome lists, icons, pills and links. */
 .muted {
   color: var(--muted);
 }
 
-.reason {
+.note {
   color: var(--muted);
   font-size: var(--font-sm);
   overflow-wrap: anywhere;
@@ -19,12 +19,6 @@
 .sessions li {
   padding: var(--space-1-5) 0;
   border-bottom: 1px solid var(--border);
-}
-
-.row-actions {
-  margin-left: auto;
-  display: flex;
-  gap: var(--space-1-5);
 }
 
 .icon {
@@ -58,7 +52,7 @@
   color: var(--kind, currentColor);
 }
 
-/* A filled, coloured label: Operation kinds, Session statuses, Operation states. */
+/* A filled, coloured label: Session statuses. */
 .pill {
   display: inline-flex;
   align-items: center;
@@ -72,16 +66,6 @@
   white-space: nowrap;
   background: var(--border);
   color: var(--text);
-}
-
-.pill .icon {
-  width: 12px;
-  height: 12px;
-}
-
-.kind-pill {
-  background: var(--kind, var(--border));
-  color: var(--on-kind);
 }
 
 .status-completed {
@@ -108,36 +92,6 @@
   color: var(--on-status-crashed);
 }
 
-.state-done {
-  background: var(--state-done);
-  color: var(--on-state);
-}
-
-.state-undone {
-  background: var(--state-undone);
-  color: var(--on-state-undone);
-}
-
-.state-skipped {
-  background: var(--state-skipped);
-  color: var(--on-state);
-}
-
-.state-failed,
-.state-unrecoverable,
-.state-started {
-  background: var(--state-failed);
-  color: var(--on-state);
-}
-
-/* A line that starts with a pill and runs on in text. */
-.pill-line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-1-5);
-}
-
 .root-path {
   display: flex;
   align-items: center;
@@ -162,4 +116,47 @@ button.link {
 
 button.link:hover {
   text-decoration: underline;
+}
+
+/* The menu that opens on a row: on a click in the scan results, on a right-click in the Plan or a Session. */
+.row-menu {
+  position: absolute;
+  z-index: 4;
+  min-width: 160px;
+  padding: var(--space-1);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-menu);
+}
+
+/* Opens at the pointer on a right-click in the Plan or a Session, so it is placed in the window. */
+.file-menu {
+  position: fixed;
+}
+
+.row-menu[hidden] {
+  display: none;
+}
+
+.row-menu button {
+  display: block;
+  width: 100%;
+  padding: var(--space-1) var(--space-2-5);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  text-align: left;
+}
+
+.row-menu button:hover,
+.row-menu button:focus-visible {
+  background: var(--accent);
+  color: var(--on-accent);
+  outline: none;
+}
+
+.row-menu .status {
+  margin: var(--space-1) var(--space-2);
+  max-width: 320px;
 }

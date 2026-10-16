@@ -1,7 +1,7 @@
 //! Past Sessions as their Journals tell them.
 
 use std::collections::{BTreeMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::Serialize;
 
@@ -76,11 +76,16 @@ pub struct SessionOperation {
     pub source: PathBuf,
     /// Where the Operation put it.
     pub destination: PathBuf,
+    /// The names from the Scan Root down to the source, its own name last.
+    pub relative_path: Vec<String>,
+    /// The names from the Scan Root down to the destination, its own name
+    /// last.
+    pub relative_destination: Vec<String>,
     pub size: u64,
     pub state: OperationState,
     /// Why it was skipped or failed, or why the last Undo or Redo of it
-    /// didn't happen.
-    pub reason: Option<String>,
+    /// didn't happen. Not a Reason, which says why the Plan proposed it.
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -107,7 +112,8 @@ pub(crate) struct JournaledOperation {
     pub destination: PathBuf,
     pub planned: SourceState,
     pub state: OperationState,
-    pub reason: Option<String>,
+    /// Why it wasn't done, as journaled in its last outcome's `reason`.
+    pub note: Option<String>,
     /// Set while the last intent for it has no outcome: that pass was cut
     /// short by a crash, maybe after the item moved.
     pub interrupted: Option<Phase>,
@@ -136,13 +142,13 @@ impl JournaledOperation {
         }
     }
 
-    pub fn outcome(&self, reason: Option<String>) -> Outcome {
+    pub fn outcome(&self, note: Option<String>) -> Outcome {
         Outcome {
             operation_id: self.id.clone(),
             kind: self.kind,
             source: self.source.clone(),
             destination: self.destination.clone(),
-            reason,
+            note,
         }
     }
 }
@@ -189,7 +195,7 @@ impl SessionJournal {
                     destination: destination.clone(),
                     planned: *planned,
                     state: OperationState::Started,
-                    reason: None,
+                    note: None,
                     interrupted: Some(Phase::Run),
                 });
             }
@@ -198,10 +204,10 @@ impl SessionJournal {
                     op.interrupted = Some(*phase);
                 }
             }
-            Record::Outcome { operation_id, phase, outcome, reason } => {
+            Record::Outcome { operation_id, phase, outcome, reason: note } => {
                 if let Some(op) = self.operation(operation_id) {
                     op.state = next_state(op.state, *phase, *outcome);
-                    op.reason = reason.clone();
+                    op.note = note.clone();
                     op.interrupted = None;
                 }
             }
@@ -286,6 +292,7 @@ pub fn list_sessions(journal_dir: &Path, offset: usize, limit: usize) -> Result<
 /// Session `session_id` and each of its Operations, from its Journal.
 pub fn session_details(session_id: &str, journal_dir: &Path) -> Result<SessionDetails, SessionError> {
     let session = SessionJournal::read(journal_dir, session_id)?;
+    let root = &session.header.scan_root;
     let operations = session
         .operations
         .iter()
@@ -294,10 +301,24 @@ pub fn session_details(session_id: &str, journal_dir: &Path) -> Result<SessionDe
             kind: op.kind,
             source: op.source.clone(),
             destination: op.destination.clone(),
+            relative_path: names_below(root, &op.source),
+            relative_destination: names_below(root, &op.destination),
             size: op.planned.size,
             state: op.state,
-            reason: op.reason.clone(),
+            note: op.note.clone(),
         })
         .collect();
     Ok(SessionDetails { info: session.info(), operations })
+}
+
+/// The names from `root` down to `path`, its own name last. Every path a
+/// Session journals is inside its Scan Root; one that somehow isn't is
+/// given in full.
+fn names_below(root: &Path, path: &Path) -> Vec<String> {
+    let below = path.strip_prefix(root).unwrap_or(path);
+    below
+        .components()
+        .filter(|c| matches!(c, Component::Normal(_)))
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect()
 }
