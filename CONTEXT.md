@@ -59,7 +59,7 @@ A user-written instruction that matches files and says what Operation to apply t
 _Avoid_: filter, policy
 
 **Plan**:
-The full list of proposed Operations for one Scan Root, shown as a before/after tree for the user to approve, untick, or cancel.
+The full list of proposed Operations for one Scan Root, shown grouped by Reason, one line per Operation, with the selected Operation's Reason beside it, for the user to approve, untick, or cancel.
 _Avoid_: preview, proposal
 
 **Operation**:
@@ -67,8 +67,12 @@ One atomic file-system change: Move, Rename, Trash, or Create Folder. The tool n
 _Avoid_: action, step, task
 
 **Reason**:
-Why the Plan proposes an Operation: either a **Duplicate** (naming the Keeper it leaves in place) or a **Rule** (naming that Rule). The Plan is grouped by Reason.
+Why the Plan proposes an Operation: either a **Duplicate** (naming the Keeper it leaves in place) or a **Rule** (naming that Rule). The Plan is grouped by Reason. Why an Operation was skipped or failed is not a Reason: that is its Note.
 _Avoid_: cause, source, explanation
+
+**Note**:
+Why an Operation of a Session didn't happen: why it was skipped, failed or couldn't be recovered, or why the last Undo or Redo of it didn't happen ("It no longer exists").
+_Avoid_: reason
 
 **Trash** (Operation):
 Taking a file out of the user's way without destroying it, sending it to the Trash Destination.
