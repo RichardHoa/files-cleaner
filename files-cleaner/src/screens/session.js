@@ -1,7 +1,7 @@
 // Session: what one past Session did and where its files are now. One card per group (Moved,
 // Put back, Needs attention) picks which files are listed; the selected file is shown beside the
 // list. Files can be put back, or moved again, all at once, ticked, or one at a time.
-import { describeError, pathSeparator, redoOperations, revealInFinder, sessionDetails, undo } from "../api.js";
+import { describeError, pathSeparator, redoOperations, revealInFileManager, sessionDetails, undo } from "../api.js";
 import { el } from "../dom.js";
 import { drawMore, revealMenu } from "../file-list.js";
 import { count, formatDate, formatSize, plural, splitPath } from "../format.js";
@@ -40,7 +40,7 @@ const ACTIONS = {
 
 const SORT_NAMES = { size: "biggest first", name: "by name", folder: "by folder" };
 
-/** Where the file is now, for Show in Finder: null once it is gone for good. */
+/** Where the file is now, for Show in folder: null once it is gone for good. */
 function whereNow(op) {
   if (op.state === "done") return op.destination;
   return op.state === "unrecoverable" ? null : op.source;
@@ -324,8 +324,8 @@ export function render(root, nav, sessionId, from, message) {
       const path = whereNow(op);
       const buttons = [];
       if (path) {
-        const reveal = el("button", { type: "button" }, "Show in Finder");
-        reveal.addEventListener("click", () => revealInFinder(path).catch((error) => showStatus(status, describeError(error), true)));
+        const reveal = el("button", { type: "button" }, "Show in folder");
+        reveal.addEventListener("click", () => revealInFileManager(path).catch((error) => showStatus(status, describeError(error), true)));
         buttons.push(reveal);
       }
       if (action) {

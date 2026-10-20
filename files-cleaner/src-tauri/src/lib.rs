@@ -7,8 +7,8 @@ use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
 
 use files_cleaner_core::{
-    self as core, Config, Plan, RecentScanRoot, ScanProgress, ScanResult, SessionDetails, SessionPage, Summary,
-    EXAMPLE_CONFIG,
+    self as core, Config, Plan, RecentScanRoot, RunProgress, ScanProgress, ScanResult, SessionDetails, SessionPage,
+    Summary, EXAMPLE_CONFIG,
 };
 use serde::Serialize;
 use tauri::ipc::Channel;
@@ -171,15 +171,27 @@ fn journal_dir(app: &AppHandle) -> Result<PathBuf, CommandError> {
     app_data_path(app, SESSIONS_FOLDER_NAME)
 }
 
-/// Runs the approved Operations of the latest Plan as a new Session. The
-/// Plan is kept, so a run refused as Busy can be retried; running it again
+/// Runs the approved Operations of the latest Plan as a new Session, off
+/// the UI thread, sending progress to `on_progress` as it goes. The Plan
+/// is kept, so a run refused as Busy can be retried; running it again
 /// after it ran starts a new Session whose Operations are all skipped.
 #[tauri::command]
-async fn run_plan(app: AppHandle, latest: State<'_, Latest>, approved: Vec<String>) -> Result<Summary, CommandError> {
+async fn run_plan(
+    app: AppHandle,
+    latest: State<'_, Latest>,
+    approved: Vec<String>,
+    on_progress: Channel<RunProgress>,
+) -> Result<Summary, CommandError> {
     let journal_dir = journal_dir(&app)?;
     let plan = latest.0.lock().unwrap().as_ref().and_then(|s| s.plan.clone());
     let plan = plan.ok_or_else(|| CommandError::new("Build a Plan first"))?;
-    blocking(move || core::run(&plan, &approved, &journal_dir)).await
+    blocking(move || {
+        // A closed window can't receive progress; the Run carries on.
+        core::run_with_progress(&plan, &approved, &journal_dir, |progress| {
+            let _ = on_progress.send(progress);
+        })
+    })
+    .await
 }
 
 /// Undoes the chosen Operations of a past Session, or all of them if none

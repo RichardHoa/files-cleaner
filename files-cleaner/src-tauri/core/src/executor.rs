@@ -3,17 +3,18 @@
 //! Operations of a past one.
 
 use std::borrow::Borrow;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
 use crate::clash;
-use crate::journal::{lock_sessions, Journal, OutcomeKind, Phase, Record, SessionError};
-use crate::planner::{OperationKind, Plan, SourceState};
-use crate::protection::HOLDING_FOLDER_NAME;
+use crate::journal::{self, lock_sessions, Journal, OutcomeKind, Phase, Record, SessionError};
+use crate::planner::{Operation, OperationKind, Plan, SourceState};
+use crate::protection::{is_os_metadata_file, HOLDING_FOLDER_NAME};
 use crate::scanner::{millis, total_size};
 use crate::sessions::{JournaledOperation, OperationState, SessionJournal};
 
@@ -67,20 +68,50 @@ type NotDone = (OutcomeKind, String);
 /// order, as a new Session journaled in `journal_dir`. Trashed items go to
 /// `<Scan Root>/Files Cleaner Trash/<Session ID>/<original relative path>`.
 /// A Move whose destination was taken since planning gets a new Clash
-/// Suffix, worked out just before it is journaled.
+/// Suffix, worked out just before it is journaled, as does an emptied
+/// folder whose files were trashed to the same place. An Operation the
+/// Plan marks as an error is never run, even if approved.
 pub fn run(plan: &Plan, approved: &[String], journal_dir: &Path) -> Result<Summary, SessionError> {
+    run_with_progress(plan, approved, journal_dir, |_| {})
+}
+
+/// How far a Run has got, reported while it runs.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunProgress {
+    /// Operations finished so far, whatever their outcome.
+    pub finished: usize,
+    /// Operations the Run will carry out in all.
+    pub total: usize,
+    /// The item the Run is on.
+    pub current: PathBuf,
+}
+
+/// Like `run`, calling `on_progress` before each Operation (at most every
+/// `PROGRESS_INTERVAL` or so), and once more at the end.
+pub fn run_with_progress(
+    plan: &Plan,
+    approved: &[String],
+    journal_dir: &Path,
+    on_progress: impl FnMut(RunProgress),
+) -> Result<Summary, SessionError> {
     let _lock = lock_sessions(journal_dir)?;
     let approved: HashSet<&str> = approved.iter().map(String::as_str).collect();
+    let runs = |op: &&Operation| approved.contains(op.id.as_str()) && op.error.is_none();
+    let total = plan.operations.iter().filter(runs).count();
     let (header, mut journal) = Journal::create(journal_dir, plan.root.clone(), plan.trash_destination)?;
 
     let holding = plan.root.join(HOLDING_FOLDER_NAME).join(&header.id);
     // Lazy, so each destination is checked once the Operations before it
     // have run.
-    let operations = plan.operations.iter().filter(|op| approved.contains(op.id.as_str())).map(|op| JournaledOperation {
+    let operations = plan.operations.iter().filter(runs).map(|op| JournaledOperation {
         id: op.id.clone(),
         kind: op.kind,
         source: op.source.clone(),
         destination: match op.kind {
+            OperationKind::Trash if op.planned.is_folder => {
+                free_destination(&holding.join(op.relative_path.iter().collect::<PathBuf>()))
+            }
             OperationKind::Trash => holding.join(op.relative_path.iter().collect::<PathBuf>()),
             OperationKind::Move => free_destination(&op.destination_path),
             OperationKind::CreateFolder => op.destination_path.clone(),
@@ -92,17 +123,50 @@ pub fn run(plan: &Plan, approved: &[String], journal_dir: &Path) -> Result<Summa
     });
 
     let mut summary = Summary::new(header.id);
+    let mut progress = Progress::new(total, on_progress);
+    let operations = operations.inspect(|op| progress.starting(&op.source));
     apply_each(&mut journal, &mut summary, Phase::Run, operations, |op| match op.kind {
         OperationKind::CreateFolder => create_folder(&op.destination),
         OperationKind::Trash | OperationKind::Move => {
-            unchanged(&op.source, &op.planned, "since the Plan was made")
+            ready_to_go(op, "since the Plan was made")
                 .and_then(|()| folder_exists(op))
                 .map_err(|r| (OutcomeKind::Skipped, r))?;
             move_without_overwriting(&op.source, &op.destination).map_err(|r| (OutcomeKind::Failed, r))
         }
     })?;
     journal.append(&Record::Finished)?;
+    progress.finish(&plan.root);
     Ok(summary)
+}
+
+/// The longest a Run waits between progress reports.
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
+
+/// Reports a Run's progress, at most every `PROGRESS_INTERVAL`.
+struct Progress<F: FnMut(RunProgress)> {
+    finished: usize,
+    total: usize,
+    last_report: Option<Instant>,
+    report: F,
+}
+
+impl<F: FnMut(RunProgress)> Progress<F> {
+    fn new(total: usize, report: F) -> Self {
+        Progress { finished: 0, total, last_report: None, report }
+    }
+
+    /// Called as the Run moves on to the next Operation, on `current`.
+    fn starting(&mut self, current: &Path) {
+        if self.last_report.is_none_or(|last| last.elapsed() >= PROGRESS_INTERVAL) {
+            (self.report)(RunProgress { finished: self.finished, total: self.total, current: current.to_path_buf() });
+            self.last_report = Some(Instant::now());
+        }
+        self.finished += 1;
+    }
+
+    fn finish(mut self, root: &Path) {
+        (self.report)(RunProgress { finished: self.total, total: self.total, current: root.to_path_buf() });
+    }
 }
 
 /// Reverses every done Operation of Session `session_id`, newest first,
@@ -124,22 +188,113 @@ fn undo_selected(session_id: &str, only: Option<&HashSet<&str>>, journal_dir: &P
     let _lock = lock_sessions(journal_dir)?;
     let (session, mut journal) = reopen(journal_dir, session_id)?;
 
+    let newer = NewerSessions::read(journal_dir, &session.header.id)?;
     let mut summary = Summary::new(session.header.id.clone());
+    // Operations this pass has settled: undone, or found unrecoverable.
+    let mut settled: HashSet<String> = HashSet::new();
     apply_each(&mut journal, &mut summary, Phase::Undo, session.in_state(OperationState::Done, only).rev(), |op| {
-        if op.kind == OperationKind::CreateFolder {
-            return remove_created_folder(&op.destination).map_err(|r| (OutcomeKind::Skipped, r));
+        let result = undo_one(&session, &newer, &settled, op);
+        if !matches!(result, Err((OutcomeKind::Skipped, _))) {
+            settled.insert(op.id.clone());
         }
-        let what = if op.kind == OperationKind::Trash { "trashed copy" } else { "moved item" };
-        if !exists(&op.destination) {
-            return Err((OutcomeKind::Unrecoverable, format!("The {what} at {} is gone", op.destination.display())));
-        }
-        move_without_overwriting(&op.destination, &op.source).map_err(|note| {
-            (OutcomeKind::Skipped, format!("{note}; the {what} was left at {}", op.destination.display()))
-        })?;
-        tidy_after_undo(&session, op);
-        Ok(())
+        result
     })?;
     Ok(summary)
+}
+
+/// Undoes one done Operation of `session`.
+fn undo_one(
+    session: &SessionJournal,
+    newer: &NewerSessions,
+    settled: &HashSet<String>,
+    op: &JournaledOperation,
+) -> Result<(), NotDone> {
+    if op.kind == OperationKind::CreateFolder {
+        // Removed only once every item the Session moved into it is back,
+        // or it would be made again, and left behind, when one comes back.
+        let waiting = session.operations.iter().any(|other| {
+            other.kind != OperationKind::CreateFolder
+                && other.state == OperationState::Done
+                && !settled.contains(&other.id)
+                && other.destination.starts_with(&op.destination)
+        });
+        if waiting {
+            return Err((OutcomeKind::Skipped, "Items this Session moved into it aren't back yet, so it was left".into()));
+        }
+        return remove_created_folder(&op.destination).map_err(|r| (OutcomeKind::Skipped, r));
+    }
+    newer.conflict(op).map_err(|r| (OutcomeKind::Skipped, r))?;
+    let what = match op.kind {
+        OperationKind::Trash if op.planned.is_folder => "trashed folder",
+        OperationKind::Trash => "trashed copy",
+        _ => "moved item",
+    };
+    if !exists(&op.destination) {
+        return Err((OutcomeKind::Unrecoverable, format!("The {what} at {} is gone", op.destination.display())));
+    }
+    let left = |note: String| (OutcomeKind::Skipped, format!("{note}; the {what} was left at {}", op.destination.display()));
+    if op.planned.is_folder && op.source.is_dir() {
+        // Undoing its files on their own made the folder again.
+        merge_folder(&op.destination, &op.source).map_err(left)?;
+    } else {
+        move_without_overwriting(&op.destination, &op.source).map_err(left)?;
+    }
+    tidy_after_undo(session, op);
+    Ok(())
+}
+
+/// What Sessions started after one Session did, as far as they still
+/// stand (not undone): where they took items from, and where they put
+/// them. Undoing the older Session must not undo around them.
+struct NewerSessions {
+    /// Lowercased paths a newer Session moved an item away from: that
+    /// Session's ID and where the item went.
+    moved_away: HashMap<String, (String, PathBuf)>,
+    /// Lowercased paths a newer Session put an item at, and its ID.
+    put_at: HashMap<String, String>,
+}
+
+impl NewerSessions {
+    /// Reads the Journals of the Sessions started after `session_id`. One
+    /// that can't be understood is passed over.
+    fn read(journal_dir: &Path, session_id: &str) -> Result<NewerSessions, SessionError> {
+        let mut newer = NewerSessions { moved_away: HashMap::new(), put_at: HashMap::new() };
+        let mut ids: Vec<String> = journal::session_ids(journal_dir)?.into_iter().filter(|id| id.as_str() > session_id).collect();
+        // Oldest first, so the newest Session's word on a path wins.
+        ids.sort();
+        for id in ids {
+            let session = match SessionJournal::read(journal_dir, &id) {
+                Ok(session) => session,
+                Err(SessionError::BadJournal { .. }) => continue,
+                Err(e) => return Err(e),
+            };
+            for op in session.in_state(OperationState::Done, None) {
+                if op.kind != OperationKind::CreateFolder {
+                    newer.moved_away.insert(key(&op.source), (id.clone(), op.destination.clone()));
+                }
+                newer.put_at.insert(key(&op.destination), id.clone());
+            }
+        }
+        Ok(newer)
+    }
+
+    /// Fails with a note if a newer Session has since moved `op`'s item on,
+    /// or put another item where `op` would put it back.
+    fn conflict(&self, op: &JournaledOperation) -> Result<(), String> {
+        if let Some((id, to)) = self.moved_away.get(&key(&op.destination)) {
+            return Err(format!("Session {id} has since moved it to {}; undo that Session first", to.display()));
+        }
+        if let Some(id) = self.put_at.get(&key(&op.source)) {
+            return Err(format!("Session {id} has since put another item at {}; undo that Session first", op.source.display()));
+        }
+        Ok(())
+    }
+}
+
+/// `path` as a key that matches it in any letter case, erring towards
+/// seeing a conflict.
+fn key(path: &Path) -> String {
+    path.to_string_lossy().to_lowercase()
 }
 
 /// Carries out again the undone Operations of Session `session_id` that
@@ -156,7 +311,7 @@ pub fn redo_operations(session_id: &str, operation_ids: &[String], journal_dir: 
     apply_each(&mut journal, &mut summary, Phase::Redo, session.in_state(OperationState::Undone, Some(&only)), |op| {
         match op.kind {
             OperationKind::CreateFolder => create_folder(&op.destination).map_err(|(_, r)| r),
-            OperationKind::Trash | OperationKind::Move => unchanged(&op.source, &op.planned, "since Undo put it back")
+            OperationKind::Trash | OperationKind::Move => ready_to_go(op, "since Undo put it back")
                 .and_then(|()| folder_exists(op))
                 .and_then(|()| move_without_overwriting(&op.source, &op.destination)),
         }
@@ -260,6 +415,49 @@ fn unchanged(path: &Path, expected: &SourceState, since: &str) -> Result<(), Str
     }
 }
 
+/// Fails with a note if `op`'s item isn't as planned: for an emptied folder,
+/// if it holds anything but OS Metadata Files and empty folders; for
+/// anything else, if it changed. `since` ends the note.
+fn ready_to_go(op: &JournaledOperation, since: &str) -> Result<(), String> {
+    if !op.planned.is_folder {
+        return unchanged(&op.source, &op.planned, since);
+    }
+    match fs::symlink_metadata(&op.source) {
+        Ok(metadata) if metadata.is_dir() => {}
+        Ok(_) => return Err(format!("It was replaced by something else {since}")),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Err("It no longer exists".into()),
+        Err(e) => return Err(format!("It couldn't be read: {e}")),
+    }
+    match first_kept(&op.source) {
+        Ok(None) => Ok(()),
+        Ok(Some(item)) => {
+            let name = item.strip_prefix(&op.source).unwrap_or(&item);
+            Err(format!("It isn't empty: {} is in it", name.display()))
+        }
+        Err(e) => Err(format!("It couldn't be read: {e}")),
+    }
+}
+
+/// The first item in `folder` that stops it counting as empty: anything
+/// but an OS Metadata File or a folder that is empty too.
+fn first_kept(folder: &Path) -> io::Result<Option<PathBuf>> {
+    for child in fs::read_dir(folder)? {
+        let child = child?;
+        let kind = child.file_type()?;
+        let path = child.path();
+        if kind.is_file() && is_os_metadata_file(&child.file_name().to_string_lossy()) {
+            continue;
+        }
+        if !kind.is_dir() {
+            return Ok(Some(path));
+        }
+        if let Some(kept) = first_kept(&path)? {
+            return Ok(Some(kept));
+        }
+    }
+    Ok(None)
+}
+
 /// `destination`, or if its name is taken (in any letter case), the first
 /// free name with a Clash Suffix in the same folder.
 fn free_destination(destination: &Path) -> PathBuf {
@@ -315,6 +513,31 @@ fn move_without_overwriting(from: &Path, to: &Path) -> Result<(), String> {
         io::ErrorKind::CrossesDevices => format!("{} is on a different disk from {}", from.display(), to.display()),
         _ => format!("Couldn't move it to {}: {e}", to.display()),
     })
+}
+
+/// Moves everything in the folder `from` into the folder `to`, then
+/// removes `from` once it is empty. Never replaces anything in `to`: an
+/// item whose name is taken there stays in `from`, which is then kept.
+fn merge_folder(from: &Path, to: &Path) -> Result<(), String> {
+    let children = fs::read_dir(from).map_err(|e| format!("Couldn't read it: {e}"))?;
+    let mut kept = None;
+    for child in children {
+        let child = child.map_err(|e| format!("Couldn't read it: {e}"))?;
+        let target = to.join(child.file_name());
+        let both_folders = child.file_type().is_ok_and(|t| t.is_dir()) && target.is_dir();
+        let merged = if both_folders {
+            merge_folder(&child.path(), &target)
+        } else {
+            move_without_overwriting(&child.path(), &target)
+        };
+        if let Err(note) = merged {
+            kept.get_or_insert(note);
+        }
+    }
+    match kept {
+        Some(note) => Err(note),
+        None => fs::remove_dir(from).map_err(|e| format!("Couldn't remove it: {e}")),
+    }
 }
 
 /// Removes `folder` and the folders above it, up to and including

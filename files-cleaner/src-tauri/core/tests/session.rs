@@ -7,7 +7,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use common::{empty_config, scan_root, write};
 use files_cleaner_core::{
-    build_plan, list_sessions, lock_sessions, redo_operations, run, scan, session_details, undo,
+    build_plan, list_sessions, lock_sessions, redo_operations, run, run_with_progress, scan, session_details, undo,
     undo_operations, OperationKind, OperationState, Plan, SessionError, SessionInfo, SessionStatus,
     TrashDestination, HOLDING_FOLDER_NAME,
 };
@@ -65,8 +65,10 @@ fn all_sessions(journal: &Path) -> Vec<SessionInfo> {
     list_sessions(journal, 0, usize::MAX).unwrap().sessions
 }
 
+/// The Operations ticked when the Plan is shown: all but trashing the
+/// folders it empties.
 fn all_ids(plan: &Plan) -> Vec<String> {
-    plan.operations.iter().map(|op| op.id.clone()).collect()
+    plan.operations.iter().filter(|op| op.ticked).map(|op| op.id.clone()).collect()
 }
 
 #[test]
@@ -83,6 +85,29 @@ fn run_trashes_only_approved_operations_into_the_holding_folder() {
     assert!(dir.path().join("a/copy.txt").exists(), "unapproved Operations don't run");
     assert_eq!(summary.done.len(), 1);
     assert!(summary.skipped.is_empty() && summary.failed.is_empty());
+}
+
+#[test]
+fn a_run_reports_its_progress_ending_with_every_operation_finished() {
+    let dir = scan_root();
+    set_modified(&write(dir.path(), "keep.txt", "same"), 9_000);
+    for i in 0..300 {
+        set_modified(&write(dir.path(), &format!("copies/{}/copy {i}.txt", i % 7), "same"), 1_000);
+    }
+    let journal = TempDir::new().unwrap();
+    let plan = plan_for(dir.path());
+    let approved = all_ids(&plan);
+    assert_eq!(approved.len(), 300);
+
+    let mut reports = Vec::new();
+    let summary = run_with_progress(&plan, &approved, journal.path(), |p| reports.push(p)).unwrap();
+
+    assert_eq!(summary.done.len(), 300);
+    assert!(reports.iter().all(|p| p.total == 300 && p.finished <= p.total));
+    assert!(reports.windows(2).all(|w| w[0].finished <= w[1].finished), "never goes backwards");
+    assert_eq!(reports[0].finished, 0, "the first report comes before anything moves");
+    let last = reports.last().unwrap();
+    assert_eq!((last.finished, last.current.as_path()), (300, plan.root.as_path()));
 }
 
 #[test]

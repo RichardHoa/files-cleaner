@@ -1,27 +1,29 @@
 // What the Plan screen shows: the Operations grouped by Reason, and one group's files searched,
 // sorted, filtered and paged. Operations are the Plan's, with `relativePath` and `destination` as
-// names from the Scan Root down and `reason` either `{ type: "duplicate", keeper }` or
-// `{ type: "rule", rule }`; the Session screen lists its own Operations, which have `relativePath`
-// too, with the same functions.
+// names from the Scan Root down and `reason` one of `{ type: "duplicate", keeper }`,
+// `{ type: "rule", rule }` or `{ type: "emptiedFolder" }`; the Session screen lists its own
+// Operations, which have `relativePath` too, with the same functions.
 
 import { splitPath } from "./format.js";
 
 /**
  * `[{ reason, operations }]`, one per Reason that has any Operations: the duplicates first
  * (`reason: "duplicates"`), then one per Rule (`reason: "rule"`, with its name as `rule`) in the
- * order the Plan first names it.
+ * order the Plan first names it, then the folders the Plan empties (`reason: "emptiedFolders"`).
  */
 export function groupByReason(operations) {
   const duplicates = { reason: "duplicates", operations: [] };
+  const emptied = { reason: "emptiedFolders", operations: [] };
   const rules = new Map();
   for (const op of operations) {
     if (op.reason.type === "duplicate") duplicates.operations.push(op);
+    else if (op.reason.type === "emptiedFolder") emptied.operations.push(op);
     else {
       if (!rules.has(op.reason.rule)) rules.set(op.reason.rule, { reason: "rule", rule: op.reason.rule, operations: [] });
       rules.get(op.reason.rule).operations.push(op);
     }
   }
-  return [duplicates, ...rules.values()].filter((group) => group.operations.length > 0);
+  return [duplicates, ...rules.values(), emptied].filter((group) => group.operations.length > 0);
 }
 
 /**

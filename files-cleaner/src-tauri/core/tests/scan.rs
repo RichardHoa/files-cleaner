@@ -3,7 +3,7 @@ mod common;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use common::{empty_config, scan_root, write};
+use common::{empty_config, scan_root, symlink, write};
 use files_cleaner_core::{scan, scan_with_progress, ScanResult};
 
 /// Paths of the scanned entries relative to the Scan Root, sorted. Also
@@ -52,6 +52,8 @@ fn reports_name_extension_size_and_dates() {
     assert_eq!(lecture.extension, "PPTX");
     assert_eq!(lecture.size, 12);
     assert_eq!(lecture.modified, 1_709_632_800_000);
+    // Some Linux file systems don't record when a file was created.
+    #[cfg(not(target_os = "linux"))]
     assert!(lecture.created.is_some());
     assert!(!lecture.is_package);
 }
@@ -95,9 +97,9 @@ fn never_follows_symlinks() {
     write(outside.path(), "elsewhere/secret.txt", "outside the root");
     let dir = scan_root();
     write(dir.path(), "real.txt", "real");
-    std::os::unix::fs::symlink(dir.path().join("real.txt"), dir.path().join("link.txt")).unwrap();
-    std::os::unix::fs::symlink(outside.path().join("elsewhere"), dir.path().join("elsewhere")).unwrap();
-    std::os::unix::fs::symlink(dir.path(), dir.path().join("loop")).unwrap();
+    symlink(dir.path().join("real.txt"), dir.path().join("link.txt"));
+    symlink(outside.path().join("elsewhere"), dir.path().join("elsewhere"));
+    symlink(dir.path(), dir.path().join("loop"));
 
     let result = scan(dir.path(), &empty_config(dir.path())).unwrap();
 
@@ -123,7 +125,7 @@ fn treats_packages_as_one_item_with_their_total_size() {
     write(dir.path(), "Tool.app/Contents/MacOS/tool", "0123456789");
     write(dir.path(), "Tool.app/Contents/Info.plist", "plist");
     write(dir.path(), "Tool.app/Contents/.hidden", "abc");
-    std::os::unix::fs::symlink("/usr/bin", dir.path().join("Tool.app/Contents/bin")).unwrap();
+    symlink(dir.path(), dir.path().join("Tool.app/Contents/bin"));
     write(dir.path(), "school/Essay.pages/Index.zip", "1234");
     write(dir.path(), "school/plain.txt", "p");
 
@@ -143,6 +145,7 @@ fn treats_packages_as_one_item_with_their_total_size() {
 }
 
 #[test]
+#[cfg(unix)]
 fn an_unreadable_folder_is_counted_and_the_scan_carries_on() {
     use std::os::unix::fs::PermissionsExt;
     let dir = scan_root();
@@ -161,6 +164,7 @@ fn an_unreadable_folder_is_counted_and_the_scan_carries_on() {
 }
 
 #[test]
+#[cfg(unix)]
 fn a_package_with_an_unreadable_folder_inside_is_still_listed() {
     use std::os::unix::fs::PermissionsExt;
     let dir = scan_root();

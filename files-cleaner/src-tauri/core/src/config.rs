@@ -33,7 +33,9 @@ pub struct Config {
     pub rules: Vec<Rule>,
 }
 
-/// Where Trash sends files.
+/// Where Trash sends files. Only the Holding Folder is supported: the
+/// System Trash is deferred (ADR-0001), and a config asking for it is
+/// rejected rather than silently ignored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TrashDestination {
@@ -141,6 +143,14 @@ struct RawThen {
 /// Parses and validates the config JSON. `home` expands `~/` paths.
 pub fn load_config(text: &str, home: &Path) -> Result<Config, ConfigError> {
     let raw: RawConfig = serde_json::from_str(text).map_err(json_error)?;
+    if raw.trash_destination == TrashDestination::SystemTrash {
+        return Err(error_at(
+            text,
+            0,
+            "systemTrash",
+            "trashDestination \"systemTrash\" is not supported yet; use \"holdingFolder\"".into(),
+        ));
+    }
 
     let mut never_touch = Vec::new();
     for written in &raw.never_touch {
@@ -151,7 +161,7 @@ pub fn load_config(text: &str, home: &Path) -> Result<Config, ConfigError> {
                     text,
                     0,
                     written,
-                    format!("Never-Touch Path \"{written}\" must start with / or ~/"),
+                    format!("Never-Touch Path \"{written}\" must be a full path or start with ~/"),
                 ))
             }
         }
@@ -243,13 +253,16 @@ fn rename_problem(template: &str) -> Option<String> {
     None
 }
 
-/// The absolute path `written` names, or `None` if it is relative.
+/// The absolute path `written` names, or `None` if it is relative. `~`
+/// is the user's home folder on every OS; on Windows `~\` works too, as do
+/// `C:\…` paths.
 fn expand_home(written: &str, home: &Path) -> Option<PathBuf> {
-    if written == "~" {
+    let after_tilde = written.strip_prefix('~');
+    if after_tilde == Some("") {
         Some(home.to_path_buf())
-    } else if let Some(rest) = written.strip_prefix("~/") {
+    } else if let Some(rest) = after_tilde.and_then(|rest| rest.strip_prefix(std::path::is_separator)) {
         Some(home.join(rest))
-    } else if written.starts_with('/') {
+    } else if Path::new(written).is_absolute() {
         Some(PathBuf::from(written))
     } else {
         None

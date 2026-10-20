@@ -18,12 +18,13 @@ fn plan_for(root: &Path) -> Plan {
     build_plan(&scan(root, &config).unwrap(), &config)
 }
 
-/// The relative paths the Plan trashes, sorted, `/`-separated.
+/// The relative paths the Plan trashes, sorted, `/`-separated, leaving out
+/// the folders it empties.
 fn trashed(plan: &Plan) -> Vec<String> {
     let mut paths: Vec<String> = plan
         .operations
         .iter()
-        .filter(|op| op.kind == OperationKind::Trash)
+        .filter(|op| op.kind == OperationKind::Trash && op.reason != Reason::EmptiedFolder)
         .map(|op| op.relative_path.join("/"))
         .collect();
     paths.sort();
@@ -179,6 +180,7 @@ fn each_trashed_copy_names_where_it_goes_and_its_keeper() {
     let summary: Vec<(String, String, String)> = plan
         .operations
         .iter()
+        .filter(|op| op.reason != Reason::EmptiedFolder)
         .map(|op| {
             let Reason::Duplicate { keeper } = &op.reason else { panic!("{:?} isn't a duplicate", op.reason) };
             (op.relative_path.join("/"), op.destination.join("/"), keeper.join("/"))

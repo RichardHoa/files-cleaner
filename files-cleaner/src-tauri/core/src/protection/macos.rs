@@ -1,3 +1,4 @@
+use std::fs::DirEntry;
 use std::path::Path;
 
 use objc2::rc::Retained;
@@ -10,25 +11,26 @@ const SYSTEM_FOLDERS: &[&str] = &[
     "/System", "/Library", "/Applications", "/usr", "/bin", "/sbin", "/private",
 ];
 
-/// Why `path` is a disk's root folder (`/`, `/Volumes`, `/Volumes/<disk>`),
-/// if it is. Only the root itself is protected, not the folders on the disk.
-pub fn disk_root_reason(path: &Path) -> Option<String> {
-    let is_root = path == Path::new("/")
-        || (is_within(path, Path::new("/Volumes")) && path.components().count() <= 3);
-    is_root.then(|| format!("{} is a disk's root folder", path.display()))
+/// True if `path` is a Disk Root: `/`, `/Volumes` or `/Volumes/<disk>`.
+pub fn is_disk_root(path: &Path) -> bool {
+    path == Path::new("/") || (is_within(path, Path::new("/Volumes")) && path.components().count() <= 3)
 }
 
 /// Why `path`, and so everything inside it, is one of macOS's System
 /// Folders, if it is.
 pub fn builtin_reason(path: &Path, home: &Path) -> Option<String> {
-    if let Some(system) = SYSTEM_FOLDERS.iter().find(|s| same_path(path, Path::new(s))) {
-        return Some(format!("{system} is a system folder"));
-    }
-    let library = home.join("Library");
-    if same_path(path, &library) {
-        return Some(format!("{} is your Library folder", library.display()));
-    }
-    None
+    SYSTEM_FOLDERS
+        .iter()
+        .map(|folder| Path::new(folder).to_path_buf())
+        .chain([home.join("Library")])
+        .find(|folder| same_path(path, folder))
+        .map(|folder| format!("{} is a System Folder", folder.display()))
+}
+
+/// macOS marks hidden files by a leading dot only, which is checked on
+/// every OS.
+pub fn is_hidden(_entry: &DirEntry) -> bool {
+    false
 }
 
 /// True if macOS says `folder` is a Package, which also covers third-party
