@@ -63,7 +63,7 @@ One atomic file-system change: Move (possibly under a new name, when a Rule rena
 _Avoid_: action, step, task
 
 **Reason**:
-Why the Plan proposes an Operation: a **Duplicate** (naming the Keeper it leaves in place), a **Suggested Folder** (naming that folder) or a **Rule** (naming that Rule). The Plan is grouped by Reason. Why an Operation was skipped or failed is not a Reason: that is its Note.
+Why the Plan proposes an Operation: a **Duplicate** (naming the Keeper it leaves in place), a **Suggested Folder** (naming that folder), a **Rule** (naming that Rule) or an **Emptied Folder** (every item in it leaves, so the folder itself is offered for Trash, unticked). The Plan is grouped by Reason. Why an Operation was skipped or failed is not a Reason: that is its Note.
 _Avoid_: cause, source, explanation
 
 **Note**:

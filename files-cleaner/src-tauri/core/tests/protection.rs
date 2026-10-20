@@ -114,17 +114,21 @@ fn a_target_folder_without_cargo_toml_is_ordinary() {
 }
 
 #[test]
-fn skips_finder_metadata_files() {
+fn skips_os_metadata_files_from_every_os() {
     let dir = scan_root();
     write(dir.path(), "photo.jpg", "jpg");
     write(dir.path(), ".DS_Store", "ds");
     write(dir.path(), "sub/.localized", "");
     write(dir.path(), "sub/Icon\r", "icon");
+    write(dir.path(), "sub/Thumbs.db", "thumbs");
+    write(dir.path(), "sub/desktop.ini", "ini");
+    write(dir.path(), "sub/deeper/.directory", "kde");
+    write(dir.path(), "sub/deeper/THUMBS.DB", "thumbs");
 
     let result = scan(dir.path(), &empty_config(dir.path())).unwrap();
 
     assert_eq!(names(&result), ["photo.jpg"]);
-    assert_eq!(result.skipped, 3);
+    assert_eq!(result.skipped, 7);
 }
 
 #[test]
@@ -158,6 +162,7 @@ fn skips_the_holding_folder() {
 }
 
 #[test]
+#[cfg(target_os = "macos")]
 fn skips_the_users_library_folder() {
     let home = scan_root();
     write(home.path(), "Library/Preferences/app.plist", "plist");
@@ -195,6 +200,7 @@ fn warning(root: &Path, home: &Path) -> String {
 }
 
 #[test]
+#[cfg(target_os = "macos")]
 fn warns_about_system_folders_as_the_scan_root() {
     let home = scan_root();
     for root in ["/System", "/Library/Fonts", "/Applications", "/usr/bin", "/bin", "/sbin", "/private/etc", "/Volumes"] {
@@ -203,6 +209,7 @@ fn warns_about_system_folders_as_the_scan_root() {
 }
 
 #[test]
+#[cfg(target_os = "macos")]
 fn warns_about_a_scan_root_that_reaches_a_system_folder_through_a_symlink() {
     // `/tmp` is a symlink to `/private/tmp`.
     let home = scan_root();
@@ -210,6 +217,7 @@ fn warns_about_a_scan_root_that_reaches_a_system_folder_through_a_symlink() {
 }
 
 #[test]
+#[cfg(target_os = "macos")]
 fn warns_about_a_volume_root_as_the_scan_root() {
     let home = scan_root();
     let volume = fs::read_dir("/Volumes").unwrap().next().unwrap().unwrap().path();
@@ -229,7 +237,6 @@ fn warns_about_protected_folders_and_anything_inside_them_as_the_scan_root() {
     let reason = warning(&project.join("node_modules/pkg/lib"), home.path());
     assert!(reason.contains("node_modules"), "{reason}");
     warning(&project.join("target/debug"), home.path());
-    warning(&home.path().join("Library/Caches"), home.path());
     warning(&home.path().join("Tool.app/Contents"), home.path());
 }
 
@@ -256,6 +263,7 @@ fn an_ordinary_folder_has_no_warning() {
 }
 
 #[test]
+#[cfg(target_os = "macos")]
 fn a_folder_inside_the_library_folder_can_be_scanned_after_its_warning() {
     // Cloud drives such as OneDrive live in ~/Library/CloudStorage.
     let home = scan_root();
@@ -304,12 +312,14 @@ fn a_folder_inside_a_package_can_be_scanned_after_its_warning() {
 }
 
 #[test]
+#[cfg(unix)]
 fn warns_about_the_startup_disk_root_as_the_scan_root() {
     let home = scan_root();
     warning(Path::new("/"), home.path());
 }
 
 #[test]
+#[cfg(target_os = "macos")]
 fn a_folder_on_a_disk_under_volumes_can_be_scanned() {
     // The startup disk also appears under /Volumes; reach the test folder
     // through it, as if it were on an external disk.
@@ -328,4 +338,147 @@ fn a_folder_on_a_disk_under_volumes_can_be_scanned() {
     let result = scan(&via_volumes, &empty_config(dir.path())).unwrap();
 
     assert_eq!(names(&result), ["a.txt"]);
+}
+
+#[test]
+fn reasons_use_the_os_neutral_words() {
+    let home = scan_root();
+    write(home.path(), "Thumbs.db/inside.txt", "x");
+
+    let reason = warning(&home.path().join("Thumbs.db"), home.path());
+
+    assert!(reason.contains("is an OS Metadata File"), "{reason}");
+}
+
+#[test]
+fn a_package_copied_from_a_mac_is_one_item_on_every_os() {
+    let dir = scan_root();
+    write(dir.path(), "Essay.pages/Index/Document.iwa", "doc");
+    write(dir.path(), "Backup.sparsebundle/bands/0", "band");
+
+    let result = scan(dir.path(), &empty_config(dir.path())).unwrap();
+
+    assert_eq!(names(&result), ["Backup.sparsebundle", "Essay.pages"]);
+    assert!(result.entries.iter().all(|e| e.is_package));
+}
+
+#[cfg(target_os = "macos")]
+mod macos {
+    use super::*;
+
+    #[test]
+    fn the_users_library_folder_is_a_system_folder() {
+        let home = scan_root();
+        write(home.path(), "Library/Caches/x", "x");
+
+        let reason = warning(&home.path().join("Library/Caches"), home.path());
+
+        assert!(reason.contains("is a System Folder"), "{reason}");
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod linux {
+    use super::*;
+
+    #[test]
+    fn warns_about_system_folders_as_the_scan_root() {
+        let home = scan_root();
+        for root in [
+            "/usr", "/usr/share", "/etc", "/bin", "/sbin", "/lib", "/lib64", "/boot", "/proc", "/sys", "/dev",
+            "/run", "/var/log", "/opt", "/snap",
+        ] {
+            let reason = warning(Path::new(root), home.path());
+            assert!(reason.contains("is a System Folder"), "{root}: {reason}");
+        }
+    }
+
+    #[test]
+    fn the_config_local_and_cache_folders_in_home_are_system_folders() {
+        let home = scan_root();
+        write(home.path(), "Documents/a.txt", "a");
+        for folder in [".config", ".local/share", ".cache", ".CONFIG"] {
+            let reason = warning(&home.path().join(folder), home.path());
+            assert!(reason.contains("is a System Folder"), "{folder}: {reason}");
+        }
+        assert_eq!(scan_root_warning(&home.path().join("Documents"), &empty_config(home.path())), None);
+    }
+
+    #[test]
+    fn skips_system_folders_in_home_when_scanning_it() {
+        let home = scan_root();
+        write(home.path(), "notes.txt", "n");
+        // Not hidden here, so only protection keeps them out.
+        let config = config(r#"{ "neverTouch": [] }"#, &home.path().join("me"));
+        write(home.path(), "me/report.pdf", "pdf");
+        write(home.path(), "me/.config/app/settings.json", "{}");
+
+        let result = scan(&home.path().join("me"), &config).unwrap();
+
+        assert_eq!(names(&result), ["report.pdf"]);
+        assert_eq!(result.skipped, 1);
+    }
+
+    #[test]
+    fn disk_roots_are_protected_but_folders_on_the_disk_are_not() {
+        let home = scan_root();
+        for root in ["/", "/mnt", "/mnt/usb", "/media", "/media/me", "/media/me/USB STICK", "/run/media/me/disk"] {
+            let reason = warning(Path::new(root), home.path());
+            assert!(reason.contains("is a Disk Root") || reason.contains("System Folder"), "{root}: {reason}");
+        }
+        for root in ["/mnt/usb/Photos", "/media/me/USB STICK/Photos", "/run/media/me/disk/Photos"] {
+            assert_eq!(scan_root_warning(Path::new(root), &empty_config(home.path())), None, "{root}");
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+mod windows {
+    use super::*;
+
+    #[test]
+    fn warns_about_system_folders_as_the_scan_root() {
+        let home = scan_root();
+        for root in [
+            r"C:\Windows", r"C:\Windows\System32", r"C:\Program Files", r"C:\Program Files (x86)\App",
+            r"C:\ProgramData", r"C:\$Recycle.Bin", r"C:\System Volume Information", r"c:\windows",
+        ] {
+            let reason = warning(Path::new(root), home.path());
+            assert!(reason.contains("is a System Folder"), "{root}: {reason}");
+        }
+    }
+
+    #[test]
+    fn the_app_data_folder_in_home_is_a_system_folder() {
+        let home = scan_root();
+        write(home.path(), "AppData/Local/x.txt", "x");
+
+        let reason = warning(&home.path().join(r"AppData\Local"), home.path());
+
+        assert!(reason.contains("is a System Folder"), "{reason}");
+    }
+
+    #[test]
+    fn drive_roots_are_disk_roots() {
+        let home = scan_root();
+        let reason = warning(Path::new(r"C:\"), home.path());
+        assert!(reason.contains("is a Disk Root"), "{reason}");
+    }
+
+    #[test]
+    fn skips_entries_with_the_hidden_or_system_attribute() {
+        use std::os::windows::process::CommandExt;
+        let dir = scan_root();
+        write(dir.path(), "seen.txt", "s");
+        let hidden = write(dir.path(), "hidden.txt", "h");
+        let system = write(dir.path(), "system.txt", "s");
+        for (path, flag) in [(&hidden, "+h"), (&system, "+s")] {
+            let status = std::process::Command::new("attrib").arg(flag).arg(path).creation_flags(0).status().unwrap();
+            assert!(status.success());
+        }
+
+        let result = scan(dir.path(), &empty_config(dir.path())).unwrap();
+
+        assert_eq!(names(&result), ["seen.txt"]);
+    }
 }

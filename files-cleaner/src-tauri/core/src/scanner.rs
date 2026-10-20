@@ -7,7 +7,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 
 use crate::config::Config;
-use crate::protection::{is_package, Protection};
+use crate::protection::{canonical, is_hidden, is_package, Protection};
 
 /// One scanned file.
 #[derive(Debug, Clone, Serialize)]
@@ -103,7 +103,7 @@ pub fn scan_with_progress(
     config: &Config,
     mut on_progress: impl FnMut(ScanProgress),
 ) -> Result<ScanResult, ScanError> {
-    let root = fs::canonicalize(scan_root)?;
+    let root = canonical(scan_root)?;
     let protection = Protection::new(config);
     let mut result = ScanResult {
         entries: Vec::new(),
@@ -142,8 +142,9 @@ pub fn scan_with_progress(
             }
             let Ok(child) = child else { continue };
             let path = child.path();
-            // Never follows symlinks: the type is the link's own. Finder
-            // aliases are plain files, so they are listed but never resolved.
+            // Never follows symlinks: the type is the link's own. macOS
+            // aliases and Windows shortcuts are plain files, so they are
+            // listed but never resolved.
             let Ok(kind) = child.file_type() else {
                 result.unreadable.push(path);
                 continue;
@@ -155,7 +156,7 @@ pub fn scan_with_progress(
                 result.skipped += 1;
                 continue;
             }
-            if child.file_name().to_string_lossy().starts_with('.') {
+            if is_hidden(&child) {
                 continue;
             }
             if kind.is_file() && path.extension().is_none_or(|e| e.is_empty()) {

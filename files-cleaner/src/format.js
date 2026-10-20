@@ -1,6 +1,6 @@
 const UNITS = ["bytes", "KB", "MB", "GB", "TB"];
 
-/** 1536 → "1.5 KB", like Finder (powers of 1000). */
+/** 1536 → "1.5 KB", like macOS and most Linux file managers (powers of 1000). */
 export function formatSize(bytes) {
   let value = bytes;
   let unit = 0;

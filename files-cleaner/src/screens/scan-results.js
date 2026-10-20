@@ -1,6 +1,6 @@
 // Scan results: every scanned file and Package, plus what was left alone.
 // Scans can list 100,000+ items, so the table only builds the rows in view.
-import { buildPlan, describeError, pathSeparator, revealInFinder } from "../api.js";
+import { buildPlan, describeError, pathSeparator, revealInFileManager } from "../api.js";
 import { el } from "../dom.js";
 import { count, fitTail, formatDate, formatSize, plural } from "../format.js";
 import { icon } from "../icons.js";
@@ -134,7 +134,7 @@ function extensionOptions(rows) {
  * A scrolling table that builds only the rows in view. `show(rows)` swaps its contents and
  * `setSort(sort)` marks the sorted column; clicking a header calls `onSort(key)`.
  * Columns resize by dragging a header's right edge (double-click resets), and widths are remembered.
- * Clicking a row selects it and opens a menu with "Show in Finder".
+ * Clicking a row selects it and opens a menu with "Show in folder".
  */
 function virtualList(sort, onSort) {
   const widths = loadWidths();
@@ -219,9 +219,9 @@ function virtualList(sort, onSort) {
     selected = entry.path;
     rowNode.classList.add("selected");
 
-    const reveal = el("button", { type: "button", role: "menuitem" }, "Show in Finder");
+    const reveal = el("button", { type: "button", role: "menuitem" }, "Show in folder");
     reveal.addEventListener("click", () =>
-      revealInFinder(entry.path).then(closeMenu, (error) =>
+      revealInFileManager(entry.path).then(closeMenu, (error) =>
         menu.replaceChildren(el("p", { className: "status error" }, describeError(error))),
       ),
     );

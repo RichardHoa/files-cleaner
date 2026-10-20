@@ -13,12 +13,13 @@ mod rules;
 mod scanner;
 mod session_id;
 mod sessions;
+mod volume;
 
 pub use config::{
     load_config, Config, ConfigError, DuplicateHandling, Rule, RuleOperation, RuleTarget,
     TrashDestination, EXAMPLE_CONFIG,
 };
-pub use executor::{redo_operations, run, undo, undo_operations, Outcome, Summary};
+pub use executor::{redo_operations, run, run_with_progress, undo, undo_operations, Outcome, RunProgress, Summary};
 pub use journal::{lock_sessions, SessionError, SessionLock};
 pub use planner::{build_plan, Operation, OperationKind, Plan, Reason, SourceState, THIS_SESSION_FOLDER};
 pub use protection::HOLDING_FOLDER_NAME;

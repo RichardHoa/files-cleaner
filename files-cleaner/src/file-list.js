@@ -1,6 +1,6 @@
 // Pieces shared by the Plan and Session screens' file lists: the "Show more" links under a
 // list, and the menu a right-click on a file opens.
-import { describeError, revealInFinder } from "./api.js";
+import { describeError, revealInFileManager } from "./api.js";
 import { el } from "./dom.js";
 import { PAGE_SIZE } from "./plan-view.js";
 
@@ -24,8 +24,8 @@ export function drawMore(node, total, shown, setLimit) {
 }
 
 /**
- * A right-click menu with "Show in Finder". `node` goes on the page once; `open(paths, row, event)`
- * opens it for the `contextmenu` `event` on `row`, and Show in Finder selects `paths` in Finder.
+ * A right-click menu with "Show in folder". `node` goes on the page once; `open(paths, row, event)`
+ * opens it for the `contextmenu` `event` on `row`, and Show in folder selects `paths` in the file manager.
  */
 export function revealMenu() {
   const menu = el("div", { className: "row-menu file-menu", role: "menu", hidden: true });
@@ -43,9 +43,9 @@ export function revealMenu() {
     if (event.key === "Escape") close();
   };
   function open(paths, row, event) {
-    const reveal = el("button", { type: "button", role: "menuitem" }, "Show in Finder");
+    const reveal = el("button", { type: "button", role: "menuitem" }, "Show in folder");
     reveal.addEventListener("click", () =>
-      revealInFinder(paths).then(close, (error) => menu.replaceChildren(el("p", { className: "status error" }, describeError(error)))),
+      revealInFileManager(paths).then(close, (error) => menu.replaceChildren(el("p", { className: "status error" }, describeError(error)))),
     );
     menu.replaceChildren(reveal);
     menu.hidden = false;

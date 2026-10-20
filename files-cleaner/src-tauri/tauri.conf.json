@@ -28,6 +28,22 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "category": "Utility",
+    "shortDescription": "Tidy a messy folder with a plan you approve and can undo",
+    "longDescription": "Files Cleaner scans a folder, finds exact duplicates and shows every proposed change before anything happens. Nothing is deleted: trashed files go to a Holding Folder, and every Session can be undone.",
+    "linux": {
+      "deb": {
+        "depends": []
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    }
   }
 }

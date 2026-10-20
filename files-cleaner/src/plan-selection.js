@@ -1,5 +1,15 @@
 // Which Plan Operations are ticked. `ticked` is a Set of Operation IDs.
 
+/** The Operations ticked when the Plan is first shown: those it ticks, never one with an error. */
+export function initiallyTicked(operations) {
+  return new Set(operations.filter((op) => op.ticked && !op.error).map((op) => op.id));
+}
+
+/** The IDs of the `operations` that can be ticked: all but those with an error. */
+export function tickableIds(operations) {
+  return operations.filter((op) => !op.error).map((op) => op.id);
+}
+
 /** Totals for the ticked Operations: how many, how many of each kind, and bytes to be trashed. */
 export function totals(operations, ticked) {
   const byKind = {};

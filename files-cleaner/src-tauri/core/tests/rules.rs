@@ -18,9 +18,14 @@ fn plan_with(root: &Path, home: &Path, text: &str) -> Plan {
     build_plan(&scan(root, &config).unwrap(), &config)
 }
 
-/// Each Operation as `(kind, source relative path, destination relative path)`.
+/// Each Operation as `(kind, source relative path, destination relative
+/// path)`, leaving out trashing the folders the Plan empties.
 fn summary(plan: &Plan) -> Vec<(OperationKind, String, String)> {
-    plan.operations.iter().map(|op| (op.kind, op.relative_path.join("/"), op.destination.join("/"))).collect()
+    plan.operations
+        .iter()
+        .filter(|op| op.reason != Reason::EmptiedFolder)
+        .map(|op| (op.kind, op.relative_path.join("/"), op.destination.join("/")))
+        .collect()
 }
 
 #[test]
@@ -43,7 +48,8 @@ fn a_trash_rule_trashes_matching_files_into_the_holding_folder() {
             (OperationKind::Trash, "setup.dmg".into(), "Files Cleaner Trash/This Session/setup.dmg".into()),
         ]
     );
-    assert!(plan.operations.iter().all(|op| op.reason == Reason::Rule { rule: "Disk images".into() }));
+    let reasons = plan.operations.iter().map(|op| &op.reason);
+    assert!(reasons.filter(|r| **r != Reason::EmptiedFolder).all(|r| *r == Reason::Rule { rule: "Disk images".into() }));
 }
 
 /// The Rule each Operation was proposed by, by relative path; "duplicate"
@@ -52,10 +58,12 @@ fn reasons(plan: &Plan) -> Vec<(String, String)> {
     let mut found: Vec<(String, String)> = plan
         .operations
         .iter()
+        .filter(|op| op.reason != Reason::EmptiedFolder)
         .map(|op| {
             let why = match &op.reason {
                 Reason::Duplicate { .. } => "duplicate".to_string(),
                 Reason::Rule { rule } => rule.clone(),
+                Reason::EmptiedFolder => "emptied folder".to_string(),
             };
             (op.relative_path.join("/"), why)
         })

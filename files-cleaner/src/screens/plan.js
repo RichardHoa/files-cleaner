@@ -6,8 +6,8 @@ import { el } from "../dom.js";
 import { drawMore, revealMenu } from "../file-list.js";
 import { formatSize, plural, splitPath } from "../format.js";
 import { kindIcon } from "../kinds.js";
-import { describeSummary } from "../outcomes.js";
-import { tickState, toggleAll, totals } from "../plan-selection.js";
+import { describeRunProgress, describeSummary } from "../outcomes.js";
+import { initiallyTicked, tickState, tickableIds, toggleAll, totals } from "../plan-selection.js";
 import {
   PAGE_SIZE,
   copyCounts,
@@ -20,7 +20,7 @@ import {
   selectedFile,
   visibleFiles,
 } from "../plan-view.js";
-import { busy } from "../status.js";
+import { busy, showStatus } from "../status.js";
 
 /**
  * What a Reason group's card and detail pane say. `why` and `tickLabel` take one of its Operations
@@ -33,6 +33,15 @@ function reasonWords(group) {
       explain: "Exact copies. The newest copy of each file stays where it is.",
       why: (op, folder) => `An exact copy of a newer file, so this one goes to ${folder}.`,
       tickLabel: () => "Move this copy",
+    };
+  }
+  if (group.reason === "emptiedFolders") {
+    return {
+      noun: "empty folder",
+      explain: "Folders left empty once their files move. Left out unless you tick them; only moved if still empty.",
+      why: (op, folder) =>
+        `Every file in it moves, so it would be left empty. If ticked, it goes to ${folder}, but only if nothing new is in it by then.`,
+      tickLabel: () => "Move this empty folder",
     };
   }
   const rule = `Your Rule “${group.rule}”`;
@@ -53,7 +62,7 @@ const SORT_NAMES = { size: "biggest first", name: "by name", folder: "by folder"
 
 export function render(root, nav, result, plan) {
   const rootName = splitPath(plan.root, pathSeparator).name;
-  let ticked = new Set(plan.operations.map((op) => op.id));
+  let ticked = initiallyTicked(plan.operations);
 
   const cancel = el("button", { type: "button" }, "Cancel");
   cancel.addEventListener("click", () => nav.scanResults(result));
@@ -84,7 +93,9 @@ export function render(root, nav, result, plan) {
   };
   run.addEventListener("click", async () => {
     const files = plural(ticked.size, "file");
-    const session = await busy(status, [run, cancel], `Moving ${files}…`, () => runPlan([...ticked]));
+    const session = await busy(status, [run, cancel], `Moving ${files}…`, () =>
+      runPlan([...ticked], (progress) => showStatus(status, describeRunProgress(progress))),
+    );
     if (session) nav.session(session.sessionId, null, describeSummary(session, "moved"));
     else drawHeader();
   });
@@ -93,7 +104,7 @@ export function render(root, nav, result, plan) {
   const cards = groups.map((group) => card(group));
   function card(group) {
     const words = reasonWords(group);
-    const ids = group.operations.map((op) => op.id);
+    const ids = tickableIds(group.operations);
     // A Rule's folders to create come first; the card shows where its files go.
     const first = group.operations.find((op) => op.kind !== "createFolder") ?? group.operations[0];
     const { folder, insideRoot } = destinationFolder(first, plan.root, pathSeparator);
@@ -115,7 +126,7 @@ export function render(root, nav, result, plan) {
       ),
       el("span", { className: "plan-card-explain" }, words.explain),
     );
-    const box = el("input", { type: "checkbox", ariaLabel: `Include every ${words.noun}` });
+    const box = el("input", { type: "checkbox", ariaLabel: `Include every ${words.noun}`, disabled: ids.length === 0 });
     box.addEventListener("change", () => setTicked(toggleAll(ids, ticked)));
     const node = el("div", { className: "plan-card" }, pick, el("label", { className: "plan-include" }, box, "Include all"));
     pick.addEventListener("click", () => {
@@ -132,7 +143,7 @@ export function render(root, nav, result, plan) {
       pick.ariaPressed = String(current);
       const tickedOps = group.operations.filter((op) => ticked.has(op.id));
       const all = plural(group.operations.length, words.noun);
-      what.textContent = tickedOps.length === ids.length ? all : `${tickedOps.length} of ${all}`;
+      what.textContent = tickedOps.length === group.operations.length ? all : `${tickedOps.length} of ${all}`;
       size.textContent = formatSize(tickedOps.reduce((sum, op) => sum + op.size, 0));
       const state = tickState(ids, ticked);
       box.checked = state === "all";
@@ -189,7 +200,8 @@ export function render(root, nav, result, plan) {
   };
 
   function fileRow(op, index) {
-    const box = el("input", { type: "checkbox", ariaLabel: `Move ${fileName(op)}` });
+    // An Operation that can't happen can't be ticked; its row says why instead.
+    const box = el("input", { type: "checkbox", ariaLabel: `Move ${fileName(op)}`, disabled: Boolean(op.error) });
     // Read after the name when the box gets focus, which is how a row is selected from the keyboard.
     box.setAttribute("aria-describedby", `plan-folder-${index} plan-size-${index}`);
     box.addEventListener("change", () => setTicked(withTick(op.id, box.checked)));
@@ -205,7 +217,7 @@ export function render(root, nav, result, plan) {
         { className: "plan-file-name", title: fileName(op) },
         fileName(op),
         n > 2 ? el("span", { className: "muted" }, ` · ${n} copies`) : "",
-        el("span", { className: "plan-left-out" }, " · Left out"),
+        el("span", { className: "plan-left-out" }, op.error ? " · Can't move" : " · Left out"),
       ),
       // Wrapped in left-to-right marks so the right-to-left box keeps the folder's end, not its slashes.
       el("span", { className: "plan-file-folder path", id: `plan-folder-${index}`, title: fullFolder(op) }, `‎${folder}‎`),
@@ -222,11 +234,12 @@ export function render(root, nav, result, plan) {
       const keeper = op.reason.type === "duplicate" ? [[plan.root, ...op.reason.keeper].join(pathSeparator)] : [];
       menu.open([op.source, ...keeper], row, event);
     });
+    if (op.error) row.classList.add("blocked");
     return { op, row, box };
   }
   const fullFolder = (op) => [plan.root, ...op.relativePath.slice(0, -1)].join(pathSeparator);
 
-  // Right-clicking a file opens a menu with "Show in Finder", which selects the file and, for a
+  // Right-clicking a file opens a menu with "Show in folder", which selects the file and, for a
   // duplicate, its Keeper too.
   const menu = revealMenu();
 
@@ -286,13 +299,14 @@ export function render(root, nav, result, plan) {
     }
     paneFile = op;
     const words = reasonWords(view.group);
-    const box = el("input", { type: "checkbox", checked: ticked.has(op.id) });
+    const box = el("input", { type: "checkbox", checked: ticked.has(op.id), disabled: Boolean(op.error) });
     box.addEventListener("change", () => setTicked(withTick(op.id, box.checked)));
     paneBox = box;
     pane.replaceChildren(
       el("h3", { className: "plan-pane-name" }, fileName(op)),
-      el("p", { className: "muted" }, formatSize(op.size)),
+      el("p", { className: "muted" }, op.isFolder ? "Folder" : formatSize(op.size)),
       el("p", {}, words.why(op, destinationFolder(op, plan.root, pathSeparator).folder)),
+      op.error ? el("p", { className: "status error" }, `Can't be done: ${op.error}.`) : "",
       op.reason.type === "duplicate"
         ? el("p", { className: "plan-original" }, "Original: ", el("span", { className: "path" }, [rootName, ...op.reason.keeper].join("/")))
         : "",

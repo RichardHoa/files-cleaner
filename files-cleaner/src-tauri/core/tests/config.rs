@@ -39,15 +39,23 @@ fn settings_default_to_holding_folder_and_trashing_duplicates() {
 #[test]
 fn reads_every_setting_value() {
     let config = load_config(
-        r#"{ "trashDestination": "systemTrash", "duplicates": "followRules" }"#,
+        r#"{ "trashDestination": "holdingFolder", "duplicates": "followRules" }"#,
         Path::new("/Users/me"),
     )
     .unwrap();
-    assert_eq!(config.trash_destination, TrashDestination::SystemTrash);
+    assert_eq!(config.trash_destination, TrashDestination::HoldingFolder);
     assert_eq!(config.duplicates, DuplicateHandling::FollowRules);
 
     let config = load_config(r#"{ "duplicates": "leave" }"#, Path::new("/Users/me")).unwrap();
     assert_eq!(config.duplicates, DuplicateHandling::Leave);
+}
+
+#[test]
+fn the_system_trash_is_rejected_as_not_supported_yet_with_its_line() {
+    let err = error("{\n  \"trashDestination\": \"systemTrash\"\n}");
+
+    assert!(err.message.contains("not supported yet"), "{}", err.message);
+    assert_eq!(err.line, Some(2));
 }
 
 #[test]
@@ -141,7 +149,13 @@ fn move_targets_resolve_home_absolute_and_relative_paths() {
 #[test]
 fn move_targets_inside_protected_paths_are_rejected_with_their_line() {
     let home = scan_root();
-    for target in ["/System/Junk", "/usr/local/stuff", "~/Library/Stuff", "~/Downloads/Keep/more", "~/code/node_modules/x"] {
+    #[cfg(target_os = "macos")]
+    let system = ["/System/Junk", "/usr/local/stuff", "~/Library/Stuff"];
+    #[cfg(target_os = "linux")]
+    let system = ["/usr/local/stuff", "/etc/stuff", "~/.config/stuff"];
+    #[cfg(target_os = "windows")]
+    let system = [r"C:\\Windows\\Junk", r"C:\\Program Files\\Stuff", r"~\\AppData\\Stuff"];
+    for target in system.into_iter().chain(["~/Downloads/Keep/more", "~/code/node_modules/x"]) {
         let text = format!(
             "{{ \"neverTouch\": [\"~/Downloads/Keep\"],\n  \"rules\": [\n    {{ \"name\": \"x\", \"match\": {{ \"nameGlob\": \"*\" }},\n      \"then\": {{ \"moveTo\": \"{target}\" }} }}\n  ] }}"
         );

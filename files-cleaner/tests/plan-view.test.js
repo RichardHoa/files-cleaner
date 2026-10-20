@@ -45,6 +45,24 @@ test("duplicates are grouped together, and an empty group is left out", () => {
   assert.deepEqual(groupByReason([]), []);
 });
 
+test("the folders the Plan empties get their own group, last", () => {
+  const copy = dup("old/a.txt");
+  const folder = {
+    id: "trashFolder:old",
+    kind: "trash",
+    relativePath: ["old"],
+    destination: ["Files Cleaner Trash", "This Session", "old"],
+    size: 0,
+    reason: { type: "emptiedFolder" },
+  };
+  const dmg = byRule("Disk images", "trash", "setup.dmg");
+  assert.deepEqual(groupByReason([copy, folder, dmg]), [
+    { reason: "duplicates", operations: [copy] },
+    { reason: "rule", rule: "Disk images", operations: [dmg] },
+    { reason: "emptiedFolders", operations: [folder] },
+  ]);
+});
+
 test("each Rule gets its own group after the duplicates, in the order the Plan first names it", () => {
   const folder = byRule("Slides", "createFolder", "Study");
   const talk = byRule("Slides", "move", "talk.pptx", "Study/talk.pptx");

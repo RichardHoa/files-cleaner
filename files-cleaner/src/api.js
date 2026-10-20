@@ -22,17 +22,22 @@ export function scan(scanRoot, onProgress) {
 
 /**
  * Plans the latest scan with the config as it is now: `{ root, trashDestination, operations }`, each
- * Operation `{ id, kind, source, relativePath, destination, destinationPath, size, modified, isPackage, reason }`,
- * `kind` being "trash", "move" or "createFolder" and `reason` either `{ type: "duplicate", keeper }` or
- * `{ type: "rule", rule }`.
+ * Operation `{ id, kind, source, relativePath, destination, destinationPath, size, modified, isPackage,
+ * isFolder, reason, ticked, error }`, `kind` being "trash", "move" or "createFolder", `reason` one of
+ * `{ type: "duplicate", keeper }`, `{ type: "rule", rule }` or `{ type: "emptiedFolder" }`, `ticked` whether
+ * it starts ticked, and `error` why it can't happen (it can't be ticked then), or null.
  */
 export const buildPlan = () => invoke("build_plan");
 
 // Running, undoing and redoing resolve to a summary: `{ sessionId, done, skipped, failed, unrecoverable }`,
 // each a list of `{ operationId, kind, source, destination, note }`, the note saying why it wasn't done.
 
-/** Runs the ticked Operations of the latest Plan as a new Session. */
-export const runPlan = (approved) => invoke("run_plan", { approved });
+/** Runs the ticked Operations of the latest Plan as a new Session, calling `onProgress({ finished, total, current })` as it goes. */
+export function runPlan(approved, onProgress) {
+  const channel = new Channel();
+  channel.onmessage = onProgress;
+  return invoke("run_plan", { approved, onProgress: channel });
+}
 
 /** Undoes the done `operationIds` of Session `sessionId`, or every done Operation if they're left out. */
 export const undo = (sessionId, operationIds) => invoke("undo", { sessionId, operationIds });
@@ -62,10 +67,10 @@ export const removeRecentScanRoot = (scanRoot) => invoke("remove_recent_scan_roo
 export const pickFolder = () => dialog.open({ directory: true, multiple: false, title: "Pick a folder to clean" });
 
 /**
- * Opens a Finder window on the folder holding `path`, with it selected. A Package is selected, not opened.
+ * Opens the file manager (Finder, Explorer or the Linux one) on the folder holding `path`, with it selected. A Package is selected, not opened.
  * Given a list of paths, selects them all, with a window for each folder they are in.
  */
-export const revealInFinder = (path) => opener.revealItemInDir(path);
+export const revealInFileManager = (path) => opener.revealItemInDir(path);
 
 /** A command error as one line, with its config position when it has one. */
 export function describeError(error) {
