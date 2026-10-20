@@ -7,7 +7,7 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::clash;
-use crate::config::{Config, DuplicateHandling, Rule, RuleOperation, RuleTarget, TrashDestination};
+use crate::config::{Config, Rule, RuleOperation, RuleTarget, TrashDestination};
 use crate::protection::{is_os_metadata_file, is_package, is_within, same_path, Protection, HOLDING_FOLDER_NAME};
 use crate::scanner::{ScanEntry, ScanResult};
 use crate::volume::different_disks;
@@ -107,35 +107,34 @@ pub enum Reason {
     EmptiedFolder,
 }
 
-/// Proposes what to do with each scanned item: a non-Keeper copy in a
-/// Duplicate Group is trashed or left alone if Duplicate Handling says so;
-/// anything else gets the first Rule it matches, if any. Rules move items
-/// into folders, which are created if missing, and never over anything:
-/// a taken name gets a Clash Suffix. An item already in its Rule's folder
-/// stays put. A folder the Plan would empty is offered for Trash, unticked.
-/// An Operation that would cross from one disk to another is kept, as an
-/// error that can't be ticked.
+/// Proposes the duplicate step: every non-Keeper copy in a Duplicate Group
+/// is trashed, and nothing else. A folder the Plan would empty is offered
+/// for Trash, unticked. An Operation that would cross from one disk to
+/// another is kept, as an error that can't be ticked.
 pub fn build_plan(scan: &ScanResult, config: &Config) -> Plan {
     let root = &scan.root;
-    let protection = Protection::new(config);
-    let mut copies: HashMap<&Path, &[String]> = HashMap::new();
-    if config.duplicates != DuplicateHandling::FollowRules {
-        for group in duplicates::find(&scan.entries) {
-            for copy in group.copies {
-                copies.insert(&copy.path, &group.keeper.relative_path);
-            }
+    let mut operations = Vec::new();
+    for group in duplicates::find(&scan.entries) {
+        for copy in group.copies {
+            operations.push(trash(root, copy, Reason::Duplicate { keeper: group.keeper.relative_path.clone() }));
         }
     }
+    finish(root, config, operations, Vec::new())
+}
 
+/// Rules are frozen: no Plan the app builds uses them, but the code stays
+/// for if they come back. This proposes what the first Rule each scanned
+/// item matches says, treating duplicate copies like any other file. Rules
+/// move items into folders, which are created if missing, and never over
+/// anything: a taken name gets a Clash Suffix. An item already in its
+/// Rule's folder stays put. Emptied folders and moves to another disk are
+/// handled as in `build_plan`.
+pub fn build_rule_plan(scan: &ScanResult, config: &Config) -> Plan {
+    let root = &scan.root;
+    let protection = Protection::new(config);
     let mut operations = Vec::new();
     let mut folders = Folders::default();
     for entry in &scan.entries {
-        if let Some(keeper) = copies.get(entry.path.as_path()) {
-            if config.duplicates == DuplicateHandling::Trash {
-                operations.push(trash(root, entry, Reason::Duplicate { keeper: keeper.to_vec() }));
-            }
-            continue;
-        }
         let Some(rule) = rules::first_match(&config.rules, entry) else { continue };
         let reason = Reason::Rule { rule: rule.name.clone() };
         match &rule.operation {
@@ -163,10 +162,16 @@ pub fn build_plan(scan: &ScanResult, config: &Config) -> Plan {
             }
         }
     }
+    finish(root, config, operations, folders.created)
+}
+
+/// Makes a Plan of `operations` and of creating the folders in `created`,
+/// each with the Rule that needs it: in order, with the folders the Plan
+/// empties offered for Trash and moves to another disk marked as errors.
+fn finish(root: &Path, config: &Config, mut operations: Vec<Operation>, mut created: Vec<(PathBuf, String)>) -> Plan {
     operations.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
 
     // Sorted by path, each folder comes before the folders inside it.
-    let mut created = folders.created;
     created.sort_by(|a, b| a.0.cmp(&b.0));
     let created = created.into_iter().map(|(folder, rule)| create_folder_operation(root, folder, rule));
     let mut operations: Vec<Operation> = created.chain(operations).collect();
@@ -182,7 +187,7 @@ pub fn build_plan(scan: &ScanResult, config: &Config) -> Plan {
     for op in &mut operations {
         op.ticked &= op.error.is_none();
     }
-    Plan { root: root.clone(), trash_destination: config.trash_destination, operations }
+    Plan { root: root.to_path_buf(), trash_destination: config.trash_destination, operations }
 }
 
 /// Why `op` can't happen, if its item would move to another disk.

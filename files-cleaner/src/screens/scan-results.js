@@ -1,6 +1,6 @@
 // Scan results: every scanned file and Package, plus what was left alone.
 // Scans can list 100,000+ items, so the table only builds the rows in view.
-import { buildPlan, describeError, pathSeparator, revealInFileManager } from "../api.js";
+import { describeError, pathSeparator, revealInFileManager } from "../api.js";
 import { el } from "../dom.js";
 import { count, fitTail, formatDate, formatSize, plural } from "../format.js";
 import { icon } from "../icons.js";
@@ -36,12 +36,9 @@ const MIN_SIZES = [
 export function render(root, nav, result) {
   const back = el("button", { type: "button" }, "Back");
   back.addEventListener("click", () => nav.home());
-  const plan = el("button", { type: "button", className: "primary" }, "Build Plan");
+  const plan = el("button", { type: "button", className: "primary" }, "Find duplicates");
   const planStatus = el("p", { className: "status" });
-  plan.addEventListener("click", async () => {
-    const built = await busy(planStatus, [plan], "Looking for duplicates…", buildPlan);
-    if (built) nav.plan(result, built);
-  });
+  plan.addEventListener("click", () => busy(planStatus, [plan], "Looking for duplicates…", () => nav.steps.findDuplicates(result)));
 
   const totalSize = result.entries.reduce((sum, entry) => sum + entry.size, 0);
   const summary = [

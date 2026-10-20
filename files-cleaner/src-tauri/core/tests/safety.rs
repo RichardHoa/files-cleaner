@@ -10,7 +10,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use common::{config, empty_config, scan_root, write};
 use files_cleaner_core::{
-    build_plan, list_sessions, run, scan, session_details, undo, undo_operations, OperationKind, OperationState,
+    build_plan, build_rule_plan, list_sessions, run, scan, session_details, undo, undo_operations, OperationKind, OperationState,
     Plan, Reason, SessionStatus, HOLDING_FOLDER_NAME,
 };
 use tempfile::TempDir;
@@ -117,7 +117,7 @@ fn a_folder_a_rule_moves_files_into_is_not_emptied() {
         dir.path(),
     );
 
-    let plan = build_plan(&scan(dir.path(), &config).unwrap(), &config);
+    let plan = build_rule_plan(&scan(dir.path(), &config).unwrap(), &config);
 
     assert_eq!(emptied(&plan), ["Slides"], "inbox gets the sorted folder, so it isn't emptied");
 }
@@ -230,15 +230,19 @@ fn moves_and_trash_across_disks_are_errors_that_are_never_run() {
         r#"{ "rules": [{ "name": "Slides", "match": { "extensions": ["pptx"] }, "then": { "moveTo": "Slides" } }] }"#,
         dir.path(),
     );
-    let plan = build_plan(&scan(dir.path(), &config).unwrap(), &config);
+    let scanned = scan(dir.path(), &config).unwrap();
+    let errors = |plan: &Plan| -> BTreeMap<String, String> {
+        plan.operations.iter().filter_map(|op| Some((op.relative_path.join("/"), op.error.clone()?))).collect()
+    };
 
-    let errors: BTreeMap<String, String> = plan
-        .operations
-        .iter()
-        .filter_map(|op| Some((op.relative_path.join("/"), op.error.clone()?)))
-        .collect();
-    assert_eq!(errors.keys().collect::<Vec<_>>(), ["usb/copy.txt", "usb/talk.pptx"]);
-    assert!(errors.values().all(|e| e.contains("different disk")), "{errors:?}");
+    let moves = errors(&build_rule_plan(&scanned, &config));
+    assert_eq!(moves.keys().collect::<Vec<_>>(), ["usb/talk.pptx"]);
+    assert!(moves.values().all(|e| e.contains("different disk")), "{moves:?}");
+
+    let plan = build_plan(&scanned, &config);
+    let trashes = errors(&plan);
+    assert_eq!(trashes.keys().collect::<Vec<_>>(), ["usb/copy.txt"]);
+    assert!(trashes.values().all(|e| e.contains("different disk")), "{trashes:?}");
     let blocked = plan.operations.iter().filter(|op| op.error.is_some());
     assert!(blocked.clone().all(|op| !op.ticked));
     assert_eq!(emptied(&plan), ["here"], "a folder whose items can't leave isn't emptied");
@@ -254,7 +258,7 @@ fn moves_and_trash_across_disks_are_errors_that_are_never_run() {
 
 fn rules(text: &str, root: &Path) -> Plan {
     let config = config(&format!(r#"{{ "rules": [{text}] }}"#), root);
-    build_plan(&scan(root, &config).unwrap(), &config)
+    build_rule_plan(&scan(root, &config).unwrap(), &config)
 }
 
 #[test]

@@ -4,8 +4,7 @@ use std::path::{Path, PathBuf};
 
 use common::scan_root;
 use files_cleaner_core::{
-    load_config, ConfigError, DuplicateHandling, RuleOperation, RuleTarget, TrashDestination,
-    EXAMPLE_CONFIG,
+    load_config, ConfigError, RuleOperation, RuleTarget, TrashDestination, EXAMPLE_CONFIG,
 };
 
 fn error(text: &str) -> ConfigError {
@@ -17,37 +16,33 @@ fn the_example_config_loads() {
     let config = load_config(EXAMPLE_CONFIG, Path::new("/Users/me")).unwrap();
 
     assert_eq!(config.trash_destination, TrashDestination::HoldingFolder);
-    assert_eq!(config.duplicates, DuplicateHandling::Trash);
     assert_eq!(config.never_touch, [PathBuf::from("/Users/me/Downloads/Keep")]);
-    let names: Vec<&str> = config.rules.iter().map(|r| r.name.as_str()).collect();
-    assert_eq!(names, ["Disk images", "Slides", "Screenshots"]);
-    assert_eq!(config.rules[0].operation, RuleOperation::Trash);
-    assert_eq!(config.rules[1].extensions, ["pptx", "key"]);
-    assert_eq!(config.rules[2].name_glob.as_deref(), Some("Screenshot*"));
+    assert!(config.rules.is_empty());
+    assert!(!EXAMPLE_CONFIG.contains("\"rules\"") && !EXAMPLE_CONFIG.contains("\"duplicates\""));
 }
 
 #[test]
-fn settings_default_to_holding_folder_and_trashing_duplicates() {
+fn settings_default_to_the_holding_folder() {
     let config = load_config("{}", Path::new("/Users/me")).unwrap();
 
     assert_eq!(config.trash_destination, TrashDestination::HoldingFolder);
-    assert_eq!(config.duplicates, DuplicateHandling::Trash);
     assert!(config.never_touch.is_empty());
     assert!(config.rules.is_empty());
 }
 
 #[test]
 fn reads_every_setting_value() {
-    let config = load_config(
-        r#"{ "trashDestination": "holdingFolder", "duplicates": "followRules" }"#,
-        Path::new("/Users/me"),
-    )
-    .unwrap();
+    let config = load_config(r#"{ "trashDestination": "holdingFolder" }"#, Path::new("/Users/me")).unwrap();
     assert_eq!(config.trash_destination, TrashDestination::HoldingFolder);
-    assert_eq!(config.duplicates, DuplicateHandling::FollowRules);
+}
 
-    let config = load_config(r#"{ "duplicates": "leave" }"#, Path::new("/Users/me")).unwrap();
-    assert_eq!(config.duplicates, DuplicateHandling::Leave);
+#[test]
+fn the_old_duplicate_handling_setting_is_ignored() {
+    for value in [r#""trash""#, r#""followRules""#, r#""leave""#, r#""delete""#, "3"] {
+        let text = format!(r#"{{ "duplicates": {value}, "neverTouch": ["~/Keep"] }}"#);
+        let config = load_config(&text, Path::new("/Users/me")).unwrap();
+        assert_eq!(config.never_touch, [PathBuf::from("/Users/me/Keep")], "{value}");
+    }
 }
 
 #[test]
@@ -60,7 +55,7 @@ fn the_system_trash_is_rejected_as_not_supported_yet_with_its_line() {
 
 #[test]
 fn invalid_json_reports_line_and_column() {
-    let err = error("{\n  \"duplicates\": \"trash\"\n  \"rules\": []\n}");
+    let err = error("{\n  \"trashDestination\": \"holdingFolder\"\n  \"rules\": []\n}");
 
     assert_eq!((err.line, err.column), (Some(3), Some(3)));
     assert!(!err.message.contains("line"), "position is not repeated in the message: {}", err.message);
@@ -71,9 +66,6 @@ fn unknown_setting_values_are_rejected_with_their_line() {
     let err = error("{\n  \"trashDestination\": \"bin\"\n}");
     assert_eq!(err.line, Some(2));
     assert!(err.message.contains("bin"), "{}", err.message);
-
-    let err = error("{\n\n  \"duplicates\": \"delete\"\n}");
-    assert_eq!(err.line, Some(3));
 }
 
 #[test]

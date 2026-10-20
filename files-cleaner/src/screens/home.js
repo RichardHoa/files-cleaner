@@ -12,11 +12,12 @@ import {
   scanRootWarning,
 } from "../api.js";
 import { el } from "../dom.js";
-import { count, plural, relativeTime, splitPath } from "../format.js";
+import { count, relativeTime, splitPath } from "../format.js";
 import { icon } from "../icons.js";
 import { noSessions, sessionList } from "../session-row.js";
 import { undoSections } from "../outcomes.js";
 import { showStatus } from "../status.js";
+import { describeScanProgress } from "../steps.js";
 
 const LATEST_SESSIONS = 3;
 
@@ -52,7 +53,7 @@ export function render(root, nav) {
         status.replaceChildren();
       } else {
         showStatus(status, `Scanning ${folder}…`);
-        nav.scanResults(await scan(folder, (progress) => showProgress(status, folder, progress)));
+        nav.scanResults(await scan(folder, (progress) => showStatus(status, describeScanProgress(folder, progress))));
         return;
       }
     } catch (error) {
@@ -88,13 +89,13 @@ export function render(root, nav) {
   window.addEventListener("focus", refresh);
 }
 
-/** The config badge: the Rule count, or that the config has an error, which is spelt out below. */
+/** The config badge: that the config is fine, or that it has an error, which is spelt out below. */
 async function showConfig(badge, errorLine) {
   try {
-    const { path, config } = await loadConfig();
+    const { path } = await loadConfig();
     badge.classList.remove("error");
     badge.title = `Open the config: ${path}`;
-    badge.replaceChildren(icon("settings"), plural(config.rules.length, "Rule"));
+    badge.replaceChildren(icon("settings"), "Config OK");
     errorLine.textContent = "";
   } catch (error) {
     badge.classList.add("error");
@@ -184,11 +185,6 @@ async function showSessions(node, seeAll, nav, undoResult = null) {
         })
       : noSessions();
   node.replaceChildren(...(undoResult ? undoSections(undoResult) : []), list);
-}
-
-function showProgress(node, folder, { found, folders, skipped, current }) {
-  const counts = [`${plural(found, "file")} found`, `${plural(folders, "folder")} read`, `${count(skipped)} protected skipped`];
-  showStatus(node, `Scanning ${folder}…\n${counts.join(" · ")}\n${current}`);
 }
 
 /** Shows `warning` in `node` with "Scan anyway" and "Cancel"; resolves to whether to scan. */

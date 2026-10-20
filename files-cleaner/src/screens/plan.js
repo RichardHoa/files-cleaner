@@ -1,6 +1,7 @@
 // Plan: how much will change, where it goes, and why each file moves. One card per Reason
 // picks which group's files are listed; the selected file's Reason is shown beside the list.
-// The user ticks or unticks files, then moves the ticked ones or cancels. Nothing changes until then.
+// The user ticks or unticks files, then moves the ticked ones, skips the step, or cancels. Nothing
+// changes until then. This is the duplicate step: once it is run or skipped, the steps go on.
 import { pathSeparator, runPlan } from "../api.js";
 import { el } from "../dom.js";
 import { drawMore, revealMenu } from "../file-list.js";
@@ -21,6 +22,7 @@ import {
   visibleFiles,
 } from "../plan-view.js";
 import { busy, showStatus } from "../status.js";
+import { describeScanProgress, fromDuplicateStep } from "../steps.js";
 
 /**
  * What a Reason group's card and detail pane say. `why` and `tickLabel` take one of its Operations
@@ -66,13 +68,22 @@ export function render(root, nav, result, plan) {
 
   const cancel = el("button", { type: "button" }, "Cancel");
   cancel.addEventListener("click", () => nav.scanResults(result));
+  const status = el("p", { className: "status" });
+  /** Goes on to the next step without running anything, with `buttons` disabled meanwhile. */
+  const goOn = (buttons) =>
+    busy(status, buttons, `Scanning ${result.root}…`, () =>
+      nav.steps.continueAfterDuplicates(result.root, (progress) => showStatus(status, describeScanProgress(result.root, progress))),
+    );
 
   if (plan.operations.length === 0) {
+    const next = el("button", { type: "button", className: "primary" }, "Continue");
+    next.addEventListener("click", () => goOn([next, cancel]));
     root.append(
-      el("h1", {}, "Plan"),
+      el("h1", {}, "No duplicates"),
       el("p", { className: "path" }, plan.root),
-      el("p", { className: "lead" }, "Nothing to do: no duplicates were found, and no Rules matched."),
-      el("div", { className: "actions" }, cancel),
+      el("p", { className: "lead" }, "No file here is an exact copy of another. Continue to scan again and suggest folders."),
+      el("div", { className: "actions" }, cancel, next),
+      status,
     );
     return;
   }
@@ -84,7 +95,9 @@ export function render(root, nav, result, plan) {
   // Header: how much is changing.
   const heading = el("h1", {});
   const run = el("button", { type: "button", className: "primary" });
-  const status = el("p", { className: "status" });
+  const skip = el("button", { type: "button", title: "Leave the duplicates as they are and go on" }, "Skip");
+  // If the rescan fails, Run goes back to being disabled when nothing is ticked.
+  skip.addEventListener("click", () => goOn([skip, run, cancel]).then(() => drawHeader()));
   const drawHeader = () => {
     const { count } = totals(plan.operations, ticked);
     heading.textContent = count ? `${plural(count, "file")} will move` : "Nothing will change";
@@ -93,10 +106,10 @@ export function render(root, nav, result, plan) {
   };
   run.addEventListener("click", async () => {
     const files = plural(ticked.size, "file");
-    const session = await busy(status, [run, cancel], `Moving ${files}…`, () =>
+    const session = await busy(status, [run, skip, cancel], `Moving ${files}…`, () =>
       runPlan([...ticked], (progress) => showStatus(status, describeRunProgress(progress))),
     );
-    if (session) nav.session(session.sessionId, null, describeSummary(session, "moved"));
+    if (session) nav.session(session.sessionId, fromDuplicateStep(result.root), describeSummary(session, "moved"));
     else drawHeader();
   });
 
@@ -341,7 +354,7 @@ export function render(root, nav, result, plan) {
         heading,
         el("p", { className: "lead" }, `Nothing is deleted. Everything stays inside ${rootName}, and you can undo it from History.`),
       ),
-      el("div", { className: "actions" }, cancel, run),
+      el("div", { className: "actions" }, cancel, skip, run),
     ),
     status,
     el("div", { className: "plan-cards" }, ...cards.map((c) => c.node)),

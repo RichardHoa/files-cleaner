@@ -9,14 +9,7 @@ use crate::rules::PLACEHOLDERS;
 /// The config written on first launch, as a working starting point.
 pub const EXAMPLE_CONFIG: &str = r#"{
   "trashDestination": "holdingFolder",
-  "duplicates": "trash",
-  "neverTouch": ["~/Downloads/Keep"],
-  "rules": [
-    { "name": "Disk images", "match": { "extensions": ["dmg"] }, "then": { "trash": true } },
-    { "name": "Slides", "match": { "extensions": ["pptx", "key"] }, "then": { "moveTo": "~/Documents/Study" } },
-    { "name": "Screenshots", "match": { "nameGlob": "Screenshot*" },
-      "then": { "moveTo": "Screenshots", "rename": "{modified} {name}" } }
-  ]
+  "neverTouch": ["~/Downloads/Keep"]
 }
 "#;
 
@@ -27,9 +20,9 @@ pub struct Config {
     /// The user's home folder, which `~/` paths were expanded against.
     pub home: PathBuf,
     pub trash_destination: TrashDestination,
-    pub duplicates: DuplicateHandling,
     pub never_touch: Vec<PathBuf>,
-    /// In file order: the first matching Rule wins.
+    /// In file order: the first matching Rule wins. Rules are frozen: they
+    /// are still checked, but no Plan the app builds uses them.
     pub rules: Vec<Rule>,
 }
 
@@ -42,16 +35,6 @@ pub enum TrashDestination {
     #[default]
     HoldingFolder,
     SystemTrash,
-}
-
-/// What happens to the non-Keeper copies in a Duplicate Group.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum DuplicateHandling {
-    #[default]
-    Trash,
-    FollowRules,
-    Leave,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -107,8 +90,10 @@ impl std::error::Error for ConfigError {}
 struct RawConfig {
     #[serde(default)]
     trash_destination: TrashDestination,
-    #[serde(default)]
-    duplicates: DuplicateHandling,
+    /// The old Duplicate Handling setting: running or skipping the
+    /// duplicate step is the choice now, so any value is ignored.
+    #[serde(default, rename = "duplicates")]
+    _duplicates: serde::de::IgnoredAny,
     #[serde(default)]
     never_touch: Vec<String>,
     #[serde(default)]
@@ -170,7 +155,6 @@ pub fn load_config(text: &str, home: &Path) -> Result<Config, ConfigError> {
     let mut config = Config {
         home: home.to_path_buf(),
         trash_destination: raw.trash_destination,
-        duplicates: raw.duplicates,
         never_touch,
         rules: Vec::new(),
     };

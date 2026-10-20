@@ -150,8 +150,9 @@ async fn scan(
     Ok(result)
 }
 
-/// Plans the latest scan with the config as it is now, off the UI thread
-/// (finding duplicates reads files). The Plan is kept for `run`.
+/// Plans the duplicate step for the latest scan with the config as it is
+/// now, off the UI thread (finding duplicates reads files). The Plan is
+/// kept for `run`.
 #[tauri::command]
 async fn build_plan(app: AppHandle, latest: State<'_, Latest>) -> Result<Plan, CommandError> {
     let loaded = read_config(&app)?;

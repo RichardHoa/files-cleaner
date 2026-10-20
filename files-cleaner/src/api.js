@@ -21,7 +21,8 @@ export function scan(scanRoot, onProgress) {
 }
 
 /**
- * Plans the latest scan with the config as it is now: `{ root, trashDestination, operations }`, each
+ * Plans the duplicate step for the latest scan, with the config as it is now: every non-Keeper copy
+ * trashed, and the folders that empties offered unticked. `{ root, trashDestination, operations }`, each
  * Operation `{ id, kind, source, relativePath, destination, destinationPath, size, modified, isPackage,
  * isFolder, reason, ticked, error }`, `kind` being "trash", "move" or "createFolder", `reason` one of
  * `{ type: "duplicate", keeper }`, `{ type: "rule", rule }` or `{ type: "emptiedFolder" }`, `ticked` whether

@@ -1,6 +1,6 @@
 # files-cleaner
 
-A desktop app for macOS, Windows and Linux that scans a folder, finds exact duplicates, applies your own rules (e.g. `.dmg` → Trash, `.pptx` → Study folder), shows a before/after preview of every change, and lets you undo any session. Nothing is ever permanently deleted.
+A desktop app for macOS, Windows and Linux that walks you through cleaning a folder: scan it, remove exact duplicates (or skip that step), then, after a fresh scan, sort what's left into Suggested Folders (coming soon). Every change is shown as a Plan first, and you can undo any session. Nothing is ever permanently deleted. (Rules, e.g. `.dmg` → Trash, are frozen: the code stays, but no Plan uses them.)
 
 ## Tech stack
 
