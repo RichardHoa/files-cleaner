@@ -1,6 +1,6 @@
 # Files Cleaner
 
-A desktop tool that tidies a messy folder (such as Downloads) by finding duplicates and applying the user's own rules, always showing a plan first and keeping every change undoable.
+A desktop tool that tidies a messy folder (such as Downloads) by removing duplicates and then suggesting folders for what's left, always showing a plan first and keeping every change undoable.
 
 ## Language
 
@@ -48,10 +48,6 @@ _Avoid_: dupes, clones
 The one file in a Duplicate Group that stays: by default the newest, judged by modified date, then created date, then shortest path.
 _Avoid_: original, master copy, oldest
 
-**Duplicate Handling**:
-A setting for what happens to the non-Keeper copies: trash them, let Rules treat them like any other file, or leave them alone.
-_Avoid_: dedupe mode
-
 ### Planning
 
 **Rule**:
@@ -67,7 +63,7 @@ One atomic file-system change: Move (possibly under a new name, when a Rule rena
 _Avoid_: action, step, task
 
 **Reason**:
-Why the Plan proposes an Operation: either a **Duplicate** (naming the Keeper it leaves in place) or a **Rule** (naming that Rule). The Plan is grouped by Reason. Why an Operation was skipped or failed is not a Reason: that is its Note.
+Why the Plan proposes an Operation: a **Duplicate** (naming the Keeper it leaves in place), a **Suggested Folder** (naming that folder) or a **Rule** (naming that Rule). The Plan is grouped by Reason. Why an Operation was skipped or failed is not a Reason: that is its Note.
 _Avoid_: cause, source, explanation
 
 **Note**:
@@ -85,6 +81,12 @@ _Avoid_: recycle bin, quarantine
 **Clash Suffix**:
 The ` (1)`, ` (2)`, … added before the extension when a file's new name is already taken (`notes (1).pptx`); the same style on every OS. Names that differ only in letter case count as taken.
 _Avoid_: Finder-style suffix, copy suffix
+
+### Grouping
+
+**Suggested Folder**:
+A set of similar files the tool proposes to gather into one folder, under a name it suggests. The user creates it in the Scan Root (the default) or somewhere else they pick, trashes all its files, or skips it. They can also trash single files in it, or take single files out of it so they stay where they are. A Suggested Folder always has a name: leaving the name empty never means "trash".
+_Avoid_: cluster, group, category, proposed folder
 
 ### History
 

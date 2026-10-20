@@ -2,7 +2,7 @@
 
 **What to build:** Ticket 01 was built for macOS only: `core/src/protection/` has just a `macos.rs` module, so the core doesn't compile on Windows or Linux, and some names and labels still say "Finder". Make the existing scan path work on all three desktop OSes, using the OS-agnostic vocabulary in `CONTEXT.md` (System Folder, Disk Root, OS Metadata File, Package, Clash Suffix) and the per-OS lists in the spec (stories 5, 6, 10, 12, 13, and Implementation Decisions: Target OS, Letter case, Created date).
 
-**Blocked by:** 01, and the platform decision from `.scratch/content-grouping/issues/01-prototype.md`
+**Blocked by:** None (01 is resolved)
 
 **Status:** ready-for-agent
 
@@ -22,3 +22,5 @@
 ## Comments
 
 **Parked (2026-10-16).** Content grouping may use macOS-only frameworks (Vision OCR, `NLEmbedding`, Foundation Models) behind a swappable interface. Porting now risks doing the work twice. Pick this up once the content-grouping prototype has settled that choice and it is recorded in an ADR.
+
+**Unparked (2026-10-20).** Grouping will use only cross-platform tools (see `.scratch/basic-pipeline/map.md`), so the platform decision no longer blocks this. Do it early, before more code builds on the macOS-only core.
