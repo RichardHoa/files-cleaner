@@ -1,6 +1,6 @@
 // What a Run, Undo or Redo did, from its `{ done, skipped, failed, unrecoverable }` summary.
 import { el } from "./dom.js";
-import { plural } from "./format.js";
+import { count, plural } from "./format.js";
 
 /** "2 files restored · 1 skipped": `done` says what was done; failed and unrecoverable show only if any. */
 export function describeSummary(summary, done) {
@@ -8,6 +8,11 @@ export function describeSummary(summary, done) {
   if (summary.failed.length > 0) parts.push(`${summary.failed.length} failed`);
   if (summary.unrecoverable.length > 0) parts.push(`${summary.unrecoverable.length} unrecoverable`);
   return parts.join(" · ");
+}
+
+/** "Moving 120 of 3,000 files…" from a Run's `{ finished, total }` progress, then the item it is on. */
+export function describeRunProgress({ finished, total, current }) {
+  return `Moving ${count(finished)} of ${plural(total, "item")}…\n${current}`;
 }
 
 /** What an Undo did: a line of counts, then the skipped and unrecoverable items with why. */

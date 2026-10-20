@@ -4,7 +4,9 @@
 
 use std::path::Path;
 
-const FINDER_METADATA: &[&str] = &[".DS_Store", "Icon\r", ".localized"];
+/// Files that file managers keep inside ordinary folders: Finder's on
+/// macOS, Explorer's on Windows, and KDE Dolphin's on Linux.
+pub const OS_METADATA_FILES: &[&str] = &[".DS_Store", "Icon\r", ".localized", "Thumbs.db", "desktop.ini", ".directory"];
 const APP_LIBRARY_EXTENSIONS: &[&str] = &["photoslibrary", "musiclibrary", "tvlibrary", "lrcat", "lrdata"];
 
 /// Why `path` is an OS Metadata File or an app library, if it is.
@@ -17,8 +19,8 @@ pub fn reason(path: &Path) -> Option<String> {
             .and_then(Path::file_name)
             .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(want))
     };
-    if FINDER_METADATA.iter().any(|m| is(m)) {
-        return Some(format!("{} is Finder metadata", name.trim_end()));
+    if is_os_metadata_file(&name) {
+        return Some(format!("{} is an OS Metadata File", name.trim_end()));
     }
     let extension = path.extension().map(|e| e.to_string_lossy().to_lowercase());
     if extension.is_some_and(|e| APP_LIBRARY_EXTENSIONS.contains(&e.as_str()))
@@ -28,4 +30,9 @@ pub fn reason(path: &Path) -> Option<String> {
         return Some(format!("{name} is an app library"));
     }
     None
+}
+
+/// True if a file called `name` is an OS Metadata File.
+pub fn is_os_metadata_file(name: &str) -> bool {
+    OS_METADATA_FILES.iter().any(|m| name.eq_ignore_ascii_case(m))
 }

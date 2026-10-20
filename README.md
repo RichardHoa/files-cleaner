@@ -1,20 +1,22 @@
 # files-cleaner
 
-A macOS desktop app that scans a folder, finds exact duplicates, applies your own rules (e.g. `.dmg` → Trash, `.pptx` → Study folder), shows a before/after preview of every change, and lets you undo any session. Nothing is ever permanently deleted.
+A desktop app for macOS, Windows and Linux that walks you through cleaning a folder: scan it, remove exact duplicates (or skip that step), then, after a fresh scan, sort what's left into Suggested Folders (coming soon). Every change is shown as a Plan first, and you can undo any session. Nothing is ever permanently deleted. (Rules, e.g. `.dmg` → Trash, are frozen: the code stays, but no Plan uses them.)
 
 ## Tech stack
 
 - **Tauri 2**: desktop shell (`files-cleaner/src-tauri`), with the dialog and opener plugins
 - **Rust**: all the logic lives in the core library `files-cleaner/src-tauri/core`, which has no Tauri dependency (see `docs/adr/0003`)
 - **Plain HTML/CSS/JS (ES modules)**: the UI in `files-cleaner/src`. No framework and no build step
-- **macOS only** for Milestone 1. The System Trash goes through `NSFileManager` via `objc2` (see `docs/adr/0001`)
+- **macOS, Windows and Linux.** The OS-specific parts (System Folders, Disk Roots, hidden files, Package detection) live in one module per OS under `core/src/protection/`. Trash goes to a Holding Folder inside the Scan Root on every OS; the System Trash is deferred (see `docs/adr/0001`)
 
 ## Prerequisites
 
-- macOS
-- Xcode Command Line Tools: `xcode-select --install`
 - Rust (stable): https://rustup.rs
 - Node.js and npm (used only to run the Tauri CLI)
+- Per OS, what Tauri needs (https://tauri.app/start/prerequisites/):
+  - macOS: Xcode Command Line Tools, `xcode-select --install`
+  - Windows: Microsoft C++ Build Tools and WebView2 (already on Windows 10 and 11)
+  - Linux (Debian/Ubuntu): `sudo apt install libwebkit2gtk-4.1-dev build-essential libssl-dev libayatana-appindicator3-dev librsvg2-dev`
 
 ## Run in development
 
@@ -33,10 +35,13 @@ cd files-cleaner/src-tauri/core
 cargo test
 ```
 
-The System Trash test is ignored by default because it writes to your real `~/.Trash`. To run it:
+Each OS's System Folders, Disk Roots and hidden-file tests run only on that OS. On Linux, one test mounts a second disk (tmpfs) to check that moves between disks are refused; it needs root and quietly passes without it. The unreadable-folder tests need a non-root user, as root can read anything.
+
+To check the other OSes compile from one machine (`CARGO_FEATURE_PURE` stops BLAKE3 needing a C cross-compiler):
 
 ```sh
-cargo test -- --ignored
+rustup target add x86_64-pc-windows-msvc x86_64-apple-darwin x86_64-unknown-linux-gnu
+CARGO_FEATURE_PURE=1 cargo check --tests --target x86_64-pc-windows-msvc
 ```
 
 ## Build a release app
@@ -46,7 +51,7 @@ cd files-cleaner
 npm run tauri build
 ```
 
-The bundle is written to `files-cleaner/src-tauri/target/release/bundle/`.
+The bundle is written to `files-cleaner/src-tauri/target/release/bundle/`: a `.app` and `.dmg` on macOS, an `.msi` and NSIS installer on Windows, and `.deb`, `.rpm` and AppImage on Linux. Each must be built on its own OS.
 
 ## Project docs
 
@@ -54,7 +59,10 @@ The bundle is written to `files-cleaner/src-tauri/target/release/bundle/`.
 - `docs/adr/`: architecture decisions
 - `.scratch/milestone-1/`: the Milestone 1 spec and tickets
 
+## Measure the scanner
 
+```sh
 cd files-cleaner/src-tauri
 cargo build --release -p files-cleaner-core --bin bench-scan
-/usr/bin/time -l ./target/release/bench-scan ~/Downloads 3
+/usr/bin/time -l ./target/release/bench-scan ~/Downloads 3   # -v instead of -l on Linux
+```

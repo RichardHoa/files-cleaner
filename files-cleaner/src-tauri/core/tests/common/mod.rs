@@ -35,3 +35,19 @@ pub fn config(text: &str, home: &Path) -> Config {
 pub fn empty_config(home: &Path) -> Config {
     config(r#"{ "rules": [] }"#, home)
 }
+
+/// Makes `link` a symlink to `target`. On Windows this needs Developer
+/// Mode or an administrator.
+pub fn symlink(target: impl AsRef<Path>, link: impl AsRef<Path>) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).unwrap();
+    #[cfg(windows)]
+    {
+        let target = target.as_ref();
+        if target.is_dir() {
+            std::os::windows::fs::symlink_dir(target, link).unwrap();
+        } else {
+            std::os::windows::fs::symlink_file(target, link).unwrap();
+        }
+    }
+}

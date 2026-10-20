@@ -18,12 +18,13 @@ fn plan_for(root: &Path) -> Plan {
     build_plan(&scan(root, &config).unwrap(), &config)
 }
 
-/// The relative paths the Plan trashes, sorted, `/`-separated.
+/// The relative paths the Plan trashes, sorted, `/`-separated, leaving out
+/// the folders it empties.
 fn trashed(plan: &Plan) -> Vec<String> {
     let mut paths: Vec<String> = plan
         .operations
         .iter()
-        .filter(|op| op.kind == OperationKind::Trash)
+        .filter(|op| op.kind == OperationKind::Trash && op.reason != Reason::EmptiedFolder)
         .map(|op| op.relative_path.join("/"))
         .collect();
     paths.sort();
@@ -136,15 +137,26 @@ fn a_missing_created_date_skips_to_the_next_tie_break() {
 }
 
 #[test]
-fn leave_and_follow_rules_propose_nothing_for_duplicates() {
+fn rules_and_the_old_duplicate_handling_setting_are_ignored() {
     let dir = scan_root();
-    write(dir.path(), "a.txt", "copy");
-    write(dir.path(), "b.txt", "copy");
+    let keeper = write(dir.path(), "a.txt", "copy");
+    let copy = write(dir.path(), "b.txt", "copy");
+    set_modified(&keeper, 2_000);
+    set_modified(&copy, 1_000);
+    write(dir.path(), "setup.dmg", "installer");
 
-    for handling in ["leave", "followRules"] {
-        let config = config(&format!(r#"{{ "duplicates": "{handling}" }}"#), dir.path());
+    for handling in ["trash", "leave", "followRules"] {
+        let config = config(
+            &format!(
+                r#"{{ "duplicates": "{handling}", "rules": [
+                  {{ "name": "Everything", "match": {{ "nameGlob": "*" }}, "then": {{ "moveTo": "Sorted" }} }}
+                ] }}"#
+            ),
+            dir.path(),
+        );
         let plan = build_plan(&scan(dir.path(), &config).unwrap(), &config);
-        assert!(trashed(&plan).is_empty(), "{handling}");
+        assert_eq!(trashed(&plan), ["b.txt"], "{handling}");
+        assert_eq!(plan.operations.len(), 1, "{handling}");
     }
 }
 
@@ -179,6 +191,7 @@ fn each_trashed_copy_names_where_it_goes_and_its_keeper() {
     let summary: Vec<(String, String, String)> = plan
         .operations
         .iter()
+        .filter(|op| op.reason != Reason::EmptiedFolder)
         .map(|op| {
             let Reason::Duplicate { keeper } = &op.reason else { panic!("{:?} isn't a duplicate", op.reason) };
             (op.relative_path.join("/"), op.destination.join("/"), keeper.join("/"))

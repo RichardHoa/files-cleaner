@@ -9,14 +9,7 @@ use crate::rules::PLACEHOLDERS;
 /// The config written on first launch, as a working starting point.
 pub const EXAMPLE_CONFIG: &str = r#"{
   "trashDestination": "holdingFolder",
-  "duplicates": "trash",
-  "neverTouch": ["~/Downloads/Keep"],
-  "rules": [
-    { "name": "Disk images", "match": { "extensions": ["dmg"] }, "then": { "trash": true } },
-    { "name": "Slides", "match": { "extensions": ["pptx", "key"] }, "then": { "moveTo": "~/Documents/Study" } },
-    { "name": "Screenshots", "match": { "nameGlob": "Screenshot*" },
-      "then": { "moveTo": "Screenshots", "rename": "{modified} {name}" } }
-  ]
+  "neverTouch": ["~/Downloads/Keep"]
 }
 "#;
 
@@ -27,29 +20,21 @@ pub struct Config {
     /// The user's home folder, which `~/` paths were expanded against.
     pub home: PathBuf,
     pub trash_destination: TrashDestination,
-    pub duplicates: DuplicateHandling,
     pub never_touch: Vec<PathBuf>,
-    /// In file order: the first matching Rule wins.
+    /// In file order: the first matching Rule wins. Rules are frozen: they
+    /// are still checked, but no Plan the app builds uses them.
     pub rules: Vec<Rule>,
 }
 
-/// Where Trash sends files.
+/// Where Trash sends files. Only the Holding Folder is supported: the
+/// System Trash is deferred (ADR-0001), and a config asking for it is
+/// rejected rather than silently ignored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TrashDestination {
     #[default]
     HoldingFolder,
     SystemTrash,
-}
-
-/// What happens to the non-Keeper copies in a Duplicate Group.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum DuplicateHandling {
-    #[default]
-    Trash,
-    FollowRules,
-    Leave,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -105,8 +90,10 @@ impl std::error::Error for ConfigError {}
 struct RawConfig {
     #[serde(default)]
     trash_destination: TrashDestination,
-    #[serde(default)]
-    duplicates: DuplicateHandling,
+    /// The old Duplicate Handling setting: running or skipping the
+    /// duplicate step is the choice now, so any value is ignored.
+    #[serde(default, rename = "duplicates")]
+    _duplicates: serde::de::IgnoredAny,
     #[serde(default)]
     never_touch: Vec<String>,
     #[serde(default)]
@@ -141,6 +128,14 @@ struct RawThen {
 /// Parses and validates the config JSON. `home` expands `~/` paths.
 pub fn load_config(text: &str, home: &Path) -> Result<Config, ConfigError> {
     let raw: RawConfig = serde_json::from_str(text).map_err(json_error)?;
+    if raw.trash_destination == TrashDestination::SystemTrash {
+        return Err(error_at(
+            text,
+            0,
+            "systemTrash",
+            "trashDestination \"systemTrash\" is not supported yet; use \"holdingFolder\"".into(),
+        ));
+    }
 
     let mut never_touch = Vec::new();
     for written in &raw.never_touch {
@@ -151,7 +146,7 @@ pub fn load_config(text: &str, home: &Path) -> Result<Config, ConfigError> {
                     text,
                     0,
                     written,
-                    format!("Never-Touch Path \"{written}\" must start with / or ~/"),
+                    format!("Never-Touch Path \"{written}\" must be a full path or start with ~/"),
                 ))
             }
         }
@@ -160,7 +155,6 @@ pub fn load_config(text: &str, home: &Path) -> Result<Config, ConfigError> {
     let mut config = Config {
         home: home.to_path_buf(),
         trash_destination: raw.trash_destination,
-        duplicates: raw.duplicates,
         never_touch,
         rules: Vec::new(),
     };
@@ -243,13 +237,16 @@ fn rename_problem(template: &str) -> Option<String> {
     None
 }
 
-/// The absolute path `written` names, or `None` if it is relative.
+/// The absolute path `written` names, or `None` if it is relative. `~`
+/// is the user's home folder on every OS; on Windows `~\` works too, as do
+/// `C:\…` paths.
 fn expand_home(written: &str, home: &Path) -> Option<PathBuf> {
-    if written == "~" {
+    let after_tilde = written.strip_prefix('~');
+    if after_tilde == Some("") {
         Some(home.to_path_buf())
-    } else if let Some(rest) = written.strip_prefix("~/") {
+    } else if let Some(rest) = after_tilde.and_then(|rest| rest.strip_prefix(std::path::is_separator)) {
         Some(home.join(rest))
-    } else if written.starts_with('/') {
+    } else if Path::new(written).is_absolute() {
         Some(PathBuf::from(written))
     } else {
         None

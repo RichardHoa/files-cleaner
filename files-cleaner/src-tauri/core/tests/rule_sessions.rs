@@ -6,7 +6,7 @@ use std::path::Path;
 
 use common::{config, scan_root, write};
 use files_cleaner_core::{
-    build_plan, list_sessions, redo_operations, run, scan, undo, undo_operations, OperationKind, Plan, SessionStatus,
+    build_rule_plan, list_sessions, redo_operations, run, scan, undo, undo_operations, OperationKind, Plan, SessionStatus,
 };
 use tempfile::TempDir;
 
@@ -48,15 +48,17 @@ fn messy_folder() -> TempDir {
 
 fn plan_for(root: &Path) -> Plan {
     let config = config(RULES, root);
-    build_plan(&scan(root, &config).unwrap(), &config)
+    build_rule_plan(&scan(root, &config).unwrap(), &config)
 }
 
+/// The Operations ticked when the Plan is shown: all but trashing the
+/// folders it empties.
 fn all_ids(plan: &Plan) -> Vec<String> {
-    plan.operations.iter().map(|op| op.id.clone()).collect()
+    plan.operations.iter().filter(|op| op.ticked).map(|op| op.id.clone()).collect()
 }
 
 fn ids_except(plan: &Plan, kind: OperationKind) -> Vec<String> {
-    plan.operations.iter().filter(|op| op.kind != kind).map(|op| op.id.clone()).collect()
+    plan.operations.iter().filter(|op| op.ticked && op.kind != kind).map(|op| op.id.clone()).collect()
 }
 
 fn read(root: &Path, relative: &str) -> String {

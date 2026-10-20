@@ -5,7 +5,7 @@ use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
 
 use common::{config, scan_root, write};
-use files_cleaner_core::{build_plan, scan, OperationKind, Plan, Reason};
+use files_cleaner_core::{build_rule_plan, scan, OperationKind, Plan, Reason};
 
 fn set_modified(path: &Path, secs: u64) {
     let time = UNIX_EPOCH + Duration::from_secs(secs);
@@ -15,12 +15,17 @@ fn set_modified(path: &Path, secs: u64) {
 /// The Plan for `root` with the config `text`, `~` being `home`.
 fn plan_with(root: &Path, home: &Path, text: &str) -> Plan {
     let config = config(text, home);
-    build_plan(&scan(root, &config).unwrap(), &config)
+    build_rule_plan(&scan(root, &config).unwrap(), &config)
 }
 
-/// Each Operation as `(kind, source relative path, destination relative path)`.
+/// Each Operation as `(kind, source relative path, destination relative
+/// path)`, leaving out trashing the folders the Plan empties.
 fn summary(plan: &Plan) -> Vec<(OperationKind, String, String)> {
-    plan.operations.iter().map(|op| (op.kind, op.relative_path.join("/"), op.destination.join("/"))).collect()
+    plan.operations
+        .iter()
+        .filter(|op| op.reason != Reason::EmptiedFolder)
+        .map(|op| (op.kind, op.relative_path.join("/"), op.destination.join("/")))
+        .collect()
 }
 
 #[test]
@@ -43,7 +48,8 @@ fn a_trash_rule_trashes_matching_files_into_the_holding_folder() {
             (OperationKind::Trash, "setup.dmg".into(), "Files Cleaner Trash/This Session/setup.dmg".into()),
         ]
     );
-    assert!(plan.operations.iter().all(|op| op.reason == Reason::Rule { rule: "Disk images".into() }));
+    let reasons = plan.operations.iter().map(|op| &op.reason);
+    assert!(reasons.filter(|r| **r != Reason::EmptiedFolder).all(|r| *r == Reason::Rule { rule: "Disk images".into() }));
 }
 
 /// The Rule each Operation was proposed by, by relative path; "duplicate"
@@ -52,10 +58,12 @@ fn reasons(plan: &Plan) -> Vec<(String, String)> {
     let mut found: Vec<(String, String)> = plan
         .operations
         .iter()
+        .filter(|op| op.reason != Reason::EmptiedFolder)
         .map(|op| {
             let why = match &op.reason {
                 Reason::Duplicate { .. } => "duplicate".to_string(),
                 Reason::Rule { rule } => rule.clone(),
+                Reason::EmptiedFolder => "emptied folder".to_string(),
             };
             (op.relative_path.join("/"), why)
         })
@@ -120,47 +128,19 @@ fn rules_match_packages_but_never_reach_inside_them_or_match_folders() {
     assert!(found.iter().all(|(path, _)| path != "Photos" && !path.starts_with("Old.app/")), "{found:?}");
 }
 
-/// A Scan Root with `keep.pdf` (the Keeper) and an older copy `copy.pdf`.
-fn with_duplicates() -> tempfile::TempDir {
+#[test]
+fn rules_treat_duplicate_copies_like_any_other_file() {
     let dir = scan_root();
     set_modified(&write(dir.path(), "keep.pdf", "same"), 2_000);
     set_modified(&write(dir.path(), "copy.pdf", "same"), 1_000);
-    dir
-}
 
-const PDF_RULE: &str = r#"{ "name": "PDFs", "match": { "extensions": ["pdf"] }, "then": { "trash": true } }"#;
-
-fn duplicates_plan(dir: &Path, handling: Option<&str>) -> Plan {
-    let setting = handling.map_or(String::new(), |h| format!(r#""duplicates": "{h}","#));
-    plan_with(dir, dir, &format!(r#"{{ {setting} "rules": [{PDF_RULE}] }}"#))
-}
-
-#[test]
-fn duplicate_handling_trash_is_the_default_and_beats_rules() {
-    let dir = with_duplicates();
-
-    for handling in [None, Some("trash")] {
-        let plan = duplicates_plan(dir.path(), handling);
-        assert_eq!(reasons(&plan), pairs(&[("copy.pdf", "duplicate"), ("keep.pdf", "PDFs")]), "{handling:?}");
-    }
-}
-
-#[test]
-fn duplicate_handling_follow_rules_treats_copies_like_any_other_file() {
-    let dir = with_duplicates();
-
-    let plan = duplicates_plan(dir.path(), Some("followRules"));
+    let plan = plan_with(
+        dir.path(),
+        dir.path(),
+        r#"{ "rules": [{ "name": "PDFs", "match": { "extensions": ["pdf"] }, "then": { "trash": true } }] }"#,
+    );
 
     assert_eq!(reasons(&plan), pairs(&[("copy.pdf", "PDFs"), ("keep.pdf", "PDFs")]));
-}
-
-#[test]
-fn duplicate_handling_leave_leaves_copies_out_of_the_plan() {
-    let dir = with_duplicates();
-
-    let plan = duplicates_plan(dir.path(), Some("leave"));
-
-    assert_eq!(reasons(&plan), pairs(&[("keep.pdf", "PDFs")]));
 }
 
 fn move_rule(target: &str, rename: Option<&str>) -> String {
@@ -252,7 +232,7 @@ fn rename_dates_before_1970_and_in_leap_years_are_right() {
     result.entries[0].modified = -1;
     result.entries[1].modified = 1_709_208_000_000;
 
-    assert_eq!(moved_to(&build_plan(&result, &config)), ["Slides/1969-12-31.pptx", "Slides/2024-02-29.pptx"]);
+    assert_eq!(moved_to(&build_rule_plan(&result, &config)), ["Slides/1969-12-31.pptx", "Slides/2024-02-29.pptx"]);
 }
 
 #[test]

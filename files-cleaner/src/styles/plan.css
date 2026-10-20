@@ -146,6 +146,11 @@
   display: inline;
 }
 
+/* An Operation that can't happen, such as a move to another disk: never ticked, and says so. */
+.plan-file.blocked .plan-left-out {
+  color: var(--error);
+}
+
 .plan-none {
   padding: var(--space-4) var(--space-2);
   color: var(--muted);
