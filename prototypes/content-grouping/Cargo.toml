@@ -1,0 +1,23 @@
+[package]
+name = "content-grouping-prototype"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Throwaway, read-only prototype: Suggested Folders from what's inside the loose files of a Scan Root"
+
+# Every dependency builds on macOS, Windows and Linux with no C compiler for
+# the target: ONNX Runtime comes prebuilt (ort's download-binaries), the
+# tokenizer uses the pure-Rust regex backend instead of oniguruma, zip uses
+# pure-Rust deflate, and there is no HTTPS client (`ring`); the model is
+# fetched once with the system `curl`.
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+dirs = "7.0.0"
+ndarray = "0.17"
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "ndarray", "download-binaries", "tls-rustls", "copy-dylibs", "api-24"] }
+pdf-extract = "0.12.1"
+tokenizers = { version = "0.23.2", default-features = false, features = ["fancy-regex"] }
+zip = { version = "9.0.5", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[dev-dependencies]
+tempfile = "3"
