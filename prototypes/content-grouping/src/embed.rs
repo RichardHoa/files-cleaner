@@ -1,84 +1,136 @@
-//! Sentence embeddings from a local ONNX model: tokenize, run, mean-pool over
-//! the attention mask, L2-normalize. Only the model download touches the
-//! network; file contents never leave the machine.
+//! Sentence embeddings from a local ONNX model: tokenize, run, pool (the
+//! first token or the mean over the attention mask), L2-normalize. Only the
+//! model download touches the network; file contents never leave the
+//! machine.
 
+use crate::download;
+use crate::extract::Content;
 use ndarray::{Array2, Axis};
 use ort::session::Session;
 use ort::value::Value;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use tokenizers::{PaddingParams, Tokenizer, TruncationParams};
 
-pub const DEFAULT_MODEL: &str = "Qdrant/all-MiniLM-L6-v2-onnx";
-const MODEL_FILES: &[&str] = &["model.onnx", "tokenizer.json"];
-/// Tokens per text; all-MiniLM-L6-v2 was trained on 256.
-const MAX_TOKENS: usize = 256;
-const BATCH: usize = 32;
+/// BAAI/bge-m3 exported by transformers.js: multilingual (Vietnamese
+/// included), 1024 dimensions, about 2.3 GB.
+pub const DEFAULT_MODEL: &str = "Xenova/bge-m3";
+/// (path in the model repository, file name in the cache). The weights sit
+/// in `model.onnx_data` next to the graph, which ONNX Runtime finds by name.
+const MODEL_FILES: &[(&str, &str)] = &[
+    ("tokenizer.json", "tokenizer.json"),
+    ("onnx/model.onnx", "model.onnx"),
+    ("onnx/model.onnx_data", "model.onnx_data"),
+];
+/// Tokens per text. bge-m3 takes up to 8,192, but attention cost grows with
+/// the square of the length, and `--max-chars` of text fits in 512.
+const MAX_TOKENS: usize = 512;
+/// Small batches keep ONNX Runtime's intermediate buffers small.
+const BATCH: usize = 8;
+/// Each extra thread adds its own scratch buffers; past a few, little is gained.
+const MAX_THREADS: usize = 4;
 
 pub type Vector = Vec<f32>;
+
+/// How a text's token vectors become one vector; each model is trained for
+/// one of these.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum Pooling {
+    /// The first (`[CLS]`/`<s>`) token: bge models.
+    Cls,
+    /// The mean over the real tokens: most sentence-transformers models, e5.
+    Mean,
+}
 
 pub struct Embedder {
     session: Session,
     tokenizer: Tokenizer,
     needs_token_type_ids: bool,
+    pooling: Pooling,
+    /// Put before every text, e.g. `query: ` for e5 models.
+    prefix: String,
     pub model_label: String,
 }
 
 /// Where the default model is cached when `--model-dir` isn't given.
 pub fn default_model_dir() -> Option<PathBuf> {
-    Some(dirs::cache_dir()?.join("files-cleaner-content-grouping").join(DEFAULT_MODEL.replace('/', "--")))
+    Some(download::cache_root()?.join(DEFAULT_MODEL.replace('/', "--")))
 }
 
-/// Downloads the default model's files into `dir` with the system `curl`
-/// (shipped with macOS, Windows 10+ and most Linux distributions), once.
+/// Downloads the default model's files into `dir`, once.
 pub fn ensure_default_model(dir: &Path) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("can't create model cache {}: {e}", dir.display()))?;
-    for file in MODEL_FILES {
-        let dest = dir.join(file);
-        if dest.exists() {
-            continue;
+    for (remote, local) in MODEL_FILES {
+        let dest = dir.join(local);
+        if !dest.exists() {
+            download::fetch(&format!("https://huggingface.co/{DEFAULT_MODEL}/resolve/main/{remote}"), &dest)?;
         }
-        let url = format!("https://huggingface.co/{DEFAULT_MODEL}/resolve/main/{file}");
-        eprintln!("Downloading {url}");
-        let partial = dir.join(format!("{file}.part"));
-        let status = Command::new("curl")
-            .args(["--fail", "--location", "--silent", "--show-error", "--output"])
-            .arg(&partial)
-            .arg(&url)
-            .status()
-            .map_err(|e| format!("can't run curl to download the model ({e}); download {url} into {} yourself", dir.display()))?;
-        if !status.success() {
-            return Err(format!("curl failed downloading {url}"));
-        }
-        std::fs::rename(&partial, &dest).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
 impl Embedder {
-    /// Loads `model.onnx` and `tokenizer.json` from `dir`: any
+    /// Loads `model.onnx` (and `model.onnx_data`, if the graph keeps its
+    /// weights there) and `tokenizer.json` from `dir`: any
     /// sentence-transformers model exported to ONNX whose output is
     /// `last_hidden_state`.
-    pub fn load(dir: &Path, model_label: String) -> Result<Self, String> {
+    pub fn load(dir: &Path, pooling: Pooling, prefix: String, model_label: String) -> Result<Self, String> {
         let mut tokenizer = Tokenizer::from_file(dir.join("tokenizer.json")).map_err(|e| format!("tokenizer: {e}"))?;
         tokenizer
             .with_truncation(Some(TruncationParams { max_length: MAX_TOKENS, ..Default::default() }))
             .map_err(|e| format!("tokenizer: {e}"))?;
-        tokenizer.with_padding(Some(PaddingParams::default()));
-        let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+        // Pad with the model's own pad token: RoBERTa-style models (bge-m3)
+        // use `<pad>` = 1 and treat id 0 as the start token.
+        let mut padding = PaddingParams::default();
+        if let Some((token, id)) = ["[PAD]", "<pad>"].iter().find_map(|t| Some((*t, tokenizer.token_to_id(t)?))) {
+            padding.pad_token = token.to_string();
+            padding.pad_id = id;
+        }
+        tokenizer.with_padding(Some(padding));
+        let threads = std::thread::available_parallelism().map_or(MAX_THREADS, |n| n.get().min(MAX_THREADS));
         let environment = ort::init().build().map_err(|e| format!("ONNX Runtime: {e}"))?;
+        // No memory arena and no per-shape memory pattern: both keep the
+        // largest buffers ever needed for the whole run.
         let session = Session::builder(&environment)
+            .and_then(|b| {
+                b.with_execution_providers([ort::ep::CPU::default().with_arena_allocator(false).build()])
+                    .map_err(Into::into)
+            })
+            .and_then(|b| b.with_memory_pattern(false).map_err(Into::into))
             .and_then(|b| b.with_intra_threads(threads).map_err(Into::into))
             .and_then(|mut b| b.commit_from_file(dir.join("model.onnx")))
             .map_err(|e: ort::Error| format!("ONNX model: {e}"))?;
         let needs_token_type_ids = session.inputs().iter().any(|i| i.name() == "token_type_ids");
-        Ok(Self { session, tokenizer, needs_token_type_ids, model_label })
+        Ok(Self { session, tokenizer, needs_token_type_ids, pooling, prefix, model_label })
     }
 
+    /// One vector per file. The name and the content are embedded apart
+    /// and averaged, `name_weight` to the name: in one text the name would
+    /// be a few tokens among hundreds, and a file read by name only would be
+    /// a short title compared with pages of text. A name-only file gets its
+    /// name's vector.
+    pub fn embed_contents(&mut self, contents: &[Content], name_weight: f32) -> Result<Vec<Vector>, String> {
+        let names: Vec<String> = contents.iter().map(|c| c.name.clone()).collect();
+        let with_body: Vec<usize> = (0..contents.len()).filter(|&i| !contents[i].body.is_empty()).collect();
+        let bodies: Vec<String> = with_body.iter().map(|&i| contents[i].body.clone()).collect();
+        let mut vectors = self.embed(&names)?;
+        for (&i, body) in with_body.iter().zip(self.embed(&bodies)?) {
+            let mixed = vectors[i].iter().zip(&body).map(|(n, b)| name_weight * n + (1.0 - name_weight) * b).collect();
+            vectors[i] = normalized(mixed);
+        }
+        Ok(vectors)
+    }
+
+    /// Texts are batched by length, so a batch pads little; the vectors come
+    /// back in the input's order.
     pub fn embed(&mut self, texts: &[String]) -> Result<Vec<Vector>, String> {
-        let mut out = Vec::with_capacity(texts.len());
-        for batch in texts.chunks(BATCH) {
-            out.extend(self.embed_batch(batch)?);
+        let mut order: Vec<usize> = (0..texts.len()).collect();
+        order.sort_by_key(|&i| texts[i].len());
+        let mut out = vec![Vector::new(); texts.len()];
+        for batch in order.chunks(BATCH) {
+            let batch_texts: Vec<String> = batch.iter().map(|&i| format!("{}{}", self.prefix, texts[i])).collect();
+            for (&i, v) in batch.iter().zip(self.embed_batch(&batch_texts)?) {
+                out[i] = v;
+            }
         }
         Ok(out)
     }
@@ -103,9 +155,13 @@ impl Embedder {
         let outputs = self.session.run(inputs).map_err(|e| e.to_string())?;
         let hidden = outputs["last_hidden_state"].try_extract_array::<f32>().map_err(|e| e.to_string())?;
 
-        // Mean over the real (unpadded) tokens of each text.
         let mut vectors = Vec::with_capacity(rows);
         for (r, tokens) in hidden.axis_iter(Axis(0)).enumerate() {
+            if self.pooling == Pooling::Cls {
+                vectors.push(normalized(tokens.index_axis(Axis(0), 0).iter().copied().collect()));
+                continue;
+            }
+            // Mean over the real (unpadded) tokens of the text.
             let mut sum = vec![0f32; tokens.shape()[1]];
             let mut count = 0f32;
             for (c, token) in tokens.axis_iter(Axis(0)).enumerate() {

@@ -4,6 +4,7 @@
 
 mod baseline;
 mod cluster;
+mod download;
 mod embed;
 mod extract;
 mod keywords;
@@ -27,15 +28,21 @@ struct Args {
     /// Default: `reports/grouping-report.md` in this prototype's folder.
     #[arg(long)]
     report: Option<PathBuf>,
-    /// Content grouper: lowest average cosine similarity at which two groups merge (0–1).
+    /// Content grouper: lowest average similarity at which two groups merge (0–1).
     #[arg(long, default_value_t = 0.5)]
     threshold: f32,
     /// Both groupers: groups with fewer files count as Ungrouped.
-    #[arg(long, default_value_t = 3)]
+    #[arg(long, default_value_t = 2)]
     min_size: usize,
     /// Content grouper: lowest similarity to an existing subfolder's centroid to suggest it.
-    #[arg(long, default_value_t = 0.45)]
+    #[arg(long, default_value_t = 0.5)]
     anchor_threshold: f32,
+    /// Content grouper: share of a file's vector that comes from its name (0–1); the rest is its content.
+    #[arg(long, default_value_t = 0.5)]
+    name_weight: f32,
+    /// Content grouper: added to two files' similarity when their names share a word.
+    #[arg(long, default_value_t = 0.1)]
+    name_bonus: f32,
     /// Content grouper: most files read from each existing subfolder (recursively) for its centroid.
     #[arg(long, default_value_t = 40)]
     folder_sample: usize,
@@ -48,16 +55,33 @@ struct Args {
     /// Give up on a PDF's text after this many seconds.
     #[arg(long, default_value_t = 10)]
     pdf_timeout: u64,
-    /// Skip reading PDFs larger than this many MB (they are grouped by name only).
-    #[arg(long, default_value_t = 100)]
-    max_pdf_mb: u64,
-    /// A folder with `model.onnx` and `tokenizer.json` of any sentence-transformers ONNX export.
-    /// Default: all-MiniLM-L6-v2, downloaded once into the user cache folder.
+    /// A PDFium library file (`libpdfium.dylib`, `pdfium.dll`, `libpdfium.so`) to use.
+    /// Default: PDFium from bblanchon/pdfium-binaries, downloaded once into the user cache folder.
+    #[arg(long)]
+    pdfium: Option<PathBuf>,
+    /// A folder with `model.onnx` (plus `model.onnx_data` if it has one) and `tokenizer.json`
+    /// of any sentence-transformers ONNX export. Default: bge-m3, downloaded once into the user cache folder.
     #[arg(long)]
     model_dir: Option<PathBuf>,
+    /// How the model pools token vectors. Default: `cls` for the default model, `mean` with --model-dir.
+    #[arg(long, value_enum)]
+    pooling: Option<embed::Pooling>,
+    /// Text put before every text the model embeds, e.g. "query: " for e5 models.
+    #[arg(long, default_value = "")]
+    prefix: String,
 }
 
 fn main() -> ExitCode {
+    let raw: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    if raw.get(1).is_some_and(|a| a == extract::PDF_CHILD_FLAG) {
+        let max_chars = raw.get(4).and_then(|n| n.to_str()?.parse().ok()).unwrap_or(2000);
+        let (Some(pdfium), Some(path)) = (raw.get(2), raw.get(3)) else { return ExitCode::FAILURE };
+        // A panic or a crash in PDFium just ends this child; the parent sees a failure.
+        return match extract::pdf_child(Path::new(pdfium), Path::new(path), max_chars) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(_) => ExitCode::FAILURE,
+        };
+    }
     match run(Args::parse()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
@@ -87,6 +111,9 @@ fn warn_if_inside(root: &Path, path: &Path, what: &str) {
         eprintln!("note: the {what} ({}) is inside the Scan Root; it is the only thing written there", path.display());
     }
 }
+
+/// Most similar files listed for each ungrouped file in the report.
+const NEAREST_SHOWN: usize = 3;
 
 struct Stages(Vec<(&'static str, Duration)>);
 
@@ -120,24 +147,25 @@ fn run(args: Args) -> Result<(), String> {
         return Err(format!("the report path {} is a symlink; pick a plain file path", report_path.display()));
     }
     let mut stages = Stages(Vec::new());
-    let (model_dir, model_label) = match &args.model_dir {
+    let (model_dir, model_label, pooling) = match &args.model_dir {
         Some(dir) => {
             let dir = dir.canonicalize().map_err(|e| format!("{}: {e}", dir.display()))?;
             let label = format!("{} (from --model-dir)", dir.file_name().unwrap_or_default().to_string_lossy());
-            (dir, label)
+            (dir, label, args.pooling.unwrap_or(embed::Pooling::Mean))
         }
         None => {
             let dir = embed::default_model_dir().ok_or("no user cache folder; pass --model-dir")?;
             warn_if_inside(&root, &dir, "model cache");
             stages.time("download model (first run only)", || embed::ensure_default_model(&dir))?;
-            (dir, format!("{} (sentence-transformers/all-MiniLM-L6-v2, ONNX, 384 dimensions)", embed::DEFAULT_MODEL))
+            let label = format!("{} (BAAI/bge-m3, ONNX, 1024 dimensions, multilingual)", embed::DEFAULT_MODEL);
+            (dir, label, args.pooling.unwrap_or(embed::Pooling::Cls))
         }
     };
-    let limits = Limits {
-        max_chars: args.max_chars,
-        pdf_timeout: Duration::from_secs(args.pdf_timeout),
-        max_pdf_bytes: args.max_pdf_mb * 1024 * 1024,
+    let pdfium = match &args.pdfium {
+        Some(lib) => lib.canonicalize().map_err(|e| format!("{}: {e}", lib.display()))?,
+        None => stages.time("download PDFium (first run only)", extract::ensure_pdfium)?,
     };
+    let limits = Limits { max_chars: args.max_chars, pdf_timeout: Duration::from_secs(args.pdf_timeout), pdfium };
 
     let listing = stages.time("list loose items", || scan::loose_items(&root)).map_err(|e| e.to_string())?;
     let items = &listing.loose;
@@ -167,29 +195,33 @@ fn run(args: Args) -> Result<(), String> {
     });
 
     // B. Content
-    let mut embedder = stages.time("load model", || embed::Embedder::load(&model_dir, model_label))?;
-    let texts: Vec<String> = contents.iter().map(|c| c.text.clone()).collect();
-    let vectors = stages.time("embed loose files", || embedder.embed(&texts))?;
+    let mut embedder =
+        stages.time("load model", || embed::Embedder::load(&model_dir, pooling, args.prefix.clone(), model_label))?;
+    let vectors = stages.time("embed loose files", || embedder.embed_contents(&contents, args.name_weight))?;
     let folders = stages.time("read and embed subfolders", || -> Result<Vec<report::Folder>, String> {
         let mut folders = Vec::new();
         for (path, name) in listing.subfolders.iter().zip(&folder_names) {
             let sample = scan::sample_files(path, args.folder_sample);
-            let mut texts: Vec<String> =
-                sample.iter().map(|i| extract::read(i, &limits).text).collect();
-            let sampled = texts.len();
+            let mut read: Vec<Content> = sample.iter().map(|i| extract::read(i, &limits)).collect();
+            let sampled = read.len();
             // An empty folder is still a destination; its name is all we know.
-            if texts.is_empty() {
-                texts.push(extract::name_words(name));
+            if read.is_empty() {
+                read.push(Content::name_only(extract::name_words(name)));
             }
-            if let Some(centroid) = embed::centroid(&embedder.embed(&texts)?) {
+            if let Some(centroid) = embed::centroid(&embedder.embed_contents(&read, args.name_weight)?) {
                 folders.push(report::Folder { name: name.clone(), centroid, sampled });
             }
         }
         Ok(folders)
     })?;
-    let clusters = stages.time("cluster", || cluster::agglomerate(&vectors, args.threshold, args.min_size));
+    let (clusters, nearest) = stages.time("cluster", || {
+        let name_words: Vec<HashSet<String>> = items.iter().map(|i| keywords::name_words(&i.name)).collect();
+        let sims = cluster::similarities(&vectors, &name_words, args.name_bonus);
+        let nearest = sims.nearest(NEAREST_SHOWN);
+        (cluster::agglomerate(sims, args.threshold, args.min_size), nearest)
+    });
     let content = stages.time("anchor and name", || {
-        let terms: Vec<HashSet<String>> = contents.iter().map(|c| keywords::terms(&c.text)).collect();
+        let terms: Vec<HashSet<String>> = contents.iter().map(|c| keywords::terms(&c.text())).collect();
         let corpus = keywords::Corpus::new(&terms);
         let mut used_names: HashSet<String> = HashSet::new();
         clusters
@@ -225,14 +257,28 @@ fn run(args: Args) -> Result<(), String> {
         skipped: listing.skipped.iter().map(|(_, s)| *s).collect(),
         model: &embedder.model_label,
         settings: format!(
-            "--threshold {} --min-size {} --anchor-threshold {} --folder-sample {} --max-chars {} --split-at {}",
-            args.threshold, args.min_size, args.anchor_threshold, args.folder_sample, args.max_chars, args.split_at
+            "--threshold {} --min-size {} --anchor-threshold {} --name-weight {} --name-bonus {} --pooling {} --prefix {:?} --folder-sample {} --max-chars {} --split-at {}",
+            args.threshold,
+            args.min_size,
+            args.anchor_threshold,
+            args.name_weight,
+            args.name_bonus,
+            match pooling {
+                embed::Pooling::Cls => "cls",
+                embed::Pooling::Mean => "mean",
+            },
+            args.prefix,
+            args.folder_sample,
+            args.max_chars,
+            args.split_at
         ),
         folders: &folders,
         baseline: &baseline,
         baseline_ungrouped: &baseline_ungrouped,
         content: &content,
         content_ungrouped: &clusters.ungrouped,
+        nearest: &nearest,
+        threshold: args.threshold,
     };
     let markdown = report.render(&stages.0, started.elapsed());
     std::fs::write(&report_path, markdown).map_err(|e| format!("{}: {e}", report_path.display()))?;

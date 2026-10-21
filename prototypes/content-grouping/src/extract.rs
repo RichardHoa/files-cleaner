@@ -2,11 +2,13 @@
 //! the format is one we can read without OCR. Files are only ever opened for
 //! reading.
 
+use crate::download;
 use crate::scan::Item;
+use pdfium_render::prelude::Pdfium;
 use std::io::Read;
-use std::path::Path;
-use std::sync::mpsc;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Method {
@@ -30,14 +32,32 @@ impl Method {
 #[derive(Debug, Clone)]
 pub struct Content {
     pub method: Method,
-    /// The name as words, then the content, at most `max_chars` of content.
-    pub text: String,
+    /// The file name as words.
+    pub name: String,
+    /// What's inside, at most `max_chars`; empty when read by name only.
+    pub body: String,
+}
+
+impl Content {
+    pub fn name_only(name: String) -> Self {
+        Content { method: Method::NameOnly, name, body: String::new() }
+    }
+
+    /// The name, then the content: what keywords are taken from.
+    pub fn text(&self) -> String {
+        if self.body.is_empty() {
+            self.name.clone()
+        } else {
+            format!("{}. {}", self.name, self.body)
+        }
+    }
 }
 
 pub struct Limits {
     pub max_chars: usize,
     pub pdf_timeout: Duration,
-    pub max_pdf_bytes: u64,
+    /// The PDFium library the PDF child loads.
+    pub pdfium: PathBuf,
 }
 
 const PLAIN_TEXT: &[&str] = &[
@@ -54,17 +74,17 @@ const MAX_XML_BYTES: u64 = 4 * 1024 * 1024;
 pub fn read(item: &Item, limits: &Limits) -> Content {
     let (path, ext) = (item.path.as_path(), item.ext.as_str());
     let inside = match ext {
-        "pdf" if item.size <= limits.max_pdf_bytes => pdf_text(path, limits.pdf_timeout).map(|t| (Method::PdfText, t)),
+        "pdf" => pdf_text(&limits.pdfium, path, limits.pdf_timeout, limits.max_chars).map(|t| (Method::PdfText, t)),
         "docx" | "pptx" | "xlsx" => office_text(path, ext, limits.max_chars).map(|t| (Method::OfficeXml, t)),
         _ if PLAIN_TEXT.contains(&ext) => plain_text(path, limits.max_chars).map(|t| (Method::PlainText, t)),
         _ => None,
     };
     let name = name_words(&item.name);
     match inside.map(|(m, t)| (m, truncate(&collapse_whitespace(&t), limits.max_chars))) {
-        Some((method, text)) if text.chars().filter(|c| c.is_alphabetic()).count() >= 20 => {
-            Content { method, text: format!("{name}. {text}") }
+        Some((method, body)) if body.chars().filter(|c| c.is_alphabetic()).count() >= 20 => {
+            Content { method, name, body }
         }
-        _ => Content { method: Method::NameOnly, text: name },
+        _ => Content::name_only(name),
     }
 }
 
@@ -110,16 +130,117 @@ fn truncate(text: &str, max_chars: usize) -> String {
     }
 }
 
-/// The PDF's text layer. pdf-extract can panic or take very long on odd
-/// files, so it runs on its own thread and is abandoned after `timeout`.
-fn pdf_text(path: &Path, timeout: Duration) -> Option<String> {
-    let bytes = std::fs::read(path).ok()?;
-    let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        let text = std::panic::catch_unwind(|| pdf_extract::extract_text_from_mem(&bytes).ok()).ok().flatten();
-        let _ = tx.send(text);
-    });
-    rx.recv_timeout(timeout).ok().flatten()
+/// Pages of a PDF read for its text; the rest of the document is never decoded.
+const PDF_PAGES: i32 = 3;
+/// The pdfium-binaries release downloaded by default. It must match the
+/// `pdfium_7881` feature of pdfium-render in Cargo.toml.
+pub const PDFIUM_RELEASE: &str = "chromium/7881";
+
+/// The library file of the default PDFium, downloaded once from
+/// bblanchon/pdfium-binaries into the user cache folder (about 6 MB).
+pub fn ensure_pdfium() -> Result<PathBuf, String> {
+    let dir = download::cache_root()
+        .ok_or("no user cache folder; pass --pdfium")?
+        .join(PDFIUM_RELEASE.replace('/', "-"));
+    // The archives keep the Windows DLL in bin/, the others in lib/.
+    let lib = Pdfium::pdfium_platform_library_name_at_path(&dir.join(if cfg!(windows) { "bin" } else { "lib" }));
+    if lib.exists() {
+        return Ok(lib);
+    }
+    let os = match std::env::consts::OS {
+        "macos" => "mac",
+        "windows" => "win",
+        "linux" => "linux",
+        other => return Err(format!("no prebuilt PDFium for {other}; pass --pdfium")),
+    };
+    let arch = match std::env::consts::ARCH {
+        "aarch64" => "arm64",
+        "x86_64" => "x64",
+        other => return Err(format!("no prebuilt PDFium for {other}; pass --pdfium")),
+    };
+    std::fs::create_dir_all(&dir).map_err(|e| format!("can't create {}: {e}", dir.display()))?;
+    let archive = dir.join("pdfium.tgz");
+    let release = PDFIUM_RELEASE.replace('/', "%2F");
+    download::fetch(
+        &format!("https://github.com/bblanchon/pdfium-binaries/releases/download/{release}/pdfium-{os}-{arch}.tgz"),
+        &archive,
+    )?;
+    // `tar` ships with macOS, Linux and Windows 10+.
+    let status = Command::new("tar")
+        .arg("-xf")
+        .arg(&archive)
+        .arg("-C")
+        .arg(&dir)
+        .status()
+        .map_err(|e| format!("can't run tar to unpack {} ({e})", archive.display()))?;
+    let _ = std::fs::remove_file(&archive);
+    if !status.success() || !lib.exists() {
+        return Err(format!("unpacking {} didn't give {}", archive.display(), lib.display()));
+    }
+    Ok(lib)
+}
+/// How often the parent checks whether the PDF child has finished.
+const PDF_POLL: Duration = Duration::from_millis(20);
+
+/// The PDF's text layer. PDFium is C++ and can crash or take long on odd
+/// files, so it runs in a child process of this same program
+/// (`--extract-pdf`), which is killed after `timeout`; the OS then frees
+/// everything it held.
+fn pdf_text(pdfium: &Path, path: &Path, timeout: Duration, max_chars: usize) -> Option<String> {
+    let mut child = Command::new(std::env::current_exe().ok()?)
+        .arg(PDF_CHILD_FLAG)
+        .arg(pdfium)
+        .arg(path)
+        .arg(max_chars.to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let started = Instant::now();
+    // The child prints at most `max_chars` characters, well under a pipe's
+    // buffer, so it never blocks on a full pipe while we wait.
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => break,
+            Ok(Some(_)) | Err(_) => return None,
+            Ok(None) if started.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            Ok(None) => std::thread::sleep(PDF_POLL),
+        }
+    }
+    let mut text = String::new();
+    child.stdout.take()?.read_to_string(&mut text).ok()?;
+    Some(text)
+}
+
+/// The flag `main` checks for before parsing arguments: run as the PDF child.
+pub const PDF_CHILD_FLAG: &str = "--extract-pdf";
+
+/// The PDF child's work: the text of the first `PDF_PAGES` pages of `path`,
+/// at most `max_chars` characters, printed to stdout. `pdfium` is the
+/// library file to load.
+pub fn pdf_child(pdfium: &Path, path: &Path, max_chars: usize) -> Result<(), String> {
+    let pdfium = Pdfium::new(Pdfium::bind_to_library(pdfium).map_err(|e| e.to_string())?);
+    // Opened through a seekable reader, not read into memory: PDFium reads
+    // the cross-reference table and then only the objects of the pages it
+    // is asked for, so a 2 GB PDF costs about what a 2 MB one does.
+    let doc = pdfium.load_pdf_from_file(path, None).map_err(|e| e.to_string())?;
+    let pages = doc.pages();
+    let mut text = String::new();
+    for index in 0..pages.len().min(PDF_PAGES) {
+        let page = pages.get(index).map_err(|e| e.to_string())?;
+        text.push_str(&page.text().map_err(|e| e.to_string())?.all());
+        text.push('\n');
+        if text.chars().count() >= max_chars {
+            break;
+        }
+    }
+    print!("{}", truncate(&text, max_chars));
+    Ok(())
 }
 
 fn plain_text(path: &Path, max_chars: usize) -> Option<String> {

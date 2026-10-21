@@ -31,6 +31,13 @@ pub fn tokens(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// A file name's words without its extension (every `.dmg` would share
+/// `dmg`), split on separators only, so `CS101` stays one word.
+pub fn name_words(name: &str) -> HashSet<String> {
+    let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
+    tokens(stem).into_iter().collect()
+}
+
 /// Each file's distinct terms: its words, and pairs of adjacent words within
 /// one clause (pairs never span punctuation such as `.` or `:`).
 pub fn terms(text: &str) -> HashSet<String> {

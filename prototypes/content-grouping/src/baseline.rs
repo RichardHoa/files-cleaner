@@ -1,7 +1,7 @@
 //! Grouper A, no ML: by file kind, then large kinds split by a shared name
 //! token, then what's left of a large kind split by modified month.
 
-use crate::keywords::{title_case, tokens};
+use crate::keywords::{name_words, title_case, tokens};
 use crate::scan::Item;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::SystemTime;
@@ -73,16 +73,8 @@ pub fn suggest(items: &[Item], min_size: usize, split_at: usize) -> Baseline {
     for (kind, mut rest) in by_kind {
         let kind_word = kind.to_lowercase();
         if rest.len() >= split_at {
-            // Name tokens without the extension (every `.dmg` would share `dmg`),
-            // split on separators only, so `CS101` stays one token.
-            let name_tokens: HashMap<usize, HashSet<String>> = rest
-                .iter()
-                .map(|&i| {
-                    let name = &items[i].name;
-                    let stem = name.rsplit_once('.').map_or(name.as_str(), |(stem, _)| stem);
-                    (i, tokens(stem).into_iter().collect())
-                })
-                .collect();
+            let name_tokens: HashMap<usize, HashSet<String>> =
+                rest.iter().map(|&i| (i, name_words(&items[i].name))).collect();
             loop {
                 let mut counts: HashMap<&str, usize> = HashMap::new();
                 for i in &rest {

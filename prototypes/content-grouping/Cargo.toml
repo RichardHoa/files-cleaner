@@ -8,14 +8,16 @@ description = "Throwaway, read-only prototype: Suggested Folders from what's ins
 # Every dependency builds on macOS, Windows and Linux with no C compiler for
 # the target: ONNX Runtime comes prebuilt (ort's download-binaries), the
 # tokenizer uses the pure-Rust regex backend instead of oniguruma, zip uses
-# pure-Rust deflate, and there is no HTTPS client (`ring`); the model is
-# fetched once with the system `curl`.
+# pure-Rust deflate, PDFium is a prebuilt library loaded at run time
+# (pdfium-render with no `static` feature), and there is no HTTPS client
+# (`ring`); the model and PDFium are fetched once with the system `curl`.
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
 dirs = "7.0.0"
 ndarray = "0.17"
 ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "ndarray", "download-binaries", "tls-rustls", "copy-dylibs", "api-24"] }
-pdf-extract = "0.12.1"
+# `pdfium_7881` must match `extract::PDFIUM_RELEASE`.
+pdfium-render = { version = "0.9.4", default-features = false, features = ["pdfium_7881"] }
 tokenizers = { version = "0.23.2", default-features = false, features = ["fancy-regex"] }
 zip = { version = "9.0.5", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 

@@ -11,7 +11,6 @@ pub struct Item {
     pub name: String,
     /// Lowercased, without the dot.
     pub ext: String,
-    pub size: u64,
     pub modified: SystemTime,
 }
 
@@ -113,7 +112,6 @@ fn classify(path: PathBuf) -> std::io::Result<Entry> {
         None => Entry::File(Item {
             ext: extension(&name).unwrap_or_default(),
             name,
-            size: meta.len(),
             // Some filesystems keep no modified date; the baseline's month split then sees 1970.
             modified: meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
             path,

@@ -41,7 +41,13 @@ pub struct Report<'a> {
     pub baseline_ungrouped: &'a [usize],
     pub content: &'a [SuggestedFolder],
     pub content_ungrouped: &'a [usize],
+    /// Per loose file: its most similar other files, most similar first.
+    pub nearest: &'a [Vec<(usize, f32)>],
+    pub threshold: f32,
 }
+
+/// Characters of each ungrouped file's content shown, to spot garbled text.
+const PREVIEW_CHARS: usize = 120;
 
 impl Report<'_> {
     pub fn render(&self, stages: &[(&str, Duration)], total: Duration) -> String {
@@ -96,7 +102,37 @@ impl Report<'_> {
         writeln!(md, "\n# A. Baseline: kind, name and date (no ML)\n")?;
         self.suggested(md, self.baseline, self.baseline_ungrouped)?;
         writeln!(md, "\n# B. Content: embeddings, clustering, keyword names\n")?;
-        self.suggested(md, self.content, self.content_ungrouped)
+        self.suggested(md, self.content, self.content_ungrouped)?;
+        self.closest(md)
+    }
+
+    /// Why each file the content grouper left out stayed out: what it read
+    /// and how close the nearest files came to the threshold.
+    fn closest(&self, md: &mut String) -> std::fmt::Result {
+        if self.content_ungrouped.is_empty() {
+            return Ok(());
+        }
+        writeln!(md, "\n## Ungrouped: nearest files\n")?;
+        writeln!(
+            md,
+            "Similarity (cosine plus the name bonus) to the most similar files; groups merge at {}. \
+             A file can be close to one file and still stay out when it is far from the rest of that file's group.\n",
+            self.threshold
+        )?;
+        for &i in self.content_ungrouped {
+            let content = &self.contents[i];
+            write!(md, "- `{}` · {}", self.items[i].name, content.method.label())?;
+            if !content.body.is_empty() {
+                let flat = content.body.split_whitespace().collect::<Vec<_>>().join(" ");
+                let preview: String = flat.chars().take(PREVIEW_CHARS).collect();
+                let more = if flat.chars().count() > PREVIEW_CHARS { "…" } else { "" };
+                write!(md, " · “{}{more}”", preview.replace('`', "'"))?;
+            }
+            let near: Vec<String> =
+                self.nearest[i].iter().map(|&(j, s)| format!("`{}` {s:.2}", self.items[j].name)).collect();
+            writeln!(md, "\n  - nearest: {}", if near.is_empty() { "none".to_string() } else { near.join(", ") })?;
+        }
+        Ok(())
     }
 
     fn suggested(&self, md: &mut String, folders: &[SuggestedFolder], ungrouped: &[usize]) -> std::fmt::Result {
