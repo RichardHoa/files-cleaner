@@ -29,10 +29,11 @@ pub fn kind(ext: &str) -> &'static str {
         | "cr2" | "nef" | "dng" | "ico" => "Images",
         "mp4" | "mov" | "mkv" | "avi" | "webm" | "m4v" | "wmv" => "Videos",
         "mp3" | "m4a" | "wav" | "flac" | "aac" | "ogg" | "aiff" | "opus" => "Audio",
-        "dmg" | "pkg" | "mpkg" | "exe" | "msi" | "deb" | "rpm" | "appimage" | "apk" | "flatpak" | "snap" => {
-            "Installers"
-        }
-        "zip" | "rar" | "7z" | "tar" | "gz" | "tgz" | "bz2" | "xz" | "zst" | "iso" => "Archives",
+        // macOS, Windows, Linux, Android
+        "dmg" | "pkg" | "mpkg" | "exe" | "msi" | "msix" | "msixbundle" | "appx" | "appxbundle" | "deb" | "rpm"
+        | "appimage" | "flatpak" | "flatpakref" | "snap" | "run" | "apk" | "xapk" | "aab" => "Installers",
+        "zip" | "rar" | "7z" | "tar" | "gz" | "tgz" | "bz2" | "tbz2" | "xz" | "txz" | "zst" | "lz" | "lzma" | "z"
+        | "cab" | "sit" | "sitx" | "iso" => "Archives",
         "epub" | "mobi" | "azw3" => "Books",
         "ttf" | "otf" | "woff" | "woff2" => "Fonts",
         "rs" | "py" | "js" | "mjs" | "ts" | "jsx" | "tsx" | "java" | "kt" | "swift" | "c" | "h" | "cc" | "cpp"
@@ -41,6 +42,15 @@ pub fn kind(ext: &str) -> &'static str {
         "ics" | "vcf" => "Calendar and contacts",
         _ => "Other",
     }
+}
+
+/// Kinds the content grouper doesn't read: each goes into one folder of its
+/// own, whatever the files are called.
+pub const FIXED_KINDS: &[&str] = &["Archives", "Images", "Installers"];
+
+/// The file's kind when it is one of the `FIXED_KINDS`.
+pub fn fixed_kind(ext: &str) -> Option<&'static str> {
+    Some(kind(ext)).filter(|k| FIXED_KINDS.contains(k))
 }
 
 fn month(t: SystemTime) -> String {
@@ -139,4 +149,19 @@ pub fn match_by_name<'a>(folder: &KindFolder, folder_names: &'a [String]) -> Opt
     folder.match_words.iter().map(|w| stem(w)).find_map(|wanted| {
         folder_names.iter().find(|name| tokens(name).iter().any(|w| stem(w) == wanted)).map(String::as_str)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn installers_of_every_platform_archives_and_images_are_fixed_kinds() {
+        for ext in ["dmg", "exe", "msi", "deb", "appimage", "apk"] {
+            assert_eq!(fixed_kind(ext), Some("Installers"), "{ext}");
+        }
+        assert_eq!(fixed_kind("7z"), Some("Archives"));
+        assert_eq!(fixed_kind("heic"), Some("Images"));
+        assert_eq!(fixed_kind("pdf"), None);
+    }
 }

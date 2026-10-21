@@ -2,6 +2,7 @@
 
 use crate::embed::Vector;
 use crate::extract::{Content, Method};
+use crate::llm::Card;
 use crate::scan::{Item, Skip};
 use std::collections::BTreeMap;
 use std::fmt::Write;
@@ -35,6 +36,9 @@ pub struct Report<'a> {
     pub contents: &'a [Content],
     pub skipped: Vec<Skip>,
     pub model: &'a str,
+    /// Per loose file: what the LLM said about it; `None` for files it
+    /// didn't read (archives, images, installers).
+    pub cards: &'a [Option<Card>],
     pub settings: String,
     pub folders: &'a [Folder],
     pub baseline: &'a [SuggestedFolder],
@@ -91,7 +95,7 @@ impl Report<'_> {
             "- **Existing subfolders:** {}",
             if folders.is_empty() { "none".to_string() } else { folders.join(", ") }
         )?;
-        writeln!(md, "- **Embedding model:** {}", self.model)?;
+        writeln!(md, "- **Models:** {}", self.model)?;
         writeln!(md, "- **Settings:** `{}`", self.settings)?;
         writeln!(md, "- **Total time:** {}\n", secs(total))?;
         writeln!(md, "| Stage | Time |\n|---|---|")?;
@@ -100,9 +104,9 @@ impl Report<'_> {
         }
 
         writeln!(md, "\n# A. Baseline: kind, name and date (no ML)\n")?;
-        self.suggested(md, self.baseline, self.baseline_ungrouped)?;
-        writeln!(md, "\n# B. Content: embeddings, clustering, keyword names\n")?;
-        self.suggested(md, self.content, self.content_ungrouped)?;
+        self.suggested(md, self.baseline, self.baseline_ungrouped, false)?;
+        writeln!(md, "\n# B. Content: archives, images and installers by kind; the rest by LLM cards\n")?;
+        self.suggested(md, self.content, self.content_ungrouped, true)?;
         self.closest(md)
     }
 
@@ -115,7 +119,7 @@ impl Report<'_> {
         writeln!(md, "\n## Ungrouped: nearest files\n")?;
         writeln!(
             md,
-            "Similarity (cosine plus the name bonus) to the most similar files; groups merge at {}. \
+            "Similarity of the cards (1 for the same topic) to the most similar files; groups merge at {}. \
              A file can be close to one file and still stay out when it is far from the rest of that file's group.\n",
             self.threshold
         )?;
@@ -128,6 +132,7 @@ impl Report<'_> {
                 let more = if flat.chars().count() > PREVIEW_CHARS { "…" } else { "" };
                 write!(md, " · “{}{more}”", preview.replace('`', "'"))?;
             }
+            write!(md, "{}", self.card(i))?;
             let near: Vec<String> =
                 self.nearest[i].iter().map(|&(j, s)| format!("`{}` {s:.2}", self.items[j].name)).collect();
             writeln!(md, "\n  - nearest: {}", if near.is_empty() { "none".to_string() } else { near.join(", ") })?;
@@ -135,7 +140,13 @@ impl Report<'_> {
         Ok(())
     }
 
-    fn suggested(&self, md: &mut String, folders: &[SuggestedFolder], ungrouped: &[usize]) -> std::fmt::Result {
+    fn suggested(
+        &self,
+        md: &mut String,
+        folders: &[SuggestedFolder],
+        ungrouped: &[usize],
+        with_cards: bool,
+    ) -> std::fmt::Result {
         let grouped: usize = folders.iter().map(|g| g.members.len()).sum();
         writeln!(md, "{} Suggested Folders holding {grouped} files; {} ungrouped.", folders.len(), ungrouped.len())?;
         for g in folders {
@@ -150,17 +161,31 @@ impl Report<'_> {
                 writeln!(md, "- **Why:** {}", g.phrases.join("; "))?;
             }
             writeln!(md)?;
-            self.files(md, &g.members)?;
+            self.files(md, &g.members, with_cards)?;
         }
         writeln!(md, "\n## Ungrouped ({} files)\n", ungrouped.len())?;
-        self.files(md, ungrouped)
+        self.files(md, ungrouped, with_cards)
     }
 
-    fn files(&self, md: &mut String, members: &[usize]) -> std::fmt::Result {
+    fn files(&self, md: &mut String, members: &[usize], with_cards: bool) -> std::fmt::Result {
         for &i in members {
-            writeln!(md, "- `{}` · {}", self.items[i].name, self.contents[i].method.label())?;
+            let card = if with_cards { self.card(i) } else { String::new() };
+            writeln!(md, "- `{}` · {}{card}", self.items[i].name, self.contents[i].method.label())?;
         }
         Ok(())
+    }
+
+    /// The file's card as ` · topic · type · summary`, or nothing when the
+    /// LLM didn't read it.
+    fn card(&self, i: usize) -> String {
+        match &self.cards[i] {
+            None => String::new(),
+            Some(c) if c.text().is_empty() => " · (empty card)".to_string(),
+            Some(c) => {
+                let topic = if c.topic.is_empty() { "no topic" } else { &c.topic };
+                format!(" · **{topic}** · {} · {}", c.kind, c.summary).replace('`', "'")
+            }
+        }
     }
 }
 

@@ -3,7 +3,6 @@
 //! average similarity is at least the threshold.
 
 use crate::embed::{cosine, Vector};
-use std::collections::HashSet;
 
 pub struct Clusters {
     /// Indices into the input, largest group first; each has at least
@@ -42,18 +41,16 @@ impl Similarities {
     }
 }
 
-/// Cosine similarity of the vectors, plus `name_bonus` when two files' names
-/// share a word (`IELTS`, `CS101`, `invoice`), capped at 1. The embedding
-/// sees the name too, but only as meaning; the bonus is the exact match the
-/// baseline groups by.
-pub fn similarities(vectors: &[Vector], name_words: &[HashSet<String>], name_bonus: f32) -> Similarities {
+/// Cosine similarity of the vectors, or 1 when two files have the same
+/// topic key: the LLM has already said they belong together, however
+/// differently they are worded.
+pub fn similarities(vectors: &[Vector], topics: &[Option<String>]) -> Similarities {
     let n = vectors.len();
     let mut sims = Similarities { n, values: vec![1.0; n * n] };
     for i in 0..n {
         for j in i + 1..n {
-            let shared = !name_words[i].is_disjoint(&name_words[j]);
-            let s = cosine(&vectors[i], &vectors[j]) + if shared { name_bonus } else { 0.0 };
-            sims.set(i, j, s.min(1.0));
+            let same_topic = topics[i].is_some() && topics[i] == topics[j];
+            sims.set(i, j, if same_topic { 1.0 } else { cosine(&vectors[i], &vectors[j]) });
         }
     }
     sims
@@ -128,28 +125,32 @@ mod tests {
         raw.iter().map(|v| normalized(v.to_vec())).collect()
     }
 
-    fn words(names: &[&[&str]]) -> Vec<HashSet<String>> {
-        names.iter().map(|w| w.iter().map(|s| s.to_string()).collect()).collect()
+    fn topics(keys: &[Option<&str>]) -> Vec<Option<String>> {
+        keys.iter().map(|k| k.map(str::to_string)).collect()
     }
 
     #[test]
     fn merges_similar_vectors_and_leaves_the_odd_one_out() {
         let v = vectors(&[[1.0, 0.1, 0.0], [1.0, 0.0, 0.1], [0.9, 0.1, 0.1], [0.0, 0.0, 1.0]]);
-        let sims = similarities(&v, &words(&[&[], &[], &[], &[]]), 0.1);
+        let sims = similarities(&v, &topics(&[None, None, None, None]));
         let clusters = agglomerate(sims, 0.5, 2);
         assert_eq!(clusters.groups, [vec![0, 1, 2]]);
         assert_eq!(clusters.ungrouped, [3]);
     }
 
     #[test]
-    fn a_shared_name_word_lifts_a_pair_over_the_threshold() {
-        // cos 45° ≈ 0.71: under 0.75 alone, over it with the bonus.
-        let v = vectors(&[[1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
-        let alone = agglomerate(similarities(&v, &words(&[&["ielts"], &["writing"], &[]]), 0.1), 0.75, 2);
-        assert!(alone.groups.is_empty());
-        let shared = agglomerate(similarities(&v, &words(&[&["ielts"], &["ielts"], &[]]), 0.1), 0.75, 2);
-        assert_eq!(shared.groups, [vec![0, 1]]);
-        assert_eq!(shared.ungrouped, [2]);
+    fn the_same_topic_groups_files_whose_vectors_disagree() {
+        // Orthogonal vectors: cosine 0, but the LLM gave both the topic "cs101".
+        let v = vectors(&[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
+        let clusters = agglomerate(similarities(&v, &topics(&[Some("cs101"), Some("cs101"), None])), 0.8, 2);
+        assert_eq!(clusters.groups, [vec![0, 1]]);
+        assert_eq!(clusters.ungrouped, [2]);
+    }
+
+    #[test]
+    fn no_topic_never_counts_as_the_same_topic() {
+        let v = vectors(&[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]);
+        assert!(agglomerate(similarities(&v, &topics(&[None, None])), 0.8, 2).groups.is_empty());
     }
 
     #[test]

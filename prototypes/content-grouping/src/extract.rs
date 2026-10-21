@@ -42,15 +42,6 @@ impl Content {
     pub fn name_only(name: String) -> Self {
         Content { method: Method::NameOnly, name, body: String::new() }
     }
-
-    /// The name, then the content: what keywords are taken from.
-    pub fn text(&self) -> String {
-        if self.body.is_empty() {
-            self.name.clone()
-        } else {
-            format!("{}. {}", self.name, self.body)
-        }
-    }
 }
 
 pub struct Limits {

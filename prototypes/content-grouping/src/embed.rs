@@ -4,25 +4,21 @@
 //! machine.
 
 use crate::download;
-use crate::extract::Content;
 use ndarray::{Array2, Axis};
 use ort::session::Session;
 use ort::value::Value;
 use std::path::{Path, PathBuf};
 use tokenizers::{PaddingParams, Tokenizer, TruncationParams};
 
-/// BAAI/bge-m3 exported by transformers.js: multilingual (Vietnamese
-/// included), 1024 dimensions, about 2.3 GB.
-pub const DEFAULT_MODEL: &str = "Xenova/bge-m3";
-/// (path in the model repository, file name in the cache). The weights sit
-/// in `model.onnx_data` next to the graph, which ONNX Runtime finds by name.
-const MODEL_FILES: &[(&str, &str)] = &[
-    ("tokenizer.json", "tokenizer.json"),
-    ("onnx/model.onnx", "model.onnx"),
-    ("onnx/model.onnx_data", "model.onnx_data"),
-];
-/// Tokens per text. bge-m3 takes up to 8,192, but attention cost grows with
-/// the square of the length, and `--max-chars` of text fits in 512.
+/// intfloat/multilingual-e5-small exported by transformers.js, 8-bit:
+/// multilingual (Vietnamese included), 384 dimensions, about 120 MB. It
+/// embeds the LLM's short cards, not whole files, so a small model is enough.
+pub const DEFAULT_MODEL: &str = "Xenova/multilingual-e5-small";
+/// (path in the model repository, file name in the cache).
+const MODEL_FILES: &[(&str, &str)] = &[("tokenizer.json", "tokenizer.json"), ("onnx/model_quantized.onnx", "model.onnx")];
+/// e5 models are trained with this before every text.
+pub const DEFAULT_PREFIX: &str = "query: ";
+/// Tokens per text; a card is far shorter.
 const MAX_TOKENS: usize = 512;
 /// Small batches keep ONNX Runtime's intermediate buffers small.
 const BATCH: usize = 8;
@@ -37,7 +33,8 @@ pub type Vector = Vec<f32>;
 pub enum Pooling {
     /// The first (`[CLS]`/`<s>`) token: bge models.
     Cls,
-    /// The mean over the real tokens: most sentence-transformers models, e5.
+    /// The mean over the real tokens: most sentence-transformers models, e5
+    /// (the default model).
     Mean,
 }
 
@@ -47,7 +44,7 @@ pub struct Embedder {
     needs_token_type_ids: bool,
     pooling: Pooling,
     /// Put before every text, e.g. `query: ` for e5 models.
-    prefix: String,
+    pub prefix: String,
     pub model_label: String,
 }
 
@@ -101,23 +98,6 @@ impl Embedder {
             .map_err(|e: ort::Error| format!("ONNX model: {e}"))?;
         let needs_token_type_ids = session.inputs().iter().any(|i| i.name() == "token_type_ids");
         Ok(Self { session, tokenizer, needs_token_type_ids, pooling, prefix, model_label })
-    }
-
-    /// One vector per file. The name and the content are embedded apart
-    /// and averaged, `name_weight` to the name: in one text the name would
-    /// be a few tokens among hundreds, and a file read by name only would be
-    /// a short title compared with pages of text. A name-only file gets its
-    /// name's vector.
-    pub fn embed_contents(&mut self, contents: &[Content], name_weight: f32) -> Result<Vec<Vector>, String> {
-        let names: Vec<String> = contents.iter().map(|c| c.name.clone()).collect();
-        let with_body: Vec<usize> = (0..contents.len()).filter(|&i| !contents[i].body.is_empty()).collect();
-        let bodies: Vec<String> = with_body.iter().map(|&i| contents[i].body.clone()).collect();
-        let mut vectors = self.embed(&names)?;
-        for (&i, body) in with_body.iter().zip(self.embed(&bodies)?) {
-            let mixed = vectors[i].iter().zip(&body).map(|(n, b)| name_weight * n + (1.0 - name_weight) * b).collect();
-            vectors[i] = normalized(mixed);
-        }
-        Ok(vectors)
     }
 
     /// Texts are batched by length, so a batch pads little; the vectors come

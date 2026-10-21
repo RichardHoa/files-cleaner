@@ -8,13 +8,15 @@ mod download;
 mod embed;
 mod extract;
 mod keywords;
+mod llm;
 mod report;
 mod scan;
 
 use clap::Parser;
 use extract::{Content, Limits};
+use llm::Card;
 use report::{Matched, Report, SuggestedFolder};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
@@ -28,23 +30,17 @@ struct Args {
     /// Default: `reports/grouping-report.md` in this prototype's folder.
     #[arg(long)]
     report: Option<PathBuf>,
-    /// Content grouper: lowest average similarity at which two groups merge (0–1).
-    #[arg(long, default_value_t = 0.5)]
+    /// Content grouper: lowest average similarity of the cards at which two groups merge (0–1).
+    #[arg(long, default_value_t = 0.86)]
     threshold: f32,
     /// Both groupers: groups with fewer files count as Ungrouped.
     #[arg(long, default_value_t = 2)]
     min_size: usize,
     /// Content grouper: lowest similarity to an existing subfolder's centroid to suggest it.
-    #[arg(long, default_value_t = 0.5)]
+    #[arg(long, default_value_t = 0.86)]
     anchor_threshold: f32,
-    /// Content grouper: share of a file's vector that comes from its name (0–1); the rest is its content.
-    #[arg(long, default_value_t = 0.5)]
-    name_weight: f32,
-    /// Content grouper: added to two files' similarity when their names share a word.
-    #[arg(long, default_value_t = 0.1)]
-    name_bonus: f32,
-    /// Content grouper: most files read from each existing subfolder (recursively) for its centroid.
-    #[arg(long, default_value_t = 40)]
+    /// Content grouper: most files read (and carded by the LLM) from each existing subfolder, recursively.
+    #[arg(long, default_value_t = 5)]
     folder_sample: usize,
     /// Most characters of content read from each file.
     #[arg(long, default_value_t = 2000)]
@@ -60,15 +56,24 @@ struct Args {
     #[arg(long)]
     pdfium: Option<PathBuf>,
     /// A folder with `model.onnx` (plus `model.onnx_data` if it has one) and `tokenizer.json`
-    /// of any sentence-transformers ONNX export. Default: bge-m3, downloaded once into the user cache folder.
+    /// of any sentence-transformers ONNX export. Default: multilingual-e5-small, downloaded once
+    /// into the user cache folder.
     #[arg(long)]
     model_dir: Option<PathBuf>,
-    /// How the model pools token vectors. Default: `cls` for the default model, `mean` with --model-dir.
-    #[arg(long, value_enum)]
-    pooling: Option<embed::Pooling>,
-    /// Text put before every text the model embeds, e.g. "query: " for e5 models.
-    #[arg(long, default_value = "")]
-    prefix: String,
+    /// How the embedding model pools token vectors.
+    #[arg(long, value_enum, default_value = "mean")]
+    pooling: embed::Pooling,
+    /// Text put before every text the model embeds. Default: "query: " for the default model,
+    /// none with --model-dir.
+    #[arg(long)]
+    prefix: Option<String>,
+    /// A folder with `model.gguf` (a Qwen2 or Qwen2.5 GGUF) and its `tokenizer.json`.
+    /// Default: Qwen2.5-1.5B-Instruct, 4-bit, downloaded once into the user cache folder.
+    #[arg(long)]
+    llm_dir: Option<PathBuf>,
+    /// Run the LLM on the CPU even when a Metal GPU is there.
+    #[arg(long)]
+    cpu: bool,
 }
 
 fn main() -> ExitCode {
@@ -147,18 +152,31 @@ fn run(args: Args) -> Result<(), String> {
         return Err(format!("the report path {} is a symlink; pick a plain file path", report_path.display()));
     }
     let mut stages = Stages(Vec::new());
-    let (model_dir, model_label, pooling) = match &args.model_dir {
+    let (model_dir, model_label, prefix) = match &args.model_dir {
         Some(dir) => {
             let dir = dir.canonicalize().map_err(|e| format!("{}: {e}", dir.display()))?;
             let label = format!("{} (from --model-dir)", dir.file_name().unwrap_or_default().to_string_lossy());
-            (dir, label, args.pooling.unwrap_or(embed::Pooling::Mean))
+            (dir, label, args.prefix.clone().unwrap_or_default())
         }
         None => {
             let dir = embed::default_model_dir().ok_or("no user cache folder; pass --model-dir")?;
             warn_if_inside(&root, &dir, "model cache");
-            stages.time("download model (first run only)", || embed::ensure_default_model(&dir))?;
-            let label = format!("{} (BAAI/bge-m3, ONNX, 1024 dimensions, multilingual)", embed::DEFAULT_MODEL);
-            (dir, label, args.pooling.unwrap_or(embed::Pooling::Cls))
+            stages.time("download embedding model (first run only)", || embed::ensure_default_model(&dir))?;
+            let label = format!("{} (ONNX, 8-bit, 384 dimensions, multilingual)", embed::DEFAULT_MODEL);
+            (dir, label, args.prefix.clone().unwrap_or_else(|| embed::DEFAULT_PREFIX.to_string()))
+        }
+    };
+    let (llm_dir, llm_label) = match &args.llm_dir {
+        Some(dir) => {
+            let dir = dir.canonicalize().map_err(|e| format!("{}: {e}", dir.display()))?;
+            let label = format!("{} (from --llm-dir)", dir.file_name().unwrap_or_default().to_string_lossy());
+            (dir, label)
+        }
+        None => {
+            let dir = llm::default_llm_dir().ok_or("no user cache folder; pass --llm-dir")?;
+            warn_if_inside(&root, &dir, "LLM cache");
+            stages.time("download LLM (first run only)", || llm::ensure_default_llm(&dir))?;
+            (dir, format!("{} (GGUF, 4-bit)", llm::DEFAULT_LLM))
         }
     };
     let pdfium = match &args.pdfium {
@@ -195,59 +213,116 @@ fn run(args: Args) -> Result<(), String> {
     });
 
     // B. Content
+    // Archives, images and installers go into one folder per kind, unread.
+    let mut fixed: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+    let mut read: Vec<usize> = Vec::new();
+    for (i, item) in items.iter().enumerate() {
+        match baseline::fixed_kind(&item.ext) {
+            Some(kind) => fixed.entry(kind).or_default().push(i),
+            None => read.push(i),
+        }
+    }
+    let mut llm = stages.time("load LLM", || llm::Llm::load(&llm_dir, args.cpu))?;
+    let mut cards: Vec<Option<Card>> = vec![None; items.len()];
+    stages.time("LLM cards", || {
+        for (n, &i) in read.iter().enumerate() {
+            eprintln!("  card {}/{}: {}", n + 1, read.len(), items[i].name);
+            cards[i] = Some(card_or_empty(&mut llm, &contents[i]));
+        }
+    });
     let mut embedder =
-        stages.time("load model", || embed::Embedder::load(&model_dir, pooling, args.prefix.clone(), model_label))?;
-    let vectors = stages.time("embed loose files", || embedder.embed_contents(&contents, args.name_weight))?;
-    let folders = stages.time("read and embed subfolders", || -> Result<Vec<report::Folder>, String> {
+        stages.time("load embedding model", || embed::Embedder::load(&model_dir, args.pooling, prefix, model_label))?;
+    let vectors = stages.time("embed cards", || {
+        let texts: Vec<String> = read.iter().map(|&i| card_text(cards[i].as_ref(), &contents[i])).collect();
+        embedder.embed(&texts)
+    })?;
+    let folders = stages.time("card and embed subfolders", || -> Result<Vec<report::Folder>, String> {
         let mut folders = Vec::new();
         for (path, name) in listing.subfolders.iter().zip(&folder_names) {
-            let sample = scan::sample_files(path, args.folder_sample);
-            let mut read: Vec<Content> = sample.iter().map(|i| extract::read(i, &limits)).collect();
-            let sampled = read.len();
+            let sample: Vec<scan::Item> = scan::sample_files(path, args.folder_sample)
+                .into_iter()
+                .filter(|i| baseline::fixed_kind(&i.ext).is_none())
+                .collect();
             // An empty folder is still a destination; its name is all we know.
-            if read.is_empty() {
-                read.push(Content::name_only(extract::name_words(name)));
-            }
-            if let Some(centroid) = embed::centroid(&embedder.embed_contents(&read, args.name_weight)?) {
-                folders.push(report::Folder { name: name.clone(), centroid, sampled });
+            let texts: Vec<String> = if sample.is_empty() {
+                vec![name.clone()]
+            } else {
+                sample
+                    .iter()
+                    .map(|i| {
+                        let content = extract::read(i, &limits);
+                        card_text(Some(&card_or_empty(&mut llm, &content)), &content)
+                    })
+                    .collect()
+            };
+            if let Some(centroid) = embed::centroid(&embedder.embed(&texts)?) {
+                folders.push(report::Folder { name: name.clone(), centroid, sampled: sample.len() });
             }
         }
         Ok(folders)
     })?;
     let (clusters, nearest) = stages.time("cluster", || {
-        let name_words: Vec<HashSet<String>> = items.iter().map(|i| keywords::name_words(&i.name)).collect();
-        let sims = cluster::similarities(&vectors, &name_words, args.name_bonus);
-        let nearest = sims.nearest(NEAREST_SHOWN);
-        (cluster::agglomerate(sims, args.threshold, args.min_size), nearest)
+        let topics: Vec<Option<String>> = read.iter().map(|&i| cards[i].as_ref().and_then(Card::topic_key)).collect();
+        let sims = cluster::similarities(&vectors, &topics);
+        // Back from positions in `read` to positions in `items`.
+        let mut nearest = vec![Vec::new(); items.len()];
+        for (k, near) in sims.nearest(NEAREST_SHOWN).into_iter().enumerate() {
+            nearest[read[k]] = near.into_iter().map(|(j, s)| (read[j], s)).collect();
+        }
+        let mut clusters = cluster::agglomerate(sims, args.threshold, args.min_size);
+        clusters.groups.iter_mut().flatten().chain(&mut clusters.ungrouped).for_each(|k| *k = read[*k]);
+        (clusters, nearest)
     });
-    let content = stages.time("anchor and name", || {
-        let terms: Vec<HashSet<String>> = contents.iter().map(|c| keywords::terms(&c.text())).collect();
-        let corpus = keywords::Corpus::new(&terms);
+    let (content, content_ungrouped) = stages.time("anchor and name", || {
         let mut used_names: HashSet<String> = HashSet::new();
-        clusters
-            .groups
-            .iter()
-            .map(|members| {
-                let centroid = embed::centroid(members.iter().map(|&i| &vectors[i])).unwrap_or_default();
-                let matched = folders
-                    .iter()
-                    .map(|f| (f, embed::cosine(&centroid, &f.centroid)))
-                    .max_by(|a, b| a.1.total_cmp(&b.1))
-                    .filter(|(_, s)| *s >= args.anchor_threshold)
-                    .map(|(f, s)| Matched::BySimilarity(f.name.clone(), s));
-                let group_terms: Vec<&HashSet<String>> = members.iter().map(|&i| &terms[i]).collect();
-                let top = corpus.top_terms(&group_terms, 3, 5);
-                let base = keywords::folder_name(&top).unwrap_or_else(|| majority_kind(items, members));
-                let mut name = base.clone();
-                let mut n = 2;
-                while !used_names.insert(name.to_lowercase()) {
-                    name = format!("{base} ({n})");
-                    n += 1;
-                }
-                let phrases = top.iter().map(|(t, c)| format!("{t} ({c}/{} files)", members.len())).collect();
-                SuggestedFolder { name, matched, phrases, members: members.clone() }
-            })
-            .collect::<Vec<_>>()
+        let mut suggested = Vec::new();
+        let mut ungrouped = clusters.ungrouped.clone();
+        for (kind, members) in fixed {
+            if members.len() < args.min_size {
+                ungrouped.extend(members);
+                continue;
+            }
+            used_names.insert(kind.to_lowercase());
+            let folder = baseline::KindFolder { name: kind.to_string(), match_words: vec![kind.to_lowercase()], members };
+            suggested.push(SuggestedFolder {
+                matched: baseline::match_by_name(&folder, &folder_names).map(|f| Matched::ByName(f.to_string())),
+                name: folder.name,
+                phrases: vec![format!("every {} goes here", kind.to_lowercase().trim_end_matches('s'))],
+                members: folder.members,
+            });
+        }
+        let position: HashMap<usize, usize> = read.iter().enumerate().map(|(k, &i)| (i, k)).collect();
+        for members in &clusters.groups {
+            let centroid = embed::centroid(members.iter().map(|i| &vectors[position[i]])).unwrap_or_default();
+            let matched = folders
+                .iter()
+                .map(|f| (f, embed::cosine(&centroid, &f.centroid)))
+                .max_by(|a, b| a.1.total_cmp(&b.1))
+                .filter(|(_, s)| *s >= args.anchor_threshold)
+                .map(|(f, s)| Matched::BySimilarity(f.name.clone(), s));
+            let group_cards: Vec<&Card> = members.iter().filter_map(|&i| cards[i].as_ref()).collect();
+            let topics = most_common(group_cards.iter().map(|c| c.topic.as_str()));
+            let kinds = most_common(group_cards.iter().map(|c| c.kind.as_str()));
+            let base = topics
+                .first()
+                .or(kinds.first())
+                .map(|(t, _)| capitalized(t))
+                .unwrap_or_else(|| majority_kind(items, members));
+            let mut name = base.clone();
+            let mut n = 2;
+            while !used_names.insert(name.to_lowercase()) {
+                name = format!("{base} ({n})");
+                n += 1;
+            }
+            let count = |label: &str, list: &[(String, usize)]| {
+                list.iter().take(3).map(|(t, c)| format!("{label} “{t}” ({c}/{} files)", members.len())).collect::<Vec<_>>()
+            };
+            let phrases = [count("topic", &topics), count("type", &kinds)].concat();
+            suggested.push(SuggestedFolder { name, matched, phrases, members: members.clone() });
+        }
+        suggested.sort_by(|a, b| b.members.len().cmp(&a.members.len()).then(a.name.cmp(&b.name)));
+        ungrouped.sort();
+        (suggested, ungrouped)
     });
 
     let report = Report {
@@ -255,19 +330,18 @@ fn run(args: Args) -> Result<(), String> {
         items,
         contents: &contents,
         skipped: listing.skipped.iter().map(|(_, s)| *s).collect(),
-        model: &embedder.model_label,
+        model: &format!("{}; LLM: {llm_label} on the {}", embedder.model_label, llm.device_label()),
+        cards: &cards,
         settings: format!(
-            "--threshold {} --min-size {} --anchor-threshold {} --name-weight {} --name-bonus {} --pooling {} --prefix {:?} --folder-sample {} --max-chars {} --split-at {}",
+            "--threshold {} --min-size {} --anchor-threshold {} --pooling {} --prefix {:?} --folder-sample {} --max-chars {} --split-at {}",
             args.threshold,
             args.min_size,
             args.anchor_threshold,
-            args.name_weight,
-            args.name_bonus,
-            match pooling {
+            match args.pooling {
                 embed::Pooling::Cls => "cls",
                 embed::Pooling::Mean => "mean",
             },
-            args.prefix,
+            embedder.prefix,
             args.folder_sample,
             args.max_chars,
             args.split_at
@@ -276,7 +350,7 @@ fn run(args: Args) -> Result<(), String> {
         baseline: &baseline,
         baseline_ungrouped: &baseline_ungrouped,
         content: &content,
-        content_ungrouped: &clusters.ungrouped,
+        content_ungrouped: &content_ungrouped,
         nearest: &nearest,
         threshold: args.threshold,
     };
@@ -289,6 +363,39 @@ fn run(args: Args) -> Result<(), String> {
     }
     println!("  {:<26} {:>9.2?}", "total", started.elapsed());
     Ok(())
+}
+
+/// A failed LLM run (a reply the model never finished, a tensor error) is
+/// an empty card: the file is then grouped by its name alone.
+fn card_or_empty(llm: &mut llm::Llm, content: &Content) -> Card {
+    llm.card(content).unwrap_or_else(|e| {
+        eprintln!("  no card for {}: {e}", content.name);
+        Card::default()
+    })
+}
+
+/// What a file is embedded as: its card, or its name when the card is empty.
+fn card_text(card: Option<&Card>, content: &Content) -> String {
+    card.map(Card::text).filter(|t| !t.is_empty()).unwrap_or_else(|| content.name.clone())
+}
+
+/// Non-empty labels by how many files carry them (ignoring case), most
+/// first, each shown as first written.
+fn most_common<'a>(labels: impl Iterator<Item = &'a str>) -> Vec<(String, usize)> {
+    let mut counts: Vec<(String, usize)> = Vec::new();
+    for label in labels.map(str::trim).filter(|l| !l.is_empty()) {
+        match counts.iter_mut().find(|(seen, _)| seen.to_lowercase() == label.to_lowercase()) {
+            Some((_, n)) => *n += 1,
+            None => counts.push((label.to_string(), 1)),
+        }
+    }
+    counts.sort_by_key(|c| std::cmp::Reverse(c.1));
+    counts
+}
+
+fn capitalized(label: &str) -> String {
+    let mut chars = label.chars();
+    chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
 }
 
 fn majority_kind(items: &[scan::Item], members: &[usize]) -> String {
