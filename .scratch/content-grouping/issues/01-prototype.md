@@ -8,7 +8,7 @@ The developer runs it on their own Downloads folder and judges the output. The a
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 ## Hard constraints
 
@@ -61,7 +61,7 @@ The program prints the report path and the timings when it's done.
 
 ## Answer
 
-_(developer's verdict goes here)_
+**2026-10-22: B clearly beats A.** The content grouper with LLM cards (card → embedding → same-topic rule → clustering) ships; A is kept only as the fallback when the Grouping Models aren't installed (implemented later). The app version moves off the prototype's stack: llama.cpp runs both models (Qwen2.5-1.5B-Instruct Q4_K_M for cards, Qwen3-Embedding-0.6B Q8_0 for embeddings), C/C++ build dependencies are allowed, and the developer sets the default thresholds by hand. → `../spec.md`, ADR-0004.
 
 ## Comments
 

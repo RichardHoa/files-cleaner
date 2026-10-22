@@ -88,6 +88,10 @@ _Avoid_: Finder-style suffix, copy suffix
 A set of similar files the tool proposes to gather into one folder, under a name it suggests. The user creates it in the Scan Root (the default) or somewhere else they pick, trashes all its files, or skips it. They can also trash single files in it, or take single files out of it so they stay where they are. A Suggested Folder always has a name: leaving the name empty never means "trash".
 _Avoid_: cluster, group, category, proposed folder
 
+**Grouping Models**:
+The two models the app downloads once, with the user's consent, to read inside files and suggest folders from what they're about. Without them, Suggested Folders come from file kind, name and date only.
+_Avoid_: AI, smart features, LLM
+
 ### History
 
 **Session**:

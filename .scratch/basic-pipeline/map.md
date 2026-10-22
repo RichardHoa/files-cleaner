@@ -21,6 +21,8 @@ The basic goal is that a user can do this, end to end, on macOS, Windows and Lin
 - **Cross-platform grouping tools** (2026-10-20): the prototype uses Rust with a local ONNX embedding model and keyword names, no Apple frameworks, compared with a no-ML baseline. → `content-grouping/issues/01`
 - **Same disk only** (2026-10-20): moves to another disk stay blocked; copying across disks comes with cloud drives. → `milestone-1/issues/04`
 - **No-extension files stay out** (2026-10-20).
+- **Content grouping ships** (2026-10-22): the prototype's LLM-card grouper beat the baseline. llama.cpp runs both Grouping Models (official Qwen GGUFs, downloaded on first use with consent; Metal on Mac, Vulkan on Windows and Linux, CPU fallback); C/C++ build dependencies are allowed; the engine is its own crate. Without the models, Suggested Folders fall back to the baseline (later). → `content-grouping/spec.md`, ADR-0004
+- **Settings screen** (2026-10-22): the config gets an in-app Settings screen (Trash Destination, Never-Touch Paths, grouping thresholds, Grouping Models). → `content-grouping/issues/05`
 
 ## Roadmap
 
@@ -33,7 +35,7 @@ The basic goal is that a user can do this, end to end, on macOS, Windows and Lin
 3. **Safety before big moves**
    - `milestone-1/issues/04`: emptied folders, blocked moves, undoing an older Session after a newer one touched the same files
    - `milestone-1/issues/05`: Run progress
-4. **Suggested Folders in the app** (spec written from the prototype verdict): grouping engine in the core with progress and caching, Suggested Folder as a Reason in the Plan, the choices and per-file actions, existing subfolders as destinations
+4. **Suggested Folders in the app** (`content-grouping/spec.md`, issues 02–05): grouping engine in the core with progress and caching, Suggested Folder as a Reason in the Plan, the choices and per-file actions, existing subfolders as destinations
 
 **Basic goal reached.**
 
