@@ -23,7 +23,10 @@ pub struct DuplicateGroup<'a> {
 /// Every Duplicate Group among `entries`, leaving out 0-byte files and
 /// Packages. Files that can't be read are left out too.
 pub fn find(entries: &[ScanEntry]) -> Vec<DuplicateGroup<'_>> {
-    let candidates: Vec<&ScanEntry> = entries.iter().filter(|e| !e.is_package && e.size > 0).collect();
+    let candidates: Vec<&ScanEntry> = entries
+        .iter()
+        .filter(|e| !e.is_package && e.size > 0)
+        .collect();
     let mut groups = Vec::new();
     for same_size in split(candidates, |e| Some(e.size)) {
         for same_start_and_end in split(same_size, |e| partial_hash(&e.path, e.size).ok()) {
@@ -33,7 +36,10 @@ pub fn find(entries: &[ScanEntry]) -> Vec<DuplicateGroup<'_>> {
                 let by_created = same.iter().all(|e| e.created.is_some());
                 same.sort_by(|a, b| keeper_order(a, b, by_created));
                 let keeper = same.remove(0);
-                groups.push(DuplicateGroup { keeper, copies: same });
+                groups.push(DuplicateGroup {
+                    keeper,
+                    copies: same,
+                });
             }
         }
     }
@@ -43,7 +49,10 @@ pub fn find(entries: &[ScanEntry]) -> Vec<DuplicateGroup<'_>> {
 
 /// Splits `entries` by `key`, keeping only groups of two or more. Entries
 /// whose key is `None` are dropped.
-fn split<K: Hash + Eq>(entries: Vec<&ScanEntry>, key: impl Fn(&ScanEntry) -> Option<K>) -> Vec<Vec<&ScanEntry>> {
+fn split<K: Hash + Eq>(
+    entries: Vec<&ScanEntry>,
+    key: impl Fn(&ScanEntry) -> Option<K>,
+) -> Vec<Vec<&ScanEntry>> {
     if entries.len() < 2 {
         return Vec::new();
     }
@@ -53,14 +62,21 @@ fn split<K: Hash + Eq>(entries: Vec<&ScanEntry>, key: impl Fn(&ScanEntry) -> Opt
             by_key.entry(k).or_default().push(entry);
         }
     }
-    by_key.into_values().filter(|group| group.len() > 1).collect()
+    by_key
+        .into_values()
+        .filter(|group| group.len() > 1)
+        .collect()
 }
 
 /// Which of two copies is the better Keeper (sorts first): the newest by
 /// modified date, then by created date if `by_created`, then the shortest
 /// path, then the first alphabetically.
 fn keeper_order(a: &ScanEntry, b: &ScanEntry, by_created: bool) -> Ordering {
-    let created = if by_created { b.created.cmp(&a.created) } else { Ordering::Equal };
+    let created = if by_created {
+        b.created.cmp(&a.created)
+    } else {
+        Ordering::Equal
+    };
     b.modified
         .cmp(&a.modified)
         .then(created)
@@ -76,7 +92,9 @@ fn partial_hash(path: &Path, size: u64) -> io::Result<[u8; 32]> {
     file.read_exact(&mut buffer)?;
     hasher.update(&buffer);
     if size > PARTIAL_BYTES {
-        file.seek(SeekFrom::Start(size.saturating_sub(PARTIAL_BYTES).max(PARTIAL_BYTES)))?;
+        file.seek(SeekFrom::Start(
+            size.saturating_sub(PARTIAL_BYTES).max(PARTIAL_BYTES),
+        ))?;
         buffer.clear();
         file.read_to_end(&mut buffer)?;
         hasher.update(&buffer);

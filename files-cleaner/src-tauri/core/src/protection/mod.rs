@@ -31,18 +31,45 @@ pub const HOLDING_FOLDER_NAME: &str = "Files Cleaner Trash";
 /// installed: a `.pages` folder is still a Package on a Mac without Pages,
 /// or on a disk copied to Windows.
 const PACKAGE_EXTENSIONS: &[&str] = &[
-    "app", "bundle", "framework", "plugin", "kext", "appex", "xpc", "prefpane", "qlgenerator",
-    "mdimporter", "saver", "component", "pkg", "mpkg", "pages", "numbers", "key", "rtfd",
-    "xcodeproj", "xcworkspace", "playground", "photoslibrary", "musiclibrary", "tvlibrary",
-    "imovielibrary", "fcpbundle", "logicx", "band", "lrdata", "scriv", "sparsebundle",
+    "app",
+    "bundle",
+    "framework",
+    "plugin",
+    "kext",
+    "appex",
+    "xpc",
+    "prefpane",
+    "qlgenerator",
+    "mdimporter",
+    "saver",
+    "component",
+    "pkg",
+    "mpkg",
+    "pages",
+    "numbers",
+    "key",
+    "rtfd",
+    "xcodeproj",
+    "xcworkspace",
+    "playground",
+    "photoslibrary",
+    "musiclibrary",
+    "tvlibrary",
+    "imovielibrary",
+    "fcpbundle",
+    "logicx",
+    "band",
+    "lrdata",
+    "scriv",
+    "sparsebundle",
 ];
 
 /// True for a folder that is one indivisible item (an `.app`, a `.pages`
 /// document): it has a known Package extension, or the OS says so.
 pub fn is_package(folder: &Path) -> bool {
-    let known = folder
-        .extension()
-        .is_some_and(|ext| PACKAGE_EXTENSIONS.contains(&ext.to_string_lossy().to_lowercase().as_str()));
+    let known = folder.extension().is_some_and(|ext| {
+        PACKAGE_EXTENSIONS.contains(&ext.to_string_lossy().to_lowercase().as_str())
+    });
     known || os::is_package(folder)
 }
 
@@ -65,7 +92,11 @@ pub fn canonical(path: &Path) -> io::Result<PathBuf> {
             Prefix::VerbatimDisk(drive) => {
                 let mut plain = PathBuf::from(format!("{}:\\", drive as char));
                 plain.extend(components.filter(|c| matches!(c, Component::Normal(_))));
-                Ok(if plain.as_os_str().len() < MAX_PATH { plain } else { resolved })
+                Ok(if plain.as_os_str().len() < MAX_PATH {
+                    plain
+                } else {
+                    resolved
+                })
             }
             _ => Ok(resolved),
         },
@@ -97,16 +128,23 @@ impl Protection {
     /// `path` is a folder; some developer folders are only recognised by
     /// what they contain.
     pub fn reason(&self, path: &Path, is_folder: bool) -> Option<String> {
-        self.covering_reason(path, is_folder)
-            .or_else(|| os::is_disk_root(path).then(|| format!("{} is a Disk Root", path.display())))
+        self.covering_reason(path, is_folder).or_else(|| {
+            os::is_disk_root(path).then(|| format!("{} is a Disk Root", path.display()))
+        })
     }
 
     /// Why `path`, and so everything inside it, is protected, if it is.
     fn covering_reason(&self, path: &Path, is_folder: bool) -> Option<String> {
         if let Some(never) = self.never_touch.iter().find(|n| same_path(path, n)) {
-            return Some(format!("{} is one of your Never-Touch Paths", never.display()));
+            return Some(format!(
+                "{} is one of your Never-Touch Paths",
+                never.display()
+            ));
         }
-        if path.file_name().is_some_and(|name| name == HOLDING_FOLDER_NAME) {
+        if path
+            .file_name()
+            .is_some_and(|name| name == HOLDING_FOLDER_NAME)
+        {
             return Some(format!("{HOLDING_FOLDER_NAME} is the app's Holding Folder"));
         }
         os::builtin_reason(path, &self.home)
@@ -135,8 +173,12 @@ impl Protection {
                     self.covering_reason(folder, true)
                 };
                 let reason = reason.or_else(|| {
-                    is_package(folder)
-                        .then(|| format!("{} is a Package, which the app never looks inside", folder.display()))
+                    is_package(folder).then(|| {
+                        format!(
+                            "{} is a Package, which the app never looks inside",
+                            folder.display()
+                        )
+                    })
                 });
                 if let Some(reason) = reason {
                     let inside = if folder == path {
@@ -184,7 +226,9 @@ fn same_component(a: Component, b: Component) -> bool {
 fn comparable(component: Component) -> String {
     match component {
         Component::Prefix(prefix) => match prefix.kind() {
-            Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => format!("{}:", drive.to_ascii_lowercase() as char),
+            Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => {
+                format!("{}:", drive.to_ascii_lowercase() as char)
+            }
             _ => prefix.as_os_str().to_string_lossy().to_lowercase(),
         },
         other => other.as_os_str().to_string_lossy().to_lowercase(),

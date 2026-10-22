@@ -80,7 +80,11 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { folder_threshold: 0.86, existing_folder_threshold: 0.86, smallest_folder: 2 }
+        Settings {
+            folder_threshold: 0.86,
+            existing_folder_threshold: 0.86,
+            smallest_folder: 2,
+        }
     }
 }
 
@@ -183,6 +187,8 @@ struct Subfolder {
     centroid: Vector,
     /// Its sampled files' topics, each once.
     topics: Vec<String>,
+    /// Its sampled files' names.
+    files: Vec<String>,
 }
 
 /// Where a file the LLM places goes.
@@ -238,15 +244,25 @@ pub fn analyse(
     let samples: Vec<(&str, Vec<&ScanEntry>)> = inside
         .into_iter()
         .map(|(folder, mut entries)| {
-            entries.sort_by(|a, b| (a.relative_path.len(), &a.relative_path).cmp(&(b.relative_path.len(), &b.relative_path)));
+            entries.sort_by(|a, b| {
+                (a.relative_path.len(), &a.relative_path)
+                    .cmp(&(b.relative_path.len(), &b.relative_path))
+            });
             entries.truncate(FOLDER_SAMPLE);
             (folder, entries)
         })
         .collect();
 
     let (card_id, embedding_id) = (models.card_model_id(), models.embedding_model_id());
-    let ids = ModelIds { card: &card_id, embedding: &embedding_id };
-    let mut all: Vec<&ScanEntry> = to_read.iter().copied().chain(samples.iter().flat_map(|(_, s)| s.iter().copied())).collect();
+    let ids = ModelIds {
+        card: &card_id,
+        embedding: &embedding_id,
+    };
+    let mut all: Vec<&ScanEntry> = to_read
+        .iter()
+        .copied()
+        .chain(samples.iter().flat_map(|(_, s)| s.iter().copied()))
+        .collect();
     let mut stored: Vec<(Option<blake3::Hash>, Stored)> = Vec::with_capacity(all.len());
     let mut last_report: Option<Instant> = None;
     for (finished, entry) in all.iter().enumerate() {
@@ -254,7 +270,12 @@ pub fn analyse(
             return Err(Stopped::Cancelled);
         }
         if last_report.is_none_or(|t| t.elapsed() >= PROGRESS_INTERVAL) {
-            on_progress(Progress { finished, total: all.len(), current: entry.path.clone(), placing: false });
+            on_progress(Progress {
+                finished,
+                total: all.len(),
+                current: entry.path.clone(),
+                placing: false,
+            });
             last_report = Some(Instant::now());
         }
         let started = Instant::now();
@@ -262,25 +283,52 @@ pub fn analyse(
         let name = &entry.name;
         let entry = match hash.as_ref().and_then(|h| input.store.get(&ids, h)) {
             Some(found) => {
-                trace::append(trace::TIMINGS, &format!("{name}: saved card, {}\n", trace::secs(started.elapsed())));
+                trace::time(&format!(
+                    "{name}: saved card, {}\n",
+                    trace::secs(started.elapsed())
+                ));
+                if trace::enabled() {
+                    trace::write(
+                        trace::CARDS,
+                        &format!("{name}.txt"),
+                        &format!(
+                            "(A card saved by an earlier analysis: the prompt wasn't run again. Forget the saved cards to see it.)\n\n\
+                             === CARD ===\n{:#?}\n",
+                            found.card
+                        ),
+                    );
+                }
                 found
             }
             None => {
-                trace::append(trace::TIMINGS, &format!("{name}\n"));
+                trace::time(&format!("{name}\n"));
                 let content = read::read(&entry.path, &entry.name, input.pdfium);
                 let read_time = started.elapsed();
-                let card = if content.scanned { Card::default() } else { models.card(&content).unwrap_or_default() };
-                trace::append(
-                    trace::TIMINGS,
-                    &format!(
-                        "  read {} · card {} · total {}{}\n",
-                        trace::secs(read_time),
-                        if content.scanned { "skipped (scanned)".to_string() } else { trace::secs(started.elapsed() - read_time) },
-                        trace::secs(started.elapsed()),
-                        if content.body.is_empty() { " · by name only" } else { "" }
-                    ),
-                );
-                let made = Stored { card, scanned: content.scanned, embedding: None };
+                let card = if content.scanned {
+                    Card::default()
+                } else {
+                    models.card(&content).unwrap_or_default()
+                };
+                trace::time(&format!(
+                    "  read {} · card {} · total {}{}\n",
+                    trace::secs(read_time),
+                    if content.scanned {
+                        "skipped (scanned)".to_string()
+                    } else {
+                        trace::secs(started.elapsed() - read_time)
+                    },
+                    trace::secs(started.elapsed()),
+                    if content.body.is_empty() {
+                        " · by name only"
+                    } else {
+                        ""
+                    }
+                ));
+                let made = Stored {
+                    card,
+                    scanned: content.scanned,
+                    embedding: None,
+                };
                 if let Some(h) = &hash {
                     input.store.put(&ids, h, &made);
                 }
@@ -290,7 +338,12 @@ pub fn analyse(
         stored.push((hash, entry));
     }
     if let Some(last) = all.last() {
-        on_progress(Progress { finished: all.len(), total: all.len(), current: last.path.clone(), placing: false });
+        on_progress(Progress {
+            finished: all.len(),
+            total: all.len(),
+            current: last.path.clone(),
+            placing: false,
+        });
     }
     if cancel.load(Ordering::Relaxed) {
         return Err(Stopped::Cancelled);
@@ -298,9 +351,16 @@ pub fn analyse(
 
     // Loose scanned PDFs are a kind of their own, grouped like images; one
     // sampled from a subfolder still stands for it by its name.
-    let scanned: Vec<bool> = stored.iter().enumerate().map(|(i, (_, s))| i < to_read.len() && s.scanned).collect();
+    let scanned: Vec<bool> = stored
+        .iter()
+        .enumerate()
+        .map(|(i, (_, s))| i < to_read.len() && s.scanned)
+        .collect();
     for (entry, _) in to_read.iter().zip(&scanned).filter(|(_, &s)| s) {
-        fixed.entry(kinds::SCANNED_PDFS).or_default().push(entry.path.clone());
+        fixed
+            .entry(kinds::SCANNED_PDFS)
+            .or_default()
+            .push(entry.path.clone());
     }
     let mut flags = scanned.iter();
     to_read.retain(|_| !flags.next().unwrap());
@@ -311,20 +371,38 @@ pub fn analyse(
 
     // Every file is carded before any is embedded, then the cards missing a
     // vector and the names of subfolders with nothing to sample are embedded.
-    let missing: Vec<usize> = (0..stored.len()).filter(|&i| stored[i].1.embedding.is_none()).collect();
-    let unsampled: Vec<&str> = samples.iter().filter(|(_, s)| s.is_empty()).map(|(f, _)| *f).collect();
+    let missing: Vec<usize> = (0..stored.len())
+        .filter(|&i| stored[i].1.embedding.is_none())
+        .collect();
+    let unsampled: Vec<&str> = samples
+        .iter()
+        .filter(|(_, s)| s.is_empty())
+        .map(|(f, _)| *f)
+        .collect();
     let texts: Vec<String> = missing
         .iter()
         .map(|&i| stored[i].1.card.text(&read::name_words(&all[i].name)))
         .chain(unsampled.iter().map(|f| f.to_string()))
         .collect();
     let mut vectors = Vec::with_capacity(texts.len());
+    let started = Instant::now();
     for chunk in texts.chunks(EMBED_CHUNK) {
         if cancel.load(Ordering::Relaxed) {
             return Err(Stopped::Cancelled);
         }
-        vectors.extend(models.embed(chunk).map_err(Stopped::Failed)?.into_iter().map(normalized));
+        vectors.extend(
+            models
+                .embed(chunk)
+                .map_err(Stopped::Failed)?
+                .into_iter()
+                .map(normalized),
+        );
     }
+    trace::time(&format!(
+        "\nembedded {} texts, {}\n\n",
+        texts.len(),
+        trace::secs(started.elapsed())
+    ));
     let name_vectors = vectors.split_off(missing.len());
     for (&i, vector) in missing.iter().zip(vectors) {
         let (hash, entry) = &mut stored[i];
@@ -334,16 +412,29 @@ pub fn analyse(
         }
     }
 
-    let mut stored = stored.into_iter().map(|(_, s)| (s.card, s.embedding.unwrap_or_default()));
+    let mut stored = stored
+        .into_iter()
+        .map(|(_, s)| (s.card, s.embedding.unwrap_or_default()));
     let (cards, vectors): (Vec<Card>, Vec<Vector>) = stored.by_ref().take(to_read.len()).unzip();
     let mut name_vectors = name_vectors.into_iter();
     let subfolders = samples
         .iter()
         .filter_map(|(folder, sample)| {
             let sampled: Vec<(Card, Vector)> = stored.by_ref().take(sample.len()).collect();
-            let centroid = if sample.is_empty() { name_vectors.next() } else { centroid(sampled.iter().map(|(_, v)| v)) }?;
+            let centroid = if sample.is_empty() {
+                name_vectors.next()
+            } else {
+                centroid(sampled.iter().map(|(_, v)| v))
+            }?;
             let topics = distinct(sampled.iter().map(|(c, _)| c.topic.as_str()));
-            Some(Subfolder { path: scan.root.join(folder), name: folder.to_string(), centroid, topics })
+            let files = sample.iter().map(|e| e.name.clone()).collect();
+            Some(Subfolder {
+                path: scan.root.join(folder),
+                name: folder.to_string(),
+                centroid,
+                topics,
+                files,
+            })
         })
         .collect();
     let mut analysis = Analysis {
@@ -371,18 +462,54 @@ pub fn analyse(
         }
         if last_report.is_none_or(|t| t.elapsed() >= PROGRESS_INTERVAL) {
             let current = analysis.files[*file].clone();
-            on_progress(Progress { finished, total: unanswered.len(), current, placing: true });
+            on_progress(Progress {
+                finished,
+                total: unanswered.len(),
+                current,
+                placing: true,
+            });
             last_report = Some(Instant::now());
         }
-        let answer = input.store.get_answer(&card_id, prompt).unwrap_or_else(|| {
-            let chosen = models.place(question);
-            let answer = Answer { folder: chosen.as_ref().ok().copied().flatten().map(|i| place::label(&question.folders[i])) };
-            // A failed question is asked again next time.
-            if chosen.is_ok() {
-                input.store.put_answer(&card_id, prompt, &answer);
+        let started = Instant::now();
+        let name = &question.file_name;
+        let answer = match input.store.get_answer(&card_id, prompt) {
+            Some(saved) => {
+                trace::time(&format!(
+                    "placing {name}: saved answer, {}\n",
+                    trace::secs(started.elapsed())
+                ));
+                if trace::enabled() {
+                    let folder = saved.folder.as_deref().unwrap_or("none");
+                    trace::write(
+                        trace::PLACING,
+                        &format!("{name}.txt"),
+                        &format!("(An answer saved by an earlier analysis: the model wasn't asked again.)\n\n\
+                                  === PROMPT ===\n{prompt}\n=== FOLDER ===\n{folder}\n"),
+                    );
+                }
+                saved
             }
-            answer
-        });
+            None => {
+                let chosen = models.place(question);
+                let answer = Answer {
+                    folder: chosen
+                        .as_ref()
+                        .ok()
+                        .copied()
+                        .flatten()
+                        .map(|i| place::label(&question.folders[i])),
+                };
+                // A failed question is asked again next time.
+                if chosen.is_ok() {
+                    input.store.put_answer(&card_id, prompt, &answer);
+                }
+                trace::time(&format!(
+                    "placing {name}: asked, {}\n",
+                    trace::secs(started.elapsed())
+                ));
+                answer
+            }
+        };
         analysis.answers.insert(prompt.clone(), answer.folder);
     }
     analysis.device = models.device();
@@ -408,11 +535,17 @@ impl Analysis {
         let topics: Vec<Option<String>> = self.cards.iter().map(Card::topic_key).collect();
         // The same topic, or topics sharing a mark: "IELTS Speaking" and "IELTS Writing".
         let same_topic = |i: usize, j: usize| match (&topics[i], &topics[j]) {
-            (Some(a), Some(b)) => a == b || marks::share_mark(&self.cards[i].topic, &self.cards[j].topic),
+            (Some(a), Some(b)) => {
+                a == b || marks::share_mark(&self.cards[i].topic, &self.cards[j].topic)
+            }
             _ => false,
         };
-        let clusters =
-            cluster::cluster(&self.vectors, same_topic, settings.folder_threshold, settings.smallest_folder);
+        let clusters = cluster::cluster(
+            &self.vectors,
+            same_topic,
+            settings.folder_threshold,
+            settings.smallest_folder,
+        );
         let mut named: Vec<(String, &[usize])> = Vec::new();
         // Each Suggested Folder of read files, by its place in `folders`, with its centroid and topics.
         let mut topical: Vec<(usize, Vector, Vec<String>)> = Vec::new();
@@ -422,14 +555,22 @@ impl Analysis {
         let group_marks: Vec<HashSet<String>> = clusters
             .groups
             .iter()
-            .map(|members| members.iter().flat_map(|&i| marks::name_marks(&file_name(&self.files[i]))).collect())
+            .map(|members| {
+                members
+                    .iter()
+                    .flat_map(|&i| marks::name_marks(&file_name(&self.files[i])))
+                    .collect()
+            })
             .collect();
         let mut joined: Vec<Vec<PathBuf>> = vec![Vec::new(); clusters.groups.len()];
         let mut fixed: BTreeMap<&str, Vec<PathBuf>> = BTreeMap::new();
         for (kind, files) in &self.fixed {
             for file in files {
                 let own = marks::name_marks(&file_name(file));
-                match group_marks.iter().position(|g| own.iter().any(|m| g.contains(m))) {
+                match group_marks
+                    .iter()
+                    .position(|g| own.iter().any(|m| g.contains(m)))
+                {
                     Some(g) => joined[g].push(file.clone()),
                     None => fixed.entry(kind).or_default().push(file.clone()),
                 }
@@ -445,7 +586,12 @@ impl Analysis {
             let existing = kinds::matching_folder(kind, &folder_names)
                 .and_then(|name| self.subfolders.iter().find(|f| f.name == name))
                 .map(|f| f.path.clone());
-            folders.push(SuggestedFolder { name: kind.to_string(), files, existing, fixed_kind: true });
+            folders.push(SuggestedFolder {
+                name: kind.to_string(),
+                files,
+                existing,
+                fixed_kind: true,
+            });
         }
 
         for (members, joined) in clusters.groups.iter().zip(joined) {
@@ -458,9 +604,17 @@ impl Analysis {
                 .filter(|(_, s)| *s >= settings.existing_folder_threshold)
                 .map(|(f, _)| f.path.clone());
             // Topics that differ but share a mark name the folder after it: "IELTS".
-            let member_topics: Vec<&str> =
-                members.iter().map(|&i| self.cards[i].topic.trim()).filter(|t| !t.is_empty()).collect();
-            let agreed = members.iter().filter_map(|&i| topics[i].as_ref()).collect::<HashSet<_>>().len() <= 1;
+            let member_topics: Vec<&str> = members
+                .iter()
+                .map(|&i| self.cards[i].topic.trim())
+                .filter(|t| !t.is_empty())
+                .collect();
+            let agreed = members
+                .iter()
+                .filter_map(|&i| topics[i].as_ref())
+                .collect::<HashSet<_>>()
+                .len()
+                <= 1;
             let base = (!agreed)
                 .then(|| marks::shared_mark(&member_topics))
                 .flatten()
@@ -471,9 +625,22 @@ impl Analysis {
                 .unwrap_or_else(|| self.majority_kind(members));
             let name = unused_name(&mut used_names, &base);
             named.push((name.clone(), members));
-            topical.push((folders.len(), centre, distinct(member_topics.iter().copied())));
-            let files = members.iter().map(|&i| self.files[i].clone()).chain(joined).collect();
-            folders.push(SuggestedFolder { name, files, existing, fixed_kind: false });
+            topical.push((
+                folders.len(),
+                centre,
+                distinct(member_topics.iter().copied()),
+            ));
+            let files = members
+                .iter()
+                .map(|&i| self.files[i].clone())
+                .chain(joined)
+                .collect();
+            folders.push(SuggestedFolder {
+                name,
+                files,
+                existing,
+                fixed_kind: false,
+            });
         }
 
         // Every question is put before any file is placed, so none depends on another's answer.
@@ -494,7 +661,12 @@ impl Analysis {
                 unanswered.push((i, prompt, question));
                 continue;
             };
-            let Some(c) = answer.as_ref().and_then(|name| question.folders.iter().position(|f| &place::label(f) == name)) else {
+            let Some(c) = answer.as_ref().and_then(|name| {
+                question
+                    .folders
+                    .iter()
+                    .position(|f| &place::label(f) == name)
+            }) else {
                 continue;
             };
             let folder = match targets[c] {
@@ -514,13 +686,27 @@ impl Analysis {
             folders[folder].files.push(self.files[i].clone());
             placed.insert(i, folders[folder].name.clone());
         }
-        ungrouped.extend(clusters.ungrouped.iter().filter(|i| !placed.contains_key(i)).map(|&i| self.files[i].clone()));
+        ungrouped.extend(
+            clusters
+                .ungrouped
+                .iter()
+                .filter(|i| !placed.contains_key(i))
+                .map(|&i| self.files[i].clone()),
+        );
         if trace::enabled() {
-            let similarity = |i: usize, j: usize| cluster::similarity(&self.vectors[i], &self.vectors[j], same_topic(i, j));
-            let report = self.similarity_report(settings, &named, &clusters.ungrouped, &placed, similarity);
-            trace::write("_similarity.txt", &report);
+            let similarity = |i: usize, j: usize| {
+                cluster::similarity(&self.vectors[i], &self.vectors[j], same_topic(i, j))
+            };
+            let report =
+                self.similarity_report(settings, &named, &clusters.ungrouped, &placed, similarity);
+            trace::write(trace::SIMILARITY, "similarity.txt", &report);
         }
-        folders.sort_by(|a, b| b.files.len().cmp(&a.files.len()).then_with(|| a.name.cmp(&b.name)));
+        folders.sort_by(|a, b| {
+            b.files
+                .len()
+                .cmp(&a.files.len())
+                .then_with(|| a.name.cmp(&b.name))
+        });
         ungrouped.sort();
         let kinds = folders
             .iter()
@@ -535,7 +721,15 @@ impl Analysis {
             .filter(|(_, card)| !card.summary.is_empty())
             .map(|(path, card)| (path.clone(), card.summary.clone()))
             .collect();
-        (Grouping { folders, ungrouped, kinds, summaries }, unanswered)
+        (
+            Grouping {
+                folders,
+                ungrouped,
+                kinds,
+                summaries,
+            },
+            unanswered,
+        )
     }
 
     /// The placing question for read file `i`, left out of every folder,
@@ -555,22 +749,51 @@ impl Analysis {
         let mut choices: Vec<(f32, Choice, Target)> = topical
             .iter()
             .map(|(k, centre, topics)| {
-                let choice = Choice { name: folders[*k].name.clone(), topics: topics.clone(), existing: false };
+                let files = folders[*k].files.iter().map(|p| file_name(p)).collect();
+                let choice = Choice {
+                    name: folders[*k].name.clone(),
+                    topics: topics.clone(),
+                    files,
+                    existing: false,
+                };
                 (cosine(&self.vectors[i], centre), choice, Target::Folder(*k))
             })
             .collect();
         let taken: HashSet<&PathBuf> = folders.iter().filter_map(|f| f.existing.as_ref()).collect();
-        choices.extend(self.subfolders.iter().enumerate().filter(|(_, f)| !taken.contains(&f.path)).map(|(s, f)| {
-            let choice = Choice { name: f.name.clone(), topics: f.topics.clone(), existing: true };
-            (cosine(&self.vectors[i], &f.centroid), choice, Target::Subfolder(s))
-        }));
+        choices.extend(
+            self.subfolders
+                .iter()
+                .enumerate()
+                .filter(|(_, f)| !taken.contains(&f.path))
+                .map(|(s, f)| {
+                    let choice = Choice {
+                        name: f.name.clone(),
+                        topics: f.topics.clone(),
+                        files: f.files.clone(),
+                        existing: true,
+                    };
+                    (
+                        cosine(&self.vectors[i], &f.centroid),
+                        choice,
+                        Target::Subfolder(s),
+                    )
+                }),
+        );
         choices.sort_by(|a, b| b.0.total_cmp(&a.0));
         choices.truncate(place::CHOICES);
         if choices.is_empty() {
             return None;
         }
-        let (choices, targets): (Vec<Choice>, Vec<Target>) = choices.into_iter().map(|(_, c, t)| (c, t)).unzip();
-        Some((Question { file_name: file_name(&self.files[i]), card: card.clone(), folders: choices }, targets))
+        let (choices, targets): (Vec<Choice>, Vec<Target>) =
+            choices.into_iter().map(|(_, c, t)| (c, t)).unzip();
+        Some((
+            Question {
+                file_name: file_name(&self.files[i]),
+                card: card.clone(),
+                folders: choices,
+            },
+            targets,
+        ))
     }
 
     /// For tuning the thresholds: each Suggested Folder made of read files,
@@ -592,9 +815,19 @@ impl Analysis {
         for (name, members) in folders {
             members.iter().for_each(|&i| home[i] = Some(name));
         }
-        let label = |i: usize| format!("{}  [topic: {}]", file_name(&self.files[i]), self.cards[i].topic);
+        let label = |i: usize| {
+            format!(
+                "{}  [topic: {}]",
+                file_name(&self.files[i]),
+                self.cards[i].topic
+            )
+        };
         let average = |i: usize, members: &[usize]| {
-            let others: Vec<f32> = members.iter().filter(|&&j| j != i).map(|&j| similarity(i, j)).collect();
+            let others: Vec<f32> = members
+                .iter()
+                .filter(|&&j| j != i)
+                .map(|&j| similarity(i, j))
+                .collect();
             others.iter().sum::<f32>() / others.len().max(1) as f32
         };
         let mut out = String::new();
@@ -605,13 +838,20 @@ impl Analysis {
             settings.folder_threshold, settings.existing_folder_threshold, settings.smallest_folder
         );
         for (name, members) in folders {
-            let inside = members.iter().map(|&i| average(i, members)).sum::<f32>() / members.len() as f32;
-            let _ = writeln!(out, "== {name} ({} files), average inside {inside:.2}", members.len());
+            let inside =
+                members.iter().map(|&i| average(i, members)).sum::<f32>() / members.len() as f32;
+            let _ = writeln!(
+                out,
+                "== {name} ({} files), average inside {inside:.2}",
+                members.len()
+            );
             for &i in members.iter() {
                 let _ = writeln!(out, "   in   {:.2}  {}", average(i, members), label(i));
             }
-            let mut outside: Vec<(f32, usize)> =
-                (0..n).filter(|i| !members.contains(i)).map(|i| (average(i, members), i)).collect();
+            let mut outside: Vec<(f32, usize)> = (0..n)
+                .filter(|i| !members.contains(i))
+                .map(|i| (average(i, members), i))
+                .collect();
             outside.sort_by(|a, b| b.0.total_cmp(&a.0));
             for &(score, i) in outside.iter().take(NEAREST) {
                 let place = home[i].map_or("left where it is".to_string(), |f| format!("in {f}"));
@@ -619,21 +859,35 @@ impl Analysis {
             }
             let centre = centroid(members.iter().map(|&i| &self.vectors[i])).unwrap_or_default();
             for f in &self.subfolders {
-                let _ = writeln!(out, "   existing {:.2}  {}/", cosine(&centre, &f.centroid), f.name);
+                let _ = writeln!(
+                    out,
+                    "   existing {:.2}  {}/",
+                    cosine(&centre, &f.centroid),
+                    f.name
+                );
             }
             out.push('\n');
         }
         let _ = writeln!(out, "== Left out of every folder");
         for &i in ungrouped {
-            let nearest_file = (0..n).filter(|&j| j != i).map(|j| (similarity(i, j), j)).max_by(|a, b| a.0.total_cmp(&b.0));
-            let nearest_folder =
-                folders.iter().map(|(name, members)| (average(i, members), name)).max_by(|a, b| a.0.total_cmp(&b.0));
+            let nearest_file = (0..n)
+                .filter(|&j| j != i)
+                .map(|j| (similarity(i, j), j))
+                .max_by(|a, b| a.0.total_cmp(&b.0));
+            let nearest_folder = folders
+                .iter()
+                .map(|(name, members)| (average(i, members), name))
+                .max_by(|a, b| a.0.total_cmp(&b.0));
             let _ = write!(out, "   {}", label(i));
             if let Some((score, name)) = nearest_folder {
                 let _ = write!(out, "\n        nearest folder {score:.2} {name}");
             }
             if let Some((score, j)) = nearest_file {
-                let _ = write!(out, "\n        nearest file   {score:.2} {}", file_name(&self.files[j]));
+                let _ = write!(
+                    out,
+                    "\n        nearest file   {score:.2} {}",
+                    file_name(&self.files[j])
+                );
             }
             if let Some(folder) = placed.get(&i) {
                 let _ = write!(out, "\n        placed by the model in {folder}");
@@ -647,9 +901,15 @@ impl Analysis {
     fn majority_kind(&self, members: &[usize]) -> String {
         let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
         for &i in members {
-            *counts.entry(kinds::kind(&extension(&self.files[i]))).or_insert(0) += 1;
+            *counts
+                .entry(kinds::kind(&extension(&self.files[i])))
+                .or_insert(0) += 1;
         }
-        counts.into_iter().max_by_key(|&(_, c)| c).map_or("Files", |(k, _)| k).to_string()
+        counts
+            .into_iter()
+            .max_by_key(|&(_, c)| c)
+            .map_or("Files", |(k, _)| k)
+            .to_string()
     }
 }
 
@@ -668,17 +928,25 @@ fn unused_name(used: &mut HashSet<String>, base: &str) -> String {
 /// The non-empty labels, trimmed, each once (ignoring case), as first written.
 fn distinct<'a>(labels: impl Iterator<Item = &'a str>) -> Vec<String> {
     let mut seen = HashSet::new();
-    labels.map(str::trim).filter(|l| !l.is_empty() && seen.insert(l.to_lowercase())).map(str::to_string).collect()
+    labels
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && seen.insert(l.to_lowercase()))
+        .map(str::to_string)
+        .collect()
 }
 
 /// The extension of `path`, lowercased; empty if none.
 fn extension(path: &Path) -> String {
-    path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default()
+    path.extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default()
 }
 
 /// The file name of `path`, or nothing.
 fn file_name(path: &Path) -> String {
-    path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// The non-empty label most files carry (ignoring case), as first written;
@@ -686,16 +954,26 @@ fn file_name(path: &Path) -> String {
 fn most_common<'a>(labels: impl Iterator<Item = &'a str>) -> Option<String> {
     let mut counts: Vec<(&str, usize)> = Vec::new();
     for label in labels.map(str::trim).filter(|l| !l.is_empty()) {
-        match counts.iter_mut().find(|(seen, _)| seen.to_lowercase() == label.to_lowercase()) {
+        match counts
+            .iter_mut()
+            .find(|(seen, _)| seen.to_lowercase() == label.to_lowercase())
+        {
             Some((_, n)) => *n += 1,
             None => counts.push((label, 1)),
         }
     }
     // `max_by_key` keeps the last of equals, so look from the end.
-    counts.into_iter().rev().max_by_key(|&(_, n)| n).map(|(label, _)| label.to_string())
+    counts
+        .into_iter()
+        .rev()
+        .max_by_key(|&(_, n)| n)
+        .map(|(label, _)| label.to_string())
 }
 
 fn capitalized(label: &str) -> String {
     let mut chars = label.chars();
-    chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
+    chars
+        .next()
+        .map(|c| c.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
 }

@@ -40,7 +40,10 @@ pub fn cluster(
     min_size: usize,
 ) -> Clusters {
     let n = vectors.len();
-    let mut sims = Similarities { n, values: vec![1.0; n * n] };
+    let mut sims = Similarities {
+        n,
+        values: vec![1.0; n * n],
+    };
     for i in 0..n {
         for j in i + 1..n {
             sims.set(i, j, similarity(&vectors[i], &vectors[j], same_topic(i, j)));
@@ -56,7 +59,10 @@ fn agglomerate(mut link: Similarities, threshold: f32, min_size: usize) -> Clust
     let mut members: Vec<Vec<usize>> = (0..n).map(|i| vec![i]).collect();
     let mut alive = vec![true; n];
     let nearest = |i: usize, alive: &[bool], link: &Similarities| -> Option<(usize, f32)> {
-        (0..n).filter(|&j| j != i && alive[j]).map(|j| (j, link.get(i, j))).max_by(|a, b| a.1.total_cmp(&b.1))
+        (0..n)
+            .filter(|&j| j != i && alive[j])
+            .map(|j| (j, link.get(i, j)))
+            .max_by(|a, b| a.1.total_cmp(&b.1))
     };
     // Each live cluster's most similar live neighbour.
     let mut best: Vec<Option<(usize, f32)>> = (0..n).map(|i| nearest(i, &alive, &link)).collect();
@@ -71,7 +77,11 @@ fn agglomerate(mut link: Similarities, threshold: f32, min_size: usize) -> Clust
         // the size-weighted average of the similarities to a and to b.
         let (sa, sb) = (sizes[a] as f32, sizes[b] as f32);
         for k in (0..n).filter(|&k| alive[k] && k != a && k != b) {
-            link.set(a, k, (sa * link.get(a, k) + sb * link.get(b, k)) / (sa + sb));
+            link.set(
+                a,
+                k,
+                (sa * link.get(a, k) + sb * link.get(b, k)) / (sa + sb),
+            );
         }
         sizes[a] += sizes[b];
         let moved = std::mem::take(&mut members[b]);

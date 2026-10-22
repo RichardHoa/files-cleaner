@@ -31,14 +31,20 @@ impl Page {
 pub fn recognize(page: &Page) -> Option<String> {
     use objc2::AnyThread;
     use objc2_foundation::{NSArray, NSData, NSDictionary};
-    use objc2_vision::{VNImageRequestHandler, VNRecognizeTextRequest, VNRequest, VNRequestTextRecognitionLevel};
+    use objc2_vision::{
+        VNImageRequestHandler, VNRecognizeTextRequest, VNRequest, VNRequestTextRecognitionLevel,
+    };
 
     // Timings go to stderr for the parent's trace (`read::pdf_child`).
     let step = std::time::Instant::now();
     let data = NSData::with_bytes(&page.png()?);
     eprintln!("  PNG encode {}", crate::trace::secs(step.elapsed()));
     let step = std::time::Instant::now();
-    let handler = VNImageRequestHandler::initWithData_options(VNImageRequestHandler::alloc(), &data, &NSDictionary::new());
+    let handler = VNImageRequestHandler::initWithData_options(
+        VNImageRequestHandler::alloc(),
+        &data,
+        &NSDictionary::new(),
+    );
     let request = VNRecognizeTextRequest::new();
     request.setRecognitionLevel(VNRequestTextRecognitionLevel::Accurate);
     request.setUsesLanguageCorrection(true);
@@ -47,14 +53,20 @@ pub fn recognize(page: &Page) -> Option<String> {
         request.setAutomaticallyDetectsLanguage(true);
     }
     let as_request: &VNRequest = &request;
-    handler.performRequests_error(&NSArray::from_slice(&[as_request])).ok()?;
+    handler
+        .performRequests_error(&NSArray::from_slice(&[as_request]))
+        .ok()?;
     let lines: Vec<String> = request
         .results()?
         .iter()
         .filter_map(|line| line.topCandidates(1).firstObject())
         .map(|text| text.string().to_string())
         .collect();
-    eprintln!("  Vision {} ({} lines)", crate::trace::secs(step.elapsed()), lines.len());
+    eprintln!(
+        "  Vision {} ({} lines)",
+        crate::trace::secs(step.elapsed()),
+        lines.len()
+    );
     Some(lines.join("\n"))
 }
 
@@ -72,7 +84,11 @@ pub fn recognize(page: &Page) -> Option<String> {
         return None;
     }
     let engine = OcrEngine::TryCreateFromUserProfileLanguages().ok()?;
-    let bgra: Vec<u8> = page.rgba.chunks_exact(4).flat_map(|p| [p[2], p[1], p[0], p[3]]).collect();
+    let bgra: Vec<u8> = page
+        .rgba
+        .chunks_exact(4)
+        .flat_map(|p| [p[2], p[1], p[0], p[3]])
+        .collect();
     let writer = DataWriter::new().ok()?;
     writer.WriteBytes(&bgra).ok()?;
     let buffer = writer.DetachBuffer().ok()?;
@@ -85,7 +101,13 @@ pub fn recognize(page: &Page) -> Option<String> {
     )
     .ok()?;
     let result = engine.RecognizeAsync(&bitmap).ok()?.join().ok()?;
-    let lines: Vec<String> = result.Lines().ok()?.into_iter().filter_map(|line| line.Text().ok()).map(|t| t.to_string()).collect();
+    let lines: Vec<String> = result
+        .Lines()
+        .ok()?
+        .into_iter()
+        .filter_map(|line| line.Text().ok())
+        .map(|t| t.to_string())
+        .collect();
     Some(lines.join("\n"))
 }
 
@@ -111,16 +133,25 @@ pub fn recognize(page: &Page) -> Option<String> {
     // pipes can't both fill up.
     child.stdin.take()?.write_all(&png).ok()?;
     let out = child.wait_with_output().ok()?;
-    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 /// The installed Tesseract languages joined for `-l`, as `eng+vie`, leaving
 /// out the ones that aren't scripts of text.
 #[cfg(not(any(target_os = "macos", windows)))]
 fn tesseract_languages() -> Option<String> {
-    let out = std::process::Command::new("tesseract").arg("--list-langs").output().ok()?;
+    let out = std::process::Command::new("tesseract")
+        .arg("--list-langs")
+        .output()
+        .ok()?;
     // Older versions list them on stderr; the first line is a header.
-    let listed = format!("{}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    let listed = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
     let languages: Vec<&str> = listed
         .lines()
         .map(str::trim)

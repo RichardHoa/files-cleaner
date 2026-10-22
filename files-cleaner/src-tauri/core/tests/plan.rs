@@ -10,7 +10,12 @@ use files_cleaner_core::{build_plan, scan, OperationKind, Plan, Reason};
 /// Sets `path`'s modified date to `secs` after the epoch.
 fn set_modified(path: &Path, secs: u64) {
     let time = UNIX_EPOCH + Duration::from_secs(secs);
-    fs::File::options().write(true).open(path).unwrap().set_modified(time).unwrap();
+    fs::File::options()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_modified(time)
+        .unwrap();
 }
 
 fn plan_for(root: &Path) -> Plan {
@@ -42,7 +47,10 @@ fn trashes_every_copy_but_the_keeper_even_when_renamed() {
     set_modified(&oldest, 1_000);
     write(dir.path(), "unique.pdf", "different contents");
 
-    assert_eq!(trashed(&plan_for(dir.path())), ["old/report (1).pdf", "renamed.pdf"]);
+    assert_eq!(
+        trashed(&plan_for(dir.path())),
+        ["old/report (1).pdf", "renamed.pdf"]
+    );
 }
 
 #[test]
@@ -105,7 +113,10 @@ fn equal_modified_dates_keep_the_latest_created() {
     write(dir.path(), "a.txt", "copy");
     write(dir.path(), "folder/b.txt", "copy");
 
-    let plan = plan_with_dates(dir.path(), &[("a.txt", 1_000, Some(1)), ("folder/b.txt", 1_000, Some(2))]);
+    let plan = plan_with_dates(
+        dir.path(),
+        &[("a.txt", 1_000, Some(1)), ("folder/b.txt", 1_000, Some(2))],
+    );
 
     assert_eq!(trashed(&plan), ["a.txt"]);
 }
@@ -119,7 +130,11 @@ fn equal_dates_keep_the_shortest_path_then_the_first_alphabetically() {
 
     let plan = plan_with_dates(
         dir.path(),
-        &[("folder/a.txt", 1_000, Some(5)), ("c.txt", 1_000, Some(5)), ("b.txt", 1_000, Some(5))],
+        &[
+            ("folder/a.txt", 1_000, Some(5)),
+            ("c.txt", 1_000, Some(5)),
+            ("b.txt", 1_000, Some(5)),
+        ],
     );
 
     assert_eq!(trashed(&plan), ["c.txt", "folder/a.txt"]);
@@ -131,7 +146,10 @@ fn a_missing_created_date_skips_to_the_next_tie_break() {
     write(dir.path(), "folder/a.txt", "copy");
     write(dir.path(), "b.txt", "copy");
 
-    let plan = plan_with_dates(dir.path(), &[("folder/a.txt", 1_000, Some(9)), ("b.txt", 1_000, None)]);
+    let plan = plan_with_dates(
+        dir.path(),
+        &[("folder/a.txt", 1_000, Some(9)), ("b.txt", 1_000, None)],
+    );
 
     assert_eq!(trashed(&plan), ["folder/a.txt"]);
 }
@@ -167,7 +185,12 @@ fn operation_ids_are_stable_between_plans() {
     write(dir.path(), "b.txt", "copy");
     write(dir.path(), "c.txt", "copy");
 
-    let ids = |plan: Plan| plan.operations.into_iter().map(|op| op.id).collect::<Vec<_>>();
+    let ids = |plan: Plan| {
+        plan.operations
+            .into_iter()
+            .map(|op| op.id)
+            .collect::<Vec<_>>()
+    };
     let first = ids(plan_for(dir.path()));
     assert_eq!(first.len(), 2);
     assert_eq!(first, ids(plan_for(dir.path())));
@@ -193,17 +216,31 @@ fn each_trashed_copy_names_where_it_goes_and_its_keeper() {
         .iter()
         .filter(|op| op.reason != Reason::EmptiedFolder)
         .map(|op| {
-            let Reason::Duplicate { keeper } = &op.reason else { panic!("{:?} isn't a duplicate", op.reason) };
-            (op.relative_path.join("/"), op.destination.join("/"), keeper.join("/"))
+            let Reason::Duplicate { keeper } = &op.reason else {
+                panic!("{:?} isn't a duplicate", op.reason)
+            };
+            (
+                op.relative_path.join("/"),
+                op.destination.join("/"),
+                keeper.join("/"),
+            )
         })
         .collect();
 
     let trashed = |path: &str, keeper: &str| {
-        (path.to_string(), format!("Files Cleaner Trash/This Session/{path}"), keeper.to_string())
+        (
+            path.to_string(),
+            format!("Files Cleaner Trash/This Session/{path}"),
+            keeper.to_string(),
+        )
     };
     assert_eq!(
         summary,
-        [trashed("a.txt", "b.txt"), trashed("sub/copy.pdf", "keep/report.pdf"), trashed("top.pdf", "keep/report.pdf")]
+        [
+            trashed("a.txt", "b.txt"),
+            trashed("sub/copy.pdf", "keep/report.pdf"),
+            trashed("top.pdf", "keep/report.pdf")
+        ]
     );
 }
 
@@ -218,8 +255,16 @@ fn one_copy_missing_its_created_date_skips_that_tie_break_for_the_whole_group() 
     // long < c < mid < long, and the Keeper would depend on scan order.
     let plan = plan_with_dates(
         dir.path(),
-        &[("a/x/long.txt", 1_000, Some(2)), ("b/mid.txt", 1_000, None), ("c.txt", 1_000, Some(1))],
+        &[
+            ("a/x/long.txt", 1_000, Some(2)),
+            ("b/mid.txt", 1_000, None),
+            ("c.txt", 1_000, Some(1)),
+        ],
     );
 
-    assert_eq!(trashed(&plan), ["a/x/long.txt", "b/mid.txt"], "the shortest path is kept");
+    assert_eq!(
+        trashed(&plan),
+        ["a/x/long.txt", "b/mid.txt"],
+        "the shortest path is kept"
+    );
 }

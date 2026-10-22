@@ -168,7 +168,10 @@ pub fn scan_with_progress(
                 continue;
             }
             // What's left is a file, or a folder that is a Package.
-            match child.metadata().and_then(|metadata| entry(&path, &root, &metadata, kind.is_dir())) {
+            match child
+                .metadata()
+                .and_then(|metadata| entry(&path, &root, &metadata, kind.is_dir()))
+            {
                 Ok(entry) => result.entries.push(entry),
                 Err(_) => result.unreadable.push(path),
             }
@@ -180,16 +183,38 @@ pub fn scan_with_progress(
 }
 
 /// Lists a file, or a Package with the total size of what's inside it.
-fn entry(path: &Path, root: &Path, metadata: &fs::Metadata, is_package: bool) -> io::Result<ScanEntry> {
-    let relative = path.strip_prefix(root).expect("the scanner only walks inside the Scan Root");
+fn entry(
+    path: &Path,
+    root: &Path,
+    metadata: &fs::Metadata,
+    is_package: bool,
+) -> io::Result<ScanEntry> {
+    let relative = path
+        .strip_prefix(root)
+        .expect("the scanner only walks inside the Scan Root");
     Ok(ScanEntry {
-        name: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
-        extension: path.extension().unwrap_or_default().to_string_lossy().into_owned(),
-        size: if is_package { total_size(path) } else { metadata.len() },
+        name: path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned(),
+        extension: path
+            .extension()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned(),
+        size: if is_package {
+            total_size(path)
+        } else {
+            metadata.len()
+        },
         modified: millis(metadata.modified()?),
         created: metadata.created().ok().map(millis),
         path: path.to_path_buf(),
-        relative_path: relative.iter().map(|name| name.to_string_lossy().into_owned()).collect(),
+        relative_path: relative
+            .iter()
+            .map(|name| name.to_string_lossy().into_owned())
+            .collect(),
         is_package,
     })
 }
@@ -201,9 +226,13 @@ pub(crate) fn total_size(folder: &Path) -> u64 {
     let mut total = 0;
     let mut folders = vec![folder.to_path_buf()];
     while let Some(folder) = folders.pop() {
-        let Ok(children) = fs::read_dir(&folder) else { continue };
+        let Ok(children) = fs::read_dir(&folder) else {
+            continue;
+        };
         for child in children.flatten() {
-            let Ok(metadata) = child.metadata() else { continue };
+            let Ok(metadata) = child.metadata() else {
+                continue;
+            };
             if metadata.is_dir() {
                 folders.push(child.path());
             } else if metadata.is_file() {

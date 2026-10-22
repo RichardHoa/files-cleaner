@@ -23,6 +23,8 @@ pub struct Choice {
     pub name: String,
     /// The topics of the files in it, each once.
     pub topics: Vec<String>,
+    /// Names of files in it, so a file can be matched by its name too.
+    pub files: Vec<String>,
     /// An existing subfolder of the Scan Root, rather than a Suggested Folder.
     pub existing: bool,
 }
@@ -37,6 +39,8 @@ pub struct Answer {
 pub const CHOICES: usize = 8;
 /// The most topics shown for each folder.
 const TOPICS: usize = 6;
+/// The most file names shown for each folder.
+const FILES: usize = 4;
 /// Tokens a reply takes: one folder name.
 pub const MAX_NEW_TOKENS: usize = 24;
 
@@ -45,20 +49,40 @@ const SYSTEM: &str = "You sort files into folders. Reply with one folder name an
 /// What the LLM is asked, in Qwen's chat template, written out.
 pub fn prompt(question: &Question) -> String {
     let card = &question.card;
-    let mut folders = String::from("- none (it fits none of these)\n");
+    // "none" goes last: small models lean towards the first choice.
+    let mut folders = String::new();
     for choice in &question.folders {
-        let topics: Vec<&str> = choice.topics.iter().take(TOPICS).map(String::as_str).collect();
-        let about = match (choice.existing, topics.is_empty()) {
-            (true, true) => "an existing folder".to_string(),
-            (true, false) => format!("an existing folder; holds: {}", topics.join("; ")),
-            (false, _) => format!("holds: {}", topics.join("; ")),
-        };
-        folders.push_str(&format!("- {} ({about})\n", label(choice)));
+        let mut about = Vec::new();
+        if choice.existing {
+            about.push("an existing folder".to_string());
+        }
+        let topics: Vec<&str> = choice
+            .topics
+            .iter()
+            .take(TOPICS)
+            .map(String::as_str)
+            .collect();
+        if !topics.is_empty() {
+            about.push(format!("topics: {}", topics.join("; ")));
+        }
+        let files: Vec<&str> = choice
+            .files
+            .iter()
+            .take(FILES)
+            .map(String::as_str)
+            .collect();
+        if !files.is_empty() {
+            about.push(format!("files: {}", files.join(", ")));
+        }
+        folders.push_str(&format!("- {} ({})\n", label(choice), about.join("; ")));
     }
+    folders.push_str("- none (it fits none of these)\n");
     let user = format!(
         "A file:\nName: {}\nTopic: {}\nType: {}\nSummary: {}\n\nFolders:\n{folders}\n\
-         Would a person keep this file in one of these folders? Pick one only if the file is clearly about \
-         the same course, project, organization or subject as the files it holds, or part of it. \
+         Which folder would a person keep this file in? Choose a folder when the file belongs with the files in it: \
+         the same course, project or organization, the same subject, or study material for the same subject or exam \
+         (a calculus lecture goes with calculus homework; vocabulary notes go with language exam papers). \
+         Reply \"none\" only when the file is unrelated to every folder. \
          Reply with the folder name exactly as written above, or \"none\".",
         question.file_name, card.topic, card.kind, card.summary
     );
@@ -69,10 +93,19 @@ pub fn prompt(question: &Question) -> String {
 /// for "none" or a reply naming no folder. A name without its slash counts
 /// when only one folder has it.
 pub fn parse(reply: &str, question: &Question) -> Option<usize> {
-    let bare = |s: &str| s.trim().trim_matches(|c: char| "\"'`*.-: ".contains(c)).to_lowercase();
+    let bare = |s: &str| {
+        s.trim()
+            .trim_matches(|c: char| "\"'`*.-: ".contains(c))
+            .to_lowercase()
+    };
     let reply = bare(reply.lines().next().unwrap_or(""));
-    let exact = question.folders.iter().position(|choice| bare(&label(choice)) == reply);
-    let named: Vec<usize> = (0..question.folders.len()).filter(|&i| bare(&question.folders[i].name) == reply).collect();
+    let exact = question
+        .folders
+        .iter()
+        .position(|choice| bare(&label(choice)) == reply);
+    let named: Vec<usize> = (0..question.folders.len())
+        .filter(|&i| bare(&question.folders[i].name) == reply)
+        .collect();
     exact.or(match named[..] {
         [only] => Some(only),
         _ => None,

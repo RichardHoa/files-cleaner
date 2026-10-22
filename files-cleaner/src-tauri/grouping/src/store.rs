@@ -36,7 +36,9 @@ pub struct ModelIds<'a> {
 impl CardStore {
     /// The store in `folder`, which is created when the first card is stored.
     pub fn open(folder: impl Into<PathBuf>) -> Self {
-        CardStore { folder: folder.into() }
+        CardStore {
+            folder: folder.into(),
+        }
     }
 
     /// Forgets every stored card and answer, so every file is read again.
@@ -72,12 +74,17 @@ impl CardStore {
     fn answer_path(&self, card_model: &str, prompt: &str) -> PathBuf {
         let model = blake3::hash(card_model.as_bytes());
         let question = blake3::hash(prompt.as_bytes());
-        self.folder.join("answers").join(&model.to_hex()[..16]).join(format!("{}.json", question.to_hex()))
+        self.folder
+            .join("answers")
+            .join(&model.to_hex()[..16])
+            .join(format!("{}.json", question.to_hex()))
     }
 
     fn path(&self, models: &ModelIds, hash: &blake3::Hash) -> PathBuf {
         let pair = blake3::hash(format!("{}\n{}", models.card, models.embedding).as_bytes());
-        self.folder.join(&pair.to_hex()[..16]).join(format!("{}.json", hash.to_hex()))
+        self.folder
+            .join(&pair.to_hex()[..16])
+            .join(format!("{}.json", hash.to_hex()))
     }
 }
 
@@ -85,7 +92,9 @@ impl CardStore {
 /// crash never leaves half an entry. Failures are ignored.
 fn write(path: &Path, value: &impl Serialize) {
     let Some(folder) = path.parent() else { return };
-    let Ok(json) = serde_json::to_vec(value) else { return };
+    let Ok(json) = serde_json::to_vec(value) else {
+        return;
+    };
     let temporary = path.with_extension("tmp");
     let written = fs::create_dir_all(folder).and_then(|()| fs::write(&temporary, json));
     if written.and_then(|()| fs::rename(&temporary, path)).is_err() {

@@ -26,7 +26,11 @@ pub fn real_path(path: &Path) -> PathBuf {
     let real = fs::canonicalize(path).unwrap();
     #[cfg(windows)]
     {
-        if let Some(plain) = real.to_str().and_then(|s| s.strip_prefix(r"\\?\")).filter(|s| !s.starts_with(r"UNC\")) {
+        if let Some(plain) = real
+            .to_str()
+            .and_then(|s| s.strip_prefix(r"\\?\"))
+            .filter(|s| !s.starts_with(r"UNC\"))
+        {
             return PathBuf::from(plain);
         }
     }

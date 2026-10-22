@@ -8,12 +8,19 @@ use objc2_foundation::{NSNumber, NSString, NSURLIsPackageKey, NSURL};
 use super::{is_within, same_path};
 
 const SYSTEM_FOLDERS: &[&str] = &[
-    "/System", "/Library", "/Applications", "/usr", "/bin", "/sbin", "/private",
+    "/System",
+    "/Library",
+    "/Applications",
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/private",
 ];
 
 /// True if `path` is a Disk Root: `/`, `/Volumes` or `/Volumes/<disk>`.
 pub fn is_disk_root(path: &Path) -> bool {
-    path == Path::new("/") || (is_within(path, Path::new("/Volumes")) && path.components().count() <= 3)
+    path == Path::new("/")
+        || (is_within(path, Path::new("/Volumes")) && path.components().count() <= 3)
 }
 
 /// Why `path`, and so everything inside it, is one of macOS's System

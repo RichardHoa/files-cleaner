@@ -19,7 +19,9 @@ pub fn different_disks(a: &Path, b: &Path) -> bool {
 #[cfg(unix)]
 fn disk(path: &Path) -> Option<u64> {
     use std::os::unix::fs::MetadataExt;
-    path.ancestors().find_map(|p| fs::metadata(p).ok()).map(|m| m.dev())
+    path.ancestors()
+        .find_map(|p| fs::metadata(p).ok())
+        .map(|m| m.dev())
 }
 
 /// The drive, such as `c:`, or the network share. Folders mounted into
@@ -30,7 +32,9 @@ fn disk(path: &Path) -> Option<String> {
     let existing = path.ancestors().find(|p| fs::metadata(p).is_ok())?;
     match fs::canonicalize(existing).ok()?.components().next()? {
         Component::Prefix(prefix) => Some(match prefix.kind() {
-            Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => format!("{}:", drive.to_ascii_lowercase() as char),
+            Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => {
+                format!("{}:", drive.to_ascii_lowercase() as char)
+            }
             _ => prefix.as_os_str().to_string_lossy().to_lowercase(),
         }),
         _ => None,

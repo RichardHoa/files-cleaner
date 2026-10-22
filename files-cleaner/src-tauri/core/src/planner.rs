@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::clash;
 use crate::config::{Config, Rule, RuleOperation, RuleTarget, TrashDestination};
-use crate::protection::{is_os_metadata_file, is_package, is_within, same_path, Protection, HOLDING_FOLDER_NAME};
+use crate::protection::{
+    is_os_metadata_file, is_package, is_within, same_path, Protection, HOLDING_FOLDER_NAME,
+};
 use crate::scanner::{ScanEntry, ScanResult};
 use crate::volume::different_disks;
 use crate::{duplicates, rules};
@@ -119,7 +121,13 @@ pub fn build_plan(scan: &ScanResult, config: &Config) -> Plan {
     let mut operations = Vec::new();
     for group in duplicates::find(&scan.entries) {
         for copy in group.copies {
-            operations.push(trash(root, copy, Reason::Duplicate { keeper: group.keeper.relative_path.clone() }));
+            operations.push(trash(
+                root,
+                copy,
+                Reason::Duplicate {
+                    keeper: group.keeper.relative_path.clone(),
+                },
+            ));
         }
     }
     finish(root, config, operations, Vec::new())
@@ -138,8 +146,12 @@ pub fn build_rule_plan(scan: &ScanResult, config: &Config) -> Plan {
     let mut operations = Vec::new();
     let mut folders = Folders::default();
     for entry in &scan.entries {
-        let Some(rule) = rules::first_match(&config.rules, entry) else { continue };
-        let reason = Reason::Rule { rule: rule.name.clone() };
+        let Some(rule) = rules::first_match(&config.rules, entry) else {
+            continue;
+        };
+        let reason = Reason::Rule {
+            rule: rule.name.clone(),
+        };
         match &rule.operation {
             RuleOperation::Trash => operations.push(trash(root, entry, reason)),
             RuleOperation::MoveTo { folder, rename } => {
@@ -153,7 +165,11 @@ pub fn build_rule_plan(scan: &ScanResult, config: &Config) -> Plan {
                         folder
                     }
                 };
-                if entry.path.parent().is_some_and(|parent| same_path(parent, &folder)) {
+                if entry
+                    .path
+                    .parent()
+                    .is_some_and(|parent| same_path(parent, &folder))
+                {
                     continue;
                 }
                 let name = match rename {
@@ -181,7 +197,9 @@ pub(crate) fn finish(
 
     // Sorted by path, each folder comes before the folders inside it.
     created.sort_by(|a, b| a.0.cmp(&b.0));
-    let created = created.into_iter().map(|(folder, reason)| create_folder_operation(root, folder, reason));
+    let created = created
+        .into_iter()
+        .map(|(folder, reason)| create_folder_operation(root, folder, reason));
     let mut operations: Vec<Operation> = created.chain(operations).collect();
     for op in &mut operations {
         op.error = across_disks(op);
@@ -195,20 +213,35 @@ pub(crate) fn finish(
     for op in &mut operations {
         op.ticked &= op.error.is_none();
     }
-    Plan { root: root.to_path_buf(), trash_destination: config.trash_destination, operations }
+    Plan {
+        root: root.to_path_buf(),
+        trash_destination: config.trash_destination,
+        operations,
+    }
 }
 
 /// Why `op` can't happen, if its item would move to another disk.
 fn across_disks(op: &Operation) -> Option<String> {
-    if op.kind == OperationKind::CreateFolder || !different_disks(&op.source, &op.destination_path) {
+    if op.kind == OperationKind::CreateFolder || !different_disks(&op.source, &op.destination_path)
+    {
         return None;
     }
-    let name = op.relative_path.last().map_or_else(|| op.source.display().to_string(), Clone::clone);
+    let name = op
+        .relative_path
+        .last()
+        .map_or_else(|| op.source.display().to_string(), Clone::clone);
     let to = match op.kind {
         OperationKind::Trash => format!("the {HOLDING_FOLDER_NAME} folder"),
-        _ => op.destination_path.parent().unwrap_or(&op.destination_path).display().to_string(),
+        _ => op
+            .destination_path
+            .parent()
+            .unwrap_or(&op.destination_path)
+            .display()
+            .to_string(),
     };
-    Some(format!("{name} is on a different disk from {to}, and the app only moves items within one disk"))
+    Some(format!(
+        "{name} is on a different disk from {to}, and the app only moves items within one disk"
+    ))
 }
 
 /// The folders inside `root` that `operations` would leave empty, apart
@@ -232,7 +265,12 @@ fn emptied_folders(root: &Path, operations: &[Operation]) -> Vec<PathBuf> {
     // Sorted by path, each folder comes before the folders inside it.
     let candidates: BTreeSet<&Path> = leaving
         .iter()
-        .flat_map(|source| source.ancestors().skip(1).take_while(|folder| folder.starts_with(root) && *folder != root))
+        .flat_map(|source| {
+            source
+                .ancestors()
+                .skip(1)
+                .take_while(|folder| folder.starts_with(root) && *folder != root)
+        })
         .collect();
     let mut emptied: Vec<PathBuf> = Vec::new();
     let mut known = HashMap::new();
@@ -249,7 +287,12 @@ fn emptied_folders(root: &Path, operations: &[Operation]) -> Vec<PathBuf> {
 
 /// True if everything in `folder` is `leaving`, an OS Metadata File, or a
 /// folder that `empties` too, and nothing in `arriving` goes into it.
-fn empties(folder: &Path, leaving: &HashSet<&Path>, arriving: &[&Path], known: &mut HashMap<PathBuf, bool>) -> bool {
+fn empties(
+    folder: &Path,
+    leaving: &HashSet<&Path>,
+    arriving: &[&Path],
+    known: &mut HashMap<PathBuf, bool>,
+) -> bool {
     if let Some(&answer) = known.get(folder) {
         return answer;
     }
@@ -262,7 +305,9 @@ fn empties(folder: &Path, leaving: &HashSet<&Path>, arriving: &[&Path], known: &
                     return true;
                 }
                 match child.file_type() {
-                    Ok(kind) if kind.is_file() => is_os_metadata_file(&child.file_name().to_string_lossy()),
+                    Ok(kind) if kind.is_file() => {
+                        is_os_metadata_file(&child.file_name().to_string_lossy())
+                    }
                     Ok(kind) if kind.is_dir() => empties(&path, leaving, arriving, known),
                     _ => false,
                 }
@@ -287,11 +332,19 @@ impl Folders {
         if !self.taken.contains_key(folder) {
             for missing in folder.ancestors().take_while(|f| !f.exists()) {
                 if !self.created.iter().any(|(f, _)| f == missing) {
-                    self.created.push((missing.to_path_buf(), Reason::Rule { rule: rule.name.clone() }));
+                    self.created.push((
+                        missing.to_path_buf(),
+                        Reason::Rule {
+                            rule: rule.name.clone(),
+                        },
+                    ));
                 }
             }
         }
-        let taken = self.taken.entry(folder.to_path_buf()).or_insert_with(|| clash::names_in(folder));
+        let taken = self
+            .taken
+            .entry(folder.to_path_buf())
+            .or_insert_with(|| clash::names_in(folder));
         let name = clash::free_name(name, taken);
         taken.insert(name.to_lowercase());
         name
@@ -338,7 +391,12 @@ fn trash_emptied_folder(root: &Path, folder: &Path) -> Operation {
         destination_path: root.join(destination.iter().collect::<PathBuf>()),
         relative_path,
         destination,
-        planned: SourceState { size: 0, modified: 0, is_package: false, is_folder: true },
+        planned: SourceState {
+            size: 0,
+            modified: 0,
+            is_package: false,
+            is_folder: true,
+        },
         reason: Reason::EmptiedFolder,
         ticked: false,
         error: None,
@@ -348,10 +406,19 @@ fn trash_emptied_folder(root: &Path, folder: &Path) -> Operation {
 /// The names from the Scan Root down to where Trash puts the item at
 /// `relative_path`.
 fn in_holding_folder(relative_path: &[String]) -> Vec<String> {
-    [HOLDING_FOLDER_NAME, THIS_SESSION_FOLDER].into_iter().map(String::from).chain(relative_path.iter().cloned()).collect()
+    [HOLDING_FOLDER_NAME, THIS_SESSION_FOLDER]
+        .into_iter()
+        .map(String::from)
+        .chain(relative_path.iter().cloned())
+        .collect()
 }
 
-pub(crate) fn move_to(root: &Path, entry: &ScanEntry, destination: PathBuf, reason: Reason) -> Operation {
+pub(crate) fn move_to(
+    root: &Path,
+    entry: &ScanEntry,
+    destination: PathBuf,
+    reason: Reason,
+) -> Operation {
     Operation {
         id: format!("move:{}", entry.relative_path.join("/")),
         kind: OperationKind::Move,
@@ -375,7 +442,12 @@ fn create_folder_operation(root: &Path, folder: PathBuf, reason: Reason) -> Oper
         relative_path: names.clone(),
         destination: names,
         destination_path: folder,
-        planned: SourceState { size: 0, modified: 0, is_package: false, is_folder: false },
+        planned: SourceState {
+            size: 0,
+            modified: 0,
+            is_package: false,
+            is_folder: false,
+        },
         reason,
         ticked: true,
         error: None,
@@ -383,7 +455,12 @@ fn create_folder_operation(root: &Path, folder: PathBuf, reason: Reason) -> Oper
 }
 
 fn planned(entry: &ScanEntry) -> SourceState {
-    SourceState { size: entry.size, modified: entry.modified, is_package: entry.is_package, is_folder: false }
+    SourceState {
+        size: entry.size,
+        modified: entry.modified,
+        is_package: entry.is_package,
+        is_folder: false,
+    }
 }
 
 /// The names from `root` down to `path`, its own name last. A path outside

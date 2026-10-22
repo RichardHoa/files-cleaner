@@ -82,11 +82,14 @@ pub fn build_suggested_folders_plan(
     folders: &[SuggestedFolderChoice],
 ) -> Result<Plan, SuggestedFolderError> {
     let root = &scan.root;
-    let entries: HashMap<&Path, &ScanEntry> = scan.entries.iter().map(|e| (e.path.as_path(), e)).collect();
+    let entries: HashMap<&Path, &ScanEntry> =
+        scan.entries.iter().map(|e| (e.path.as_path(), e)).collect();
     // The names taken in each destination folder, lowercased.
     let mut taken: HashMap<PathBuf, HashSet<String>> = HashMap::new();
     let mut claim = |folder: &Path, name: &str, free: fn(&str, &HashSet<String>) -> String| {
-        let names = taken.entry(folder.to_path_buf()).or_insert_with(|| clash::names_in(folder));
+        let names = taken
+            .entry(folder.to_path_buf())
+            .or_insert_with(|| clash::names_in(folder));
         let name = free(name, names);
         names.insert(name.to_lowercase());
         name
@@ -98,7 +101,9 @@ pub fn build_suggested_folders_plan(
             continue;
         }
         let name =
-            safe_folder_name(&folder.name).ok_or_else(|| SuggestedFolderError::EmptyName { name: folder.name.clone() })?;
+            safe_folder_name(&folder.name).ok_or_else(|| SuggestedFolderError::EmptyName {
+                name: folder.name.clone(),
+            })?;
         let destination = match &folder.choice {
             FolderChoice::Skip | FolderChoice::TrashAll => None,
             FolderChoice::AddTo { folder } => Some(folder.clone()),
@@ -112,15 +117,29 @@ pub fn build_suggested_folders_plan(
                 Some(new)
             }
         };
-        let reason = destination.as_deref().map_or_else(|| Reason::SuggestedFolder { folder: name.clone() }, |d| suggested(d, &name));
+        let reason = destination.as_deref().map_or_else(
+            || Reason::SuggestedFolder {
+                folder: name.clone(),
+            },
+            |d| suggested(d, &name),
+        );
         for (path, choice) in &folder.files {
-            let Some(entry) = entries.get(path.as_path()) else { continue };
+            let Some(entry) = entries.get(path.as_path()) else {
+                continue;
+            };
             match (choice, &destination) {
                 (FileChoice::TakeOut, _) => {}
-                (FileChoice::Trash, _) | (FileChoice::InFolder, None) => operations.push(trash(root, entry, reason.clone())),
+                (FileChoice::Trash, _) | (FileChoice::InFolder, None) => {
+                    operations.push(trash(root, entry, reason.clone()))
+                }
                 (FileChoice::InFolder, Some(destination)) => {
                     let file_name = claim(destination, &entry.name, clash::free_name);
-                    operations.push(move_to(root, entry, destination.join(file_name), reason.clone()));
+                    operations.push(move_to(
+                        root,
+                        entry,
+                        destination.join(file_name),
+                        reason.clone(),
+                    ));
                 }
             }
         }
@@ -131,6 +150,8 @@ pub fn build_suggested_folders_plan(
 /// The Reason for a Suggested Folder whose files go to `destination`: named
 /// as that folder is on disk, or `name` if it has no name of its own.
 fn suggested(destination: &Path, name: &str) -> Reason {
-    let folder = destination.file_name().map_or_else(|| name.to_string(), |n| n.to_string_lossy().into_owned());
+    let folder = destination
+        .file_name()
+        .map_or_else(|| name.to_string(), |n| n.to_string_lossy().into_owned());
     Reason::SuggestedFolder { folder }
 }

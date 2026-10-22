@@ -103,7 +103,11 @@ enum Stopped {
 
 impl GroupingModels {
     pub fn new(app: AppHandle, folder: PathBuf) -> Self {
-        GroupingModels { folder, app, inner: Mutex::new(Inner::default()) }
+        GroupingModels {
+            folder,
+            app,
+            inner: Mutex::new(Inner::default()),
+        }
     }
 
     /// True once both models are downloaded and checked.
@@ -114,7 +118,8 @@ impl GroupingModels {
     /// The two model files, the card writer's then the embedding model's,
     /// once both are installed.
     pub fn files(&self) -> Option<(PathBuf, PathBuf)> {
-        self.installed().then(|| (self.file(&MODELS[0]), self.file(&MODELS[1])))
+        self.installed()
+            .then(|| (self.file(&MODELS[0]), self.file(&MODELS[1])))
     }
 
     pub fn status(&self) -> Status {
@@ -125,16 +130,32 @@ impl GroupingModels {
     fn status_of(&self, inner: &Inner) -> Status {
         let total = MODELS.iter().map(|model| model.size).sum();
         let downloaded = MODELS.iter().map(|model| self.on_disk(model)).sum();
-        let state = match inner.running.as_ref().map(|asked| asked.load(Ordering::SeqCst)) {
+        let state = match inner
+            .running
+            .as_ref()
+            .map(|asked| asked.load(Ordering::SeqCst))
+        {
             Some(RUN) => State::Downloading,
             Some(PAUSE) => State::Paused,
             // Its files go once its thread sees the cancel.
-            Some(_) => return Status { state: State::NotInstalled, downloaded: 0, total, error: None },
+            Some(_) => {
+                return Status {
+                    state: State::NotInstalled,
+                    downloaded: 0,
+                    total,
+                    error: None,
+                }
+            }
             None if self.installed() => State::Installed,
             None if downloaded > 0 => State::Paused,
             None => State::NotInstalled,
         };
-        Status { state, downloaded, total, error: inner.error.clone() }
+        Status {
+            state,
+            downloaded,
+            total,
+            error: inner.error.clone(),
+        }
     }
 
     /// Starts the download, or resumes it from where it stopped, after
@@ -146,7 +167,10 @@ impl GroupingModels {
             asked.store(RUN, Ordering::SeqCst);
         } else if !self.installed() {
             fs::create_dir_all(&self.folder).map_err(|e| e.to_string())?;
-            let left: u64 = MODELS.iter().map(|model| model.size - self.on_disk(model)).sum();
+            let left: u64 = MODELS
+                .iter()
+                .map(|model| model.size - self.on_disk(model))
+                .sum();
             let needed = left + left / 10;
             let free = fs4::available_space(&self.folder).map_err(|e| e.to_string())?;
             if free < needed {
@@ -211,7 +235,9 @@ impl GroupingModels {
             }
         };
         let status = loop {
-            let result = MODELS.iter().try_for_each(|model| self.fetch(model, asked, &mut progress));
+            let result = MODELS
+                .iter()
+                .try_for_each(|model| self.fetch(model, asked, &mut progress));
             // Under the lock, so a resume can't slip in between deciding to stop and stopping.
             let mut inner = self.inner.lock().unwrap();
             match (asked.load(Ordering::SeqCst), result) {
@@ -233,8 +259,15 @@ impl GroupingModels {
 
     /// Downloads `model` into its partial file, from where that stopped,
     /// then moves it into place if its SHA-256 matches.
-    fn fetch(&self, model: &Model, asked: &AtomicU8, progress: &mut impl FnMut()) -> Result<(), Stopped> {
-        let failed = |e: &dyn std::fmt::Display| Stopped::Failed(format!("Downloading the {} failed: {e}", model.name));
+    fn fetch(
+        &self,
+        model: &Model,
+        asked: &AtomicU8,
+        progress: &mut impl FnMut(),
+    ) -> Result<(), Stopped> {
+        let failed = |e: &dyn std::fmt::Display| {
+            Stopped::Failed(format!("Downloading the {} failed: {e}", model.name))
+        };
         let file = self.file(model);
         if file.is_file() {
             return Ok(());
@@ -259,7 +292,10 @@ impl GroupingModels {
                 .map_err(|e| failed(&e))?;
             let resumed = match response.status().as_u16() {
                 206 => {
-                    let range = response.headers().get("content-range").and_then(|v| v.to_str().ok());
+                    let range = response
+                        .headers()
+                        .get("content-range")
+                        .and_then(|v| v.to_str().ok());
                     if !range.is_some_and(|range| range.starts_with(&format!("bytes {offset}-"))) {
                         return Err(failed(&"the server sent the wrong part of the file"));
                     }
@@ -291,10 +327,17 @@ impl GroupingModels {
             }
             out.sync_all().map_err(|e| failed(&e))?;
         }
-        if sha256(&partial, asked).map_err(|e| failed(&e))?.ok_or(Stopped::Asked)? != model.sha256 {
+        if sha256(&partial, asked)
+            .map_err(|e| failed(&e))?
+            .ok_or(Stopped::Asked)?
+            != model.sha256
+        {
             // A wrong file is never resumed: the next try starts again.
             let _ = fs::remove_file(&partial);
-            return Err(Stopped::Failed(format!("The {} downloaded damaged. Try again.", model.name)));
+            return Err(Stopped::Failed(format!(
+                "The {} downloaded damaged. Try again.",
+                model.name
+            )));
         }
         fs::rename(&partial, &file).map_err(|e| failed(&e))
     }
@@ -304,7 +347,9 @@ impl GroupingModels {
         if self.file(model).is_file() {
             return model.size;
         }
-        fs::metadata(self.partial(model)).map(|m| m.len().min(model.size)).unwrap_or(0)
+        fs::metadata(self.partial(model))
+            .map(|m| m.len().min(model.size))
+            .unwrap_or(0)
     }
 
     fn file(&self, model: &Model) -> PathBuf {
@@ -316,7 +361,10 @@ impl GroupingModels {
     }
 
     fn delete_files(&self) -> io::Result<()> {
-        for path in MODELS.iter().flat_map(|model| [self.file(model), self.partial(model)]) {
+        for path in MODELS
+            .iter()
+            .flat_map(|model| [self.file(model), self.partial(model)])
+        {
             match fs::remove_file(&path) {
                 Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
                 _ => {}
@@ -347,7 +395,13 @@ fn sha256(path: &Path, asked: &AtomicU8) -> io::Result<Option<String>> {
         }
         hasher.update(&buffer[..read]);
     }
-    Ok(Some(hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect()))
+    Ok(Some(
+        hasher
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+    ))
 }
 
 /// `bytes` as "1.8 GB", in the decimal units macOS and Windows show for disk space.

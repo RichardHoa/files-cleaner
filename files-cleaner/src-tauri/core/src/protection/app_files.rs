@@ -6,8 +6,21 @@ use std::path::Path;
 
 /// Files that file managers keep inside ordinary folders: Finder's on
 /// macOS, Explorer's on Windows, and KDE Dolphin's on Linux.
-pub const OS_METADATA_FILES: &[&str] = &[".DS_Store", "Icon\r", ".localized", "Thumbs.db", "desktop.ini", ".directory"];
-const APP_LIBRARY_EXTENSIONS: &[&str] = &["photoslibrary", "musiclibrary", "tvlibrary", "lrcat", "lrdata"];
+pub const OS_METADATA_FILES: &[&str] = &[
+    ".DS_Store",
+    "Icon\r",
+    ".localized",
+    "Thumbs.db",
+    "desktop.ini",
+    ".directory",
+];
+const APP_LIBRARY_EXTENSIONS: &[&str] = &[
+    "photoslibrary",
+    "musiclibrary",
+    "tvlibrary",
+    "lrcat",
+    "lrdata",
+];
 
 /// Why `path` is an OS Metadata File or an app library, if it is.
 pub fn reason(path: &Path) -> Option<String> {
@@ -34,5 +47,7 @@ pub fn reason(path: &Path) -> Option<String> {
 
 /// True if a file called `name` is an OS Metadata File.
 pub fn is_os_metadata_file(name: &str) -> bool {
-    OS_METADATA_FILES.iter().any(|m| name.eq_ignore_ascii_case(m))
+    OS_METADATA_FILES
+        .iter()
+        .any(|m| name.eq_ignore_ascii_case(m))
 }

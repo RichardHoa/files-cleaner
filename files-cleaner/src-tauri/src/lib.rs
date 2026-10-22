@@ -1,17 +1,17 @@
 //! Thin Tauri commands over the core library (ADR-0003): they find the
 //! config file and home folder, call the core, and serialise the result.
 
+use std::convert::Infallible;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::convert::Infallible;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 mod models;
 
 use files_cleaner_core::{
-    self as core, Config, Plan, RecentScanRoot, RunProgress, ScanProgress, ScanResult, SessionDetails, SessionPage,
-    SuggestedFolderChoice, Summary, EXAMPLE_CONFIG,
+    self as core, Config, Plan, RecentScanRoot, RunProgress, ScanProgress, ScanResult,
+    SessionDetails, SessionPage, SuggestedFolderChoice, Summary, EXAMPLE_CONFIG,
 };
 use files_cleaner_grouping::{self as grouping, Analysis, CardStore, Grouping, LlamaModels};
 use serde::Serialize;
@@ -71,17 +71,27 @@ struct CommandError {
 
 impl CommandError {
     fn new(message: impl ToString) -> Self {
-        CommandError { message: message.to_string(), config_path: None, line: None, column: None }
+        CommandError {
+            message: message.to_string(),
+            config_path: None,
+            line: None,
+            column: None,
+        }
     }
 }
 
 /// Runs `work` off the UI thread.
-async fn blocking<T, E>(work: impl FnOnce() -> Result<T, E> + Send + 'static) -> Result<T, CommandError>
+async fn blocking<T, E>(
+    work: impl FnOnce() -> Result<T, E> + Send + 'static,
+) -> Result<T, CommandError>
 where
     T: Send + 'static,
     E: ToString + Send + 'static,
 {
-    tauri::async_runtime::spawn_blocking(work).await.map_err(CommandError::new)?.map_err(CommandError::new)
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(CommandError::new)?
+        .map_err(CommandError::new)
 }
 
 #[derive(Serialize)]
@@ -93,7 +103,11 @@ struct LoadedConfig {
 
 /// `name` inside the app data folder.
 fn app_data_path(app: &AppHandle, name: &str) -> Result<PathBuf, CommandError> {
-    Ok(app.path().app_data_dir().map_err(CommandError::new)?.join(name))
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(CommandError::new)?
+        .join(name))
 }
 
 fn config_path(app: &AppHandle) -> Result<PathBuf, CommandError> {
@@ -161,8 +175,9 @@ async fn scan(
 ) -> Result<ScanResult, CommandError> {
     let loaded = read_config(&app)?;
     // A list that can't be saved only loses the shortcut; the scan goes on.
-    let recorded = recent_store(&app)
-        .and_then(|store| core::record_recent_scan_root(&store, &scan_root).map_err(CommandError::new));
+    let recorded = recent_store(&app).and_then(|store| {
+        core::record_recent_scan_root(&store, &scan_root).map_err(CommandError::new)
+    });
     if let Err(e) = recorded {
         eprintln!("Couldn't save the Recent Scan Roots: {}", e.message);
     }
@@ -173,7 +188,10 @@ async fn scan(
         })
     })
     .await?;
-    *latest.0.lock().unwrap() = Some(Scanned { scan: Arc::new(result.clone()), plan: None });
+    *latest.0.lock().unwrap() = Some(Scanned {
+        scan: Arc::new(result.clone()),
+        plan: None,
+    });
     Ok(result)
 }
 
@@ -185,9 +203,16 @@ async fn build_plan(app: AppHandle, latest: State<'_, Latest>) -> Result<Plan, C
     let loaded = read_config(&app)?;
     let scan = latest_scan(&latest)?;
     let planned = Arc::clone(&scan);
-    let plan = blocking(move || Ok::<_, Infallible>(core::build_plan(&planned, &loaded.config))).await?;
+    let plan =
+        blocking(move || Ok::<_, Infallible>(core::build_plan(&planned, &loaded.config))).await?;
     // Kept only if no newer scan came in while planning.
-    if let Some(scanned) = latest.0.lock().unwrap().as_mut().filter(|s| Arc::ptr_eq(&s.scan, &scan)) {
+    if let Some(scanned) = latest
+        .0
+        .lock()
+        .unwrap()
+        .as_mut()
+        .filter(|s| Arc::ptr_eq(&s.scan, &scan))
+    {
         scanned.plan = Some(plan.clone());
     }
     Ok(plan)
@@ -210,7 +235,12 @@ async fn run_plan(
     on_progress: Channel<RunProgress>,
 ) -> Result<Summary, CommandError> {
     let journal_dir = journal_dir(&app)?;
-    let plan = latest.0.lock().unwrap().as_ref().and_then(|s| s.plan.clone());
+    let plan = latest
+        .0
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|s| s.plan.clone());
     let plan = plan.ok_or_else(|| CommandError::new("Build a Plan first"))?;
     blocking(move || {
         // A closed window can't receive progress; the Run carries on.
@@ -224,7 +254,11 @@ async fn run_plan(
 /// Undoes the chosen Operations of a past Session, or all of them if none
 /// are chosen.
 #[tauri::command]
-async fn undo(app: AppHandle, session_id: String, operation_ids: Option<Vec<String>>) -> Result<Summary, CommandError> {
+async fn undo(
+    app: AppHandle,
+    session_id: String,
+    operation_ids: Option<Vec<String>>,
+) -> Result<Summary, CommandError> {
     let journal_dir = journal_dir(&app)?;
     blocking(move || match operation_ids {
         Some(ids) => core::undo_operations(&session_id, &ids, &journal_dir),
@@ -275,7 +309,12 @@ fn remove_recent_scan_root(app: AppHandle, scan_root: PathBuf) -> Result<(), Com
 
 /// The latest scan, or an error asking for one.
 fn latest_scan(latest: &Latest) -> Result<Arc<ScanResult>, CommandError> {
-    let scan = latest.0.lock().unwrap().as_ref().map(|s| Arc::clone(&s.scan));
+    let scan = latest
+        .0
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|s| Arc::clone(&s.scan));
     scan.ok_or_else(|| CommandError::new("Scan a folder first"))
 }
 
@@ -312,22 +351,31 @@ async fn analyse_loose_files(
     let cancel = Arc::new(AtomicBool::new(false));
     *analysing.cancel.lock().unwrap() = Arc::clone(&cancel);
     let scan = latest_scan(&latest)?;
-    let (llm, embedding) = models.files().ok_or_else(|| CommandError::new("Download the grouping models first"))?;
+    let (llm, embedding) = models
+        .files()
+        .ok_or_else(|| CommandError::new("Download the grouping models first"))?;
     let store = CardStore::open(app_data_path(&app, CARDS_FOLDER_NAME)?);
     let pdfium = pdfium_library(&app);
     let analysed = Arc::clone(&scan);
     let analysis = blocking(move || {
         // Dropped when the analysis ends, freeing the models' memory.
         let mut models = LlamaModels::new(&llm, &embedding);
-        let input =
-            grouping::Input { scan: &analysed, settings, store: &store, pdfium: pdfium.as_deref() };
+        let input = grouping::Input {
+            scan: &analysed,
+            settings,
+            store: &store,
+            pdfium: pdfium.as_deref(),
+        };
         // A closed window can't receive progress; the analysis carries on.
         grouping::analyse(&input, &mut models, &cancel, |progress| {
             let _ = on_progress.send(progress);
         })
     })
     .await?;
-    let result = AnalysisResult { grouping: analysis.grouping.clone(), device: analysis.device.clone() };
+    let result = AnalysisResult {
+        grouping: analysis.grouping.clone(),
+        device: analysis.device.clone(),
+    };
     *analysing.latest.lock().unwrap() = Some((scan, analysis));
     Ok(result)
 }
@@ -335,7 +383,11 @@ async fn analyse_loose_files(
 /// Stops the running analysis between files; the cards made so far are kept.
 #[tauri::command]
 fn cancel_analysis(analysing: State<'_, Analysing>) {
-    analysing.cancel.lock().unwrap().store(true, Ordering::Relaxed);
+    analysing
+        .cancel
+        .lock()
+        .unwrap()
+        .store(true, Ordering::Relaxed);
 }
 
 /// Forgets the cards the Grouping Models wrote, and the traces of earlier
@@ -343,7 +395,9 @@ fn cancel_analysis(analysing: State<'_, Analysing>) {
 #[tauri::command]
 fn clear_grouping_cards(app: AppHandle) -> Result<(), CommandError> {
     grouping::clear_trace();
-    CardStore::open(app_data_path(&app, CARDS_FOLDER_NAME)?).clear().map_err(CommandError::new)
+    CardStore::open(app_data_path(&app, CARDS_FOLDER_NAME)?)
+        .clear()
+        .map_err(CommandError::new)
 }
 
 /// The latest scan's analysis grouped again by `settings`, with no model run.
@@ -374,9 +428,17 @@ async fn build_suggested_folders_plan(
     let scan = latest_scan(&latest)?;
     let planned = Arc::clone(&scan);
     // Finding names already taken reads the destination folders.
-    let plan = blocking(move || core::build_suggested_folders_plan(&planned, &loaded.config, &folders)).await?;
+    let plan =
+        blocking(move || core::build_suggested_folders_plan(&planned, &loaded.config, &folders))
+            .await?;
     // Kept only if no newer scan came in while planning.
-    if let Some(scanned) = latest.0.lock().unwrap().as_mut().filter(|s| Arc::ptr_eq(&s.scan, &scan)) {
+    if let Some(scanned) = latest
+        .0
+        .lock()
+        .unwrap()
+        .as_mut()
+        .filter(|s| Arc::ptr_eq(&s.scan, &scan))
+    {
         scanned.plan = Some(plan.clone());
     }
     Ok(plan)
@@ -392,7 +454,9 @@ fn grouping_models_status(models: State<'_, Arc<GroupingModels>>) -> models::Sta
 /// Starts or resumes downloading the Grouping Models in the background,
 /// unless the disk is too full for them.
 #[tauri::command]
-fn download_grouping_models(models: State<'_, Arc<GroupingModels>>) -> Result<models::Status, CommandError> {
+fn download_grouping_models(
+    models: State<'_, Arc<GroupingModels>>,
+) -> Result<models::Status, CommandError> {
     models.download().map_err(CommandError::new)
 }
 
@@ -404,14 +468,19 @@ fn pause_grouping_models(models: State<'_, Arc<GroupingModels>>) -> models::Stat
 
 /// Cancels the download, or removes the installed Grouping Models.
 #[tauri::command]
-fn remove_grouping_models(models: State<'_, Arc<GroupingModels>>) -> Result<models::Status, CommandError> {
+fn remove_grouping_models(
+    models: State<'_, Arc<GroupingModels>>,
+) -> Result<models::Status, CommandError> {
     models.remove().map_err(CommandError::new)
 }
 
 /// Whether to offer the Grouping Models before Home: only until the offer
 /// is answered, and never once they're installed.
 #[tauri::command]
-fn grouping_models_offer_pending(app: AppHandle, models: State<'_, Arc<GroupingModels>>) -> Result<bool, CommandError> {
+fn grouping_models_offer_pending(
+    app: AppHandle,
+    models: State<'_, Arc<GroupingModels>>,
+) -> Result<bool, CommandError> {
     Ok(!models.installed() && !app_data_path(&app, MODELS_OFFER_FILE_NAME)?.exists())
 }
 
@@ -423,7 +492,8 @@ fn answer_grouping_models_offer(app: AppHandle, answer: String) -> Result<(), Co
     if let Some(folder) = path.parent() {
         fs::create_dir_all(folder).map_err(CommandError::new)?;
     }
-    let text = serde_json::to_string(&serde_json::json!({ "answer": answer })).map_err(CommandError::new)?;
+    let text = serde_json::to_string(&serde_json::json!({ "answer": answer }))
+        .map_err(CommandError::new)?;
     fs::write(path, text).map_err(CommandError::new)
 }
 

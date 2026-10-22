@@ -24,8 +24,13 @@ pub fn is_disk_root(path: &Path) -> bool {
     // Case-insensitive, like every Protected Path check.
     let path = PathBuf::from(path.to_string_lossy().to_lowercase());
     MOUNT_FOLDERS.iter().any(|(folder, depth)| {
-        let Ok(below) = path.strip_prefix(folder) else { return false };
-        below.components().all(|c| matches!(c, Component::Normal(_))) && below.components().count() <= *depth
+        let Ok(below) = path.strip_prefix(folder) else {
+            return false;
+        };
+        below
+            .components()
+            .all(|c| matches!(c, Component::Normal(_)))
+            && below.components().count() <= *depth
     })
 }
 

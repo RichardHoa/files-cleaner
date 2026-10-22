@@ -29,7 +29,8 @@ fn main() -> ExitCode {
     for run in 1..=runs {
         let mut folders = 0;
         let start = Instant::now();
-        let result = match scan_with_progress(&root, &config, |progress| folders = progress.folders) {
+        let result = match scan_with_progress(&root, &config, |progress| folders = progress.folders)
+        {
             Ok(result) => result,
             Err(e) => {
                 eprintln!("{e}");

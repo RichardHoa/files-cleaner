@@ -77,7 +77,12 @@ pub enum Record {
     /// How the last intent for the Operation ended. An intent with no
     /// outcome after it was cut short by a crash.
     #[serde(rename_all = "camelCase")]
-    Outcome { operation_id: String, phase: Phase, outcome: OutcomeKind, reason: Option<String> },
+    Outcome {
+        operation_id: String,
+        phase: Phase,
+        outcome: OutcomeKind,
+        reason: Option<String>,
+    },
     /// The Run has recorded its last Operation.
     Finished,
 }
@@ -88,16 +93,23 @@ pub enum SessionError {
     Busy,
     UnknownSession(String),
     /// A Journal that can't be understood.
-    BadJournal { path: PathBuf, problem: String },
+    BadJournal {
+        path: PathBuf,
+        problem: String,
+    },
     Io(io::Error),
 }
 
 impl fmt::Display for SessionError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            SessionError::Busy => f.write_str("Another Session or Undo is in progress; try again once it has finished"),
+            SessionError::Busy => f.write_str(
+                "Another Session or Undo is in progress; try again once it has finished",
+            ),
             SessionError::UnknownSession(id) => write!(f, "There is no Session {id}"),
-            SessionError::BadJournal { path, problem } => write!(f, "The Journal {} is damaged: {problem}", path.display()),
+            SessionError::BadJournal { path, problem } => {
+                write!(f, "The Journal {} is damaged: {problem}", path.display())
+            }
             SessionError::Io(e) => write!(f, "Couldn't write the Journal: {e}"),
         }
     }
@@ -121,7 +133,11 @@ pub struct SessionLock {
 /// time, or fails with `SessionError::Busy`. Also works across processes.
 pub fn lock_sessions(journal_dir: &Path) -> Result<SessionLock, SessionError> {
     fs::create_dir_all(journal_dir)?;
-    let file = OpenOptions::new().create(true).truncate(false).write(true).open(journal_dir.join(LOCK_FILE_NAME))?;
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(journal_dir.join(LOCK_FILE_NAME))?;
     match file.try_lock() {
         Ok(()) => Ok(SessionLock { _file: file }),
         Err(TryLockError::WouldBlock) => Err(SessionError::Busy),
@@ -144,13 +160,22 @@ impl Journal {
     ) -> io::Result<(SessionHeader, Journal)> {
         let now = SystemTime::now();
         for id in session_id::candidates(now) {
-            let file = match OpenOptions::new().create_new(true).append(true).open(path(journal_dir, &id)) {
+            let file = match OpenOptions::new()
+                .create_new(true)
+                .append(true)
+                .open(path(journal_dir, &id))
+            {
                 Ok(file) => file,
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
                 Err(e) => return Err(e),
             };
             sync_folder(journal_dir)?;
-            let header = SessionHeader { id, scan_root, trash_destination, started_at: millis(now) };
+            let header = SessionHeader {
+                id,
+                scan_root,
+                trash_destination,
+                started_at: millis(now),
+            };
             let mut journal = Journal { file };
             journal.append_line(&header)?;
             return Ok((header, journal));
@@ -160,7 +185,9 @@ impl Journal {
 
     /// Reopens an existing Session's Journal to add to it.
     pub fn reopen(journal_dir: &Path, id: &str) -> io::Result<Journal> {
-        let file = OpenOptions::new().append(true).open(path(journal_dir, id))?;
+        let file = OpenOptions::new()
+            .append(true)
+            .open(path(journal_dir, id))?;
         Ok(Journal { file })
     }
 
@@ -186,15 +213,21 @@ pub fn read(journal_dir: &Path, id: &str) -> Result<(SessionHeader, Vec<Record>)
     let path = path(journal_dir, id);
     let text = match fs::read_to_string(&path) {
         Ok(text) => text,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Err(SessionError::UnknownSession(id.to_string())),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            return Err(SessionError::UnknownSession(id.to_string()))
+        }
         Err(e) => return Err(e.into()),
     };
-    let bad = |problem: String| SessionError::BadJournal { path: path.clone(), problem };
+    let bad = |problem: String| SessionError::BadJournal {
+        path: path.clone(),
+        problem,
+    };
     let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
     let Some((first, rest)) = lines.split_first() else {
         return Err(bad("it is empty".into()));
     };
-    let header = serde_json::from_str(first).map_err(|e| bad(format!("its first line isn't a Session header: {e}")))?;
+    let header = serde_json::from_str(first)
+        .map_err(|e| bad(format!("its first line isn't a Session header: {e}")))?;
     let mut records = Vec::with_capacity(rest.len());
     for (i, line) in rest.iter().enumerate() {
         match serde_json::from_str(line) {

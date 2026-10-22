@@ -8,8 +8,13 @@ use std::path::Path;
 /// The names in `folder`, lowercased; none if it can't be read (say, it
 /// doesn't exist yet).
 pub fn names_in(folder: &Path) -> HashSet<String> {
-    let Ok(children) = fs::read_dir(folder) else { return HashSet::new() };
-    children.flatten().map(|child| child.file_name().to_string_lossy().to_lowercase()).collect()
+    let Ok(children) = fs::read_dir(folder) else {
+        return HashSet::new();
+    };
+    children
+        .flatten()
+        .map(|child| child.file_name().to_string_lossy().to_lowercase())
+        .collect()
 }
 
 /// `name` if `taken` (lowercased names) doesn't hold it, or else the first

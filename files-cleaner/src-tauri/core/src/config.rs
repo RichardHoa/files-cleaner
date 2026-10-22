@@ -51,7 +51,10 @@ pub struct Rule {
 #[serde(rename_all = "camelCase")]
 pub enum RuleOperation {
     Trash,
-    MoveTo { folder: RuleTarget, rename: Option<String> },
+    MoveTo {
+        folder: RuleTarget,
+        rename: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -77,7 +80,9 @@ pub struct ConfigError {
 impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match (self.line, self.column) {
-            (Some(line), Some(column)) => write!(f, "line {line}, column {column}: {}", self.message),
+            (Some(line), Some(column)) => {
+                write!(f, "line {line}, column {column}: {}", self.message)
+            }
             _ => f.write_str(&self.message),
         }
     }
@@ -164,7 +169,9 @@ pub fn load_config(text: &str, home: &Path) -> Result<Config, ConfigError> {
     let mut cursor = text.find("\"rules\"").unwrap_or(0);
     for rule in raw.rules {
         let start = find(text, cursor, &rule.name).unwrap_or(cursor);
-        config.rules.push(validate_rule(rule, text, start, home, &protection)?);
+        config
+            .rules
+            .push(validate_rule(rule, text, start, home, &protection)?);
         cursor = start + 1;
     }
     Ok(config)
@@ -180,7 +187,14 @@ fn validate_rule(
     protection: &Protection,
 ) -> Result<Rule, ConfigError> {
     let name = raw.name;
-    let fail = |at: &str, problem: String| Err(error_at(text, start, at, format!("Rule \"{name}\": {problem}")));
+    let fail = |at: &str, problem: String| {
+        Err(error_at(
+            text,
+            start,
+            at,
+            format!("Rule \"{name}\": {problem}"),
+        ))
+    };
     if raw.matcher.extensions.is_empty() && raw.matcher.name_glob.is_none() {
         return fail(&name, "match needs extensions or nameGlob".into());
     }
@@ -214,7 +228,12 @@ fn validate_rule(
         .iter()
         .map(|e| e.trim_start_matches('.').to_lowercase())
         .collect();
-    Ok(Rule { name, extensions, name_glob: raw.matcher.name_glob, operation })
+    Ok(Rule {
+        name,
+        extensions,
+        name_glob: raw.matcher.name_glob,
+        operation,
+    })
 }
 
 /// What is wrong with a rename template, if anything: it must give a
@@ -224,13 +243,20 @@ fn rename_problem(template: &str) -> Option<String> {
         return Some("rename is empty".into());
     }
     if let Some(separator) = template.chars().find(|c| matches!(c, '/' | '\\')) {
-        return Some(format!("rename can't contain {separator}: it gives a name, not a folder"));
+        return Some(format!(
+            "rename can't contain {separator}: it gives a name, not a folder"
+        ));
     }
     let mut rest = template;
     while let Some(open) = rest.find('{') {
-        let placeholder = rest[open..].find('}').map_or(&rest[open..], |close| &rest[open..=open + close]);
+        let placeholder = rest[open..]
+            .find('}')
+            .map_or(&rest[open..], |close| &rest[open..=open + close]);
         if !PLACEHOLDERS.contains(&placeholder) {
-            return Some(format!("rename has {placeholder}, but only {} can be used", PLACEHOLDERS.join(", ")));
+            return Some(format!(
+                "rename has {placeholder}, but only {} can be used",
+                PLACEHOLDERS.join(", ")
+            ));
         }
         rest = &rest[open + placeholder.len()..];
     }
@@ -244,7 +270,9 @@ fn expand_home(written: &str, home: &Path) -> Option<PathBuf> {
     let after_tilde = written.strip_prefix('~');
     if after_tilde == Some("") {
         Some(home.to_path_buf())
-    } else if let Some(rest) = after_tilde.and_then(|rest| rest.strip_prefix(std::path::is_separator)) {
+    } else if let Some(rest) =
+        after_tilde.and_then(|rest| rest.strip_prefix(std::path::is_separator))
+    {
         Some(home.join(rest))
     } else if Path::new(written).is_absolute() {
         Some(PathBuf::from(written))
@@ -262,9 +290,17 @@ fn json_error(e: serde_json::Error) -> ConfigError {
         .unwrap_or(&message)
         .to_string();
     if line == 0 {
-        ConfigError { message, line: None, column: None }
+        ConfigError {
+            message,
+            line: None,
+            column: None,
+        }
     } else {
-        ConfigError { message, line: Some(line), column: Some(column) }
+        ConfigError {
+            message,
+            line: Some(line),
+            column: Some(column),
+        }
     }
 }
 
@@ -277,7 +313,11 @@ fn error_at(text: &str, from: usize, value: &str, message: String) -> ConfigErro
         let column = before.len() - before.rfind('\n').map_or(0, |i| i + 1) + 1;
         (line, column)
     });
-    ConfigError { message, line: position.map(|p| p.0), column: position.map(|p| p.1) }
+    ConfigError {
+        message,
+        line: position.map(|p| p.0),
+        column: position.map(|p| p.1),
+    }
 }
 
 /// The byte offset of the JSON string `value` in `text`, from byte `from`.

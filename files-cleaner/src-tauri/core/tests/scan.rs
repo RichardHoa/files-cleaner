@@ -15,7 +15,12 @@ fn relative_paths(result: &ScanResult, root: &Path) -> Vec<String> {
         .iter()
         .map(|e| {
             let relative = e.path.strip_prefix(&root).unwrap();
-            assert_eq!(relative, e.relative_path.iter().collect::<PathBuf>(), "{}", e.path.display());
+            assert_eq!(
+                relative,
+                e.relative_path.iter().collect::<PathBuf>(),
+                "{}",
+                e.path.display()
+            );
             e.relative_path.join("/")
         })
         .collect();
@@ -44,11 +49,20 @@ fn reports_name_extension_size_and_dates() {
     let path = write(dir.path(), "docs/Lecture 3.PPTX", "twelve bytes");
     // 2024-03-05T10:00:00Z
     let modified = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_709_632_800);
-    fs::File::options().write(true).open(&path).unwrap().set_modified(modified).unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
 
     let result = scan(dir.path(), &empty_config(dir.path())).unwrap();
 
-    let lecture = result.entries.iter().find(|e| e.name == "Lecture 3.PPTX").unwrap();
+    let lecture = result
+        .entries
+        .iter()
+        .find(|e| e.name == "Lecture 3.PPTX")
+        .unwrap();
     assert_eq!(lecture.extension, "PPTX");
     assert_eq!(lecture.size, 12);
     assert_eq!(lecture.modified, 1_709_632_800_000);
@@ -69,7 +83,10 @@ fn leaves_out_files_with_no_extension_and_counts_them() {
     let result = scan(dir.path(), &empty_config(dir.path())).unwrap();
 
     assert_eq!(relative_paths(&result, dir.path()), ["notes.txt"]);
-    assert_eq!(result.no_extension, 3, "a name ending in a dot has no extension either");
+    assert_eq!(
+        result.no_extension, 3,
+        "a name ending in a dot has no extension either"
+    );
 }
 
 #[test]
@@ -81,7 +98,8 @@ fn reports_progress_ending_with_the_final_counts() {
     write(dir.path(), "node_modules/x/index.js", "js");
     let mut reports = Vec::new();
 
-    let result = scan_with_progress(dir.path(), &empty_config(dir.path()), |p| reports.push(p)).unwrap();
+    let result =
+        scan_with_progress(dir.path(), &empty_config(dir.path()), |p| reports.push(p)).unwrap();
 
     let last = reports.last().expect("at least one progress report");
     assert_eq!(last.found, 3);
@@ -98,7 +116,10 @@ fn never_follows_symlinks() {
     let dir = scan_root();
     write(dir.path(), "real.txt", "real");
     symlink(dir.path().join("real.txt"), dir.path().join("link.txt"));
-    symlink(outside.path().join("elsewhere"), dir.path().join("elsewhere"));
+    symlink(
+        outside.path().join("elsewhere"),
+        dir.path().join("elsewhere"),
+    );
     symlink(dir.path(), dir.path().join("loop"));
 
     let result = scan(dir.path(), &empty_config(dir.path())).unwrap();
@@ -135,11 +156,19 @@ fn treats_packages_as_one_item_with_their_total_size() {
         relative_paths(&result, dir.path()),
         ["Tool.app", "school/Essay.pages", "school/plain.txt"]
     );
-    let app = result.entries.iter().find(|e| e.name == "Tool.app").unwrap();
+    let app = result
+        .entries
+        .iter()
+        .find(|e| e.name == "Tool.app")
+        .unwrap();
     assert!(app.is_package);
     assert_eq!(app.extension, "app");
     assert_eq!(app.size, 18);
-    let essay = result.entries.iter().find(|e| e.name == "Essay.pages").unwrap();
+    let essay = result
+        .entries
+        .iter()
+        .find(|e| e.name == "Essay.pages")
+        .unwrap();
     assert!(essay.is_package);
     assert_eq!(essay.size, 4);
 }

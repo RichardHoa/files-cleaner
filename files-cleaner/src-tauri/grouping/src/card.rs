@@ -21,7 +21,12 @@ impl Card {
     /// The topic, lowercased with whitespace collapsed: files with equal
     /// keys always group. `None` when the LLM gave no topic.
     pub fn topic_key(&self) -> Option<String> {
-        let key = self.topic.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+        let key = self
+            .topic
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase();
         (!key.is_empty()).then_some(key)
     }
 
@@ -49,9 +54,22 @@ pub fn parse_card(reply: &str) -> Card {
         (Some(a), Some(b)) if a < b => &reply[a..=b],
         _ => return Card::default(),
     };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else { return Card::default() };
-    let field = |k: &str| value.get(k).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    Card { topic: field("topic"), kind: field("type"), summary: field("summary") }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
+        return Card::default();
+    };
+    let field = |k: &str| {
+        value
+            .get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
+    Card {
+        topic: field("topic"),
+        kind: field("type"),
+        summary: field("summary"),
+    }
 }
 
 /// Characters of content the LLM reads: fewer than are read, since
@@ -73,14 +91,16 @@ Look for it in the title, headers and first lines as well as the file name. \"\"
 /// Identifies the prompt and how files are read for it, so cards written
 /// with an earlier one aren't used: changing either reads every file again.
 pub fn prompt_id() -> String {
-    let id = blake3::hash(format!("{SYSTEM}\n{INSTRUCTIONS}\n{LLM_CHARS}\n{READER_VERSION}").as_bytes());
+    let id =
+        blake3::hash(format!("{SYSTEM}\n{INSTRUCTIONS}\n{LLM_CHARS}\n{READER_VERSION}").as_bytes());
     id.to_hex()[..8].to_string()
 }
 
 /// The card prompt in Qwen's chat template, written out.
 pub fn prompt(content: &Content) -> String {
     let body = if content.body.is_empty() {
-        "(none: only the file name is known; leave topic empty unless the name makes it obvious)".to_string()
+        "(none: only the file name is known; leave topic empty unless the name makes it obvious)"
+            .to_string()
     } else {
         content.body.chars().take(LLM_CHARS).collect()
     };

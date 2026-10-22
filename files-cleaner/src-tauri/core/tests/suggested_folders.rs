@@ -2,7 +2,8 @@ mod common;
 
 use common::{empty_config, real_path, scan_root, write};
 use files_cleaner_core::{
-    build_suggested_folders_plan, scan, FileChoice, FolderChoice, OperationKind, Reason, SuggestedFolderChoice,
+    build_suggested_folders_plan, scan, FileChoice, FolderChoice, OperationKind, Reason,
+    SuggestedFolderChoice,
 };
 
 #[test]
@@ -19,12 +20,18 @@ fn create_here_plans_the_folder_then_a_move_per_file() {
     let folder = SuggestedFolderChoice {
         name: "CS101".to_string(),
         choice: FolderChoice::CreateHere,
-        files: vec![(real_path(&lecture), FileChoice::InFolder), (real_path(&slides), FileChoice::InFolder)],
+        files: vec![
+            (real_path(&lecture), FileChoice::InFolder),
+            (real_path(&slides), FileChoice::InFolder),
+        ],
     };
     let plan = build_suggested_folders_plan(&scan, &config, &[folder]).unwrap();
 
-    let ops: Vec<(OperationKind, Vec<String>)> =
-        plan.operations.iter().map(|op| (op.kind, op.destination.clone())).collect();
+    let ops: Vec<(OperationKind, Vec<String>)> = plan
+        .operations
+        .iter()
+        .map(|op| (op.kind, op.destination.clone()))
+        .collect();
     let names = |path: &[&str]| path.iter().map(|s| s.to_string()).collect::<Vec<_>>();
     assert_eq!(
         ops,
@@ -34,9 +41,13 @@ fn create_here_plans_the_folder_then_a_move_per_file() {
             (OperationKind::Move, names(&["CS101", "slides.pptx"])),
         ]
     );
-    assert_eq!(plan.operations[1].destination_path, root.join("CS101").join("lecture 1.pdf"));
-    assert!(plan
-        .operations
-        .iter()
-        .all(|op| op.reason == Reason::SuggestedFolder { folder: "CS101".to_string() } && op.ticked));
+    assert_eq!(
+        plan.operations[1].destination_path,
+        root.join("CS101").join("lecture 1.pdf")
+    );
+    assert!(plan.operations.iter().all(|op| op.reason
+        == Reason::SuggestedFolder {
+            folder: "CS101".to_string()
+        }
+        && op.ticked));
 }

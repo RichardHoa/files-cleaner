@@ -9,7 +9,12 @@ use files_cleaner_core::{build_rule_plan, scan, OperationKind, Plan, Reason};
 
 fn set_modified(path: &Path, secs: u64) {
     let time = UNIX_EPOCH + Duration::from_secs(secs);
-    fs::File::options().write(true).open(path).unwrap().set_modified(time).unwrap();
+    fs::File::options()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_modified(time)
+        .unwrap();
 }
 
 /// The Plan for `root` with the config `text`, `~` being `home`.
@@ -24,7 +29,13 @@ fn summary(plan: &Plan) -> Vec<(OperationKind, String, String)> {
     plan.operations
         .iter()
         .filter(|op| op.reason != Reason::EmptiedFolder)
-        .map(|op| (op.kind, op.relative_path.join("/"), op.destination.join("/")))
+        .map(|op| {
+            (
+                op.kind,
+                op.relative_path.join("/"),
+                op.destination.join("/"),
+            )
+        })
         .collect()
 }
 
@@ -44,12 +55,23 @@ fn a_trash_rule_trashes_matching_files_into_the_holding_folder() {
     assert_eq!(
         summary(&plan),
         [
-            (OperationKind::Trash, "old/Other.DMG".into(), "Files Cleaner Trash/This Session/old/Other.DMG".into()),
-            (OperationKind::Trash, "setup.dmg".into(), "Files Cleaner Trash/This Session/setup.dmg".into()),
+            (
+                OperationKind::Trash,
+                "old/Other.DMG".into(),
+                "Files Cleaner Trash/This Session/old/Other.DMG".into()
+            ),
+            (
+                OperationKind::Trash,
+                "setup.dmg".into(),
+                "Files Cleaner Trash/This Session/setup.dmg".into()
+            ),
         ]
     );
     let reasons = plan.operations.iter().map(|op| &op.reason);
-    assert!(reasons.filter(|r| **r != Reason::EmptiedFolder).all(|r| *r == Reason::Rule { rule: "Disk images".into() }));
+    assert!(reasons.filter(|r| **r != Reason::EmptiedFolder).all(|r| *r
+        == Reason::Rule {
+            rule: "Disk images".into()
+        }));
 }
 
 /// The Rule each Operation was proposed by, by relative path; "duplicate"
@@ -74,7 +96,10 @@ fn reasons(plan: &Plan) -> Vec<(String, String)> {
 }
 
 fn pairs(expected: &[(&str, &str)]) -> Vec<(String, String)> {
-    expected.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()
+    expected
+        .iter()
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .collect()
 }
 
 #[test]
@@ -125,8 +150,16 @@ fn rules_match_packages_but_never_reach_inside_them_or_match_folders() {
     );
 
     let found = reasons(&plan);
-    assert!(found.contains(&("Old.app".into(), "Apps".into())), "{found:?}");
-    assert!(found.iter().all(|(path, _)| path != "Photos" && !path.starts_with("Old.app/")), "{found:?}");
+    assert!(
+        found.contains(&("Old.app".into(), "Apps".into())),
+        "{found:?}"
+    );
+    assert!(
+        found
+            .iter()
+            .all(|(path, _)| path != "Photos" && !path.starts_with("Old.app/")),
+        "{found:?}"
+    );
 }
 
 #[test]
@@ -141,12 +174,17 @@ fn rules_treat_duplicate_copies_like_any_other_file() {
         r#"{ "rules": [{ "name": "PDFs", "match": { "extensions": ["pdf"] }, "then": { "trash": true } }] }"#,
     );
 
-    assert_eq!(reasons(&plan), pairs(&[("copy.pdf", "PDFs"), ("keep.pdf", "PDFs")]));
+    assert_eq!(
+        reasons(&plan),
+        pairs(&[("copy.pdf", "PDFs"), ("keep.pdf", "PDFs")])
+    );
 }
 
 fn move_rule(target: &str, rename: Option<&str>) -> String {
     let target = serde_json::to_string(target).unwrap();
-    let rename = rename.map_or(String::new(), |r| format!(r#", "rename": {}"#, serde_json::to_string(r).unwrap()));
+    let rename = rename.map_or(String::new(), |r| {
+        format!(r#", "rename": {}"#, serde_json::to_string(r).unwrap())
+    });
     format!(
         r#"{{ "rules": [{{ "name": "Slides", "match": {{ "extensions": ["pptx"] }}, "then": {{ "moveTo": {target}{rename} }} }}] }}"#
     )
@@ -164,15 +202,35 @@ fn a_relative_target_is_inside_the_scan_root_and_missing_folders_are_created_fir
         summary(&plan),
         [
             (OperationKind::CreateFolder, "Study".into(), "Study".into()),
-            (OperationKind::CreateFolder, "Study/Slides".into(), "Study/Slides".into()),
-            (OperationKind::Move, "old/lecture.pptx".into(), "Study/Slides/lecture.pptx".into()),
-            (OperationKind::Move, "talk.pptx".into(), "Study/Slides/talk.pptx".into()),
+            (
+                OperationKind::CreateFolder,
+                "Study/Slides".into(),
+                "Study/Slides".into()
+            ),
+            (
+                OperationKind::Move,
+                "old/lecture.pptx".into(),
+                "Study/Slides/lecture.pptx".into()
+            ),
+            (
+                OperationKind::Move,
+                "talk.pptx".into(),
+                "Study/Slides/talk.pptx".into()
+            ),
         ]
     );
     let create = &plan.operations[0];
-    assert_eq!(create.reason, Reason::Rule { rule: "Slides".into() });
+    assert_eq!(
+        create.reason,
+        Reason::Rule {
+            rule: "Slides".into()
+        }
+    );
     assert_eq!(create.destination_path, plan.root.join("Study"));
-    assert_eq!(plan.operations[3].destination_path, plan.root.join("Study/Slides/talk.pptx"));
+    assert_eq!(
+        plan.operations[3].destination_path,
+        plan.root.join("Study/Slides/talk.pptx")
+    );
 }
 
 #[test]
@@ -183,7 +241,14 @@ fn an_existing_target_folder_is_not_created_again_and_files_already_in_it_stay()
 
     let plan = plan_with(dir.path(), dir.path(), &move_rule("Slides", None));
 
-    assert_eq!(summary(&plan), [(OperationKind::Move, "talk.pptx".into(), "Slides/talk.pptx".into())]);
+    assert_eq!(
+        summary(&plan),
+        [(
+            OperationKind::Move,
+            "talk.pptx".into(),
+            "Slides/talk.pptx".into()
+        )]
+    );
 }
 
 #[test]
@@ -193,19 +258,38 @@ fn home_and_absolute_targets_can_be_outside_the_scan_root() {
     let elsewhere = scan_root();
     fs::create_dir(home.path().join("Study")).unwrap();
     write(dir.path(), "talk.pptx", "slides");
-    let destinations = |plan: Plan| plan.operations.into_iter().map(|op| (op.kind, op.destination_path)).collect::<Vec<_>>();
+    let destinations = |plan: Plan| {
+        plan.operations
+            .into_iter()
+            .map(|op| (op.kind, op.destination_path))
+            .collect::<Vec<_>>()
+    };
 
     let plan = plan_with(dir.path(), home.path(), &move_rule("~/Study", None));
-    assert_eq!(destinations(plan), [(OperationKind::Move, home.path().join("Study/talk.pptx"))]);
+    assert_eq!(
+        destinations(plan),
+        [(OperationKind::Move, home.path().join("Study/talk.pptx"))]
+    );
 
-    let plan = plan_with(dir.path(), home.path(), &move_rule(elsewhere.path().to_str().unwrap(), None));
-    assert_eq!(destinations(plan), [(OperationKind::Move, elsewhere.path().join("talk.pptx"))]);
+    let plan = plan_with(
+        dir.path(),
+        home.path(),
+        &move_rule(elsewhere.path().to_str().unwrap(), None),
+    );
+    assert_eq!(
+        destinations(plan),
+        [(OperationKind::Move, elsewhere.path().join("talk.pptx"))]
+    );
 }
 
 /// The destinations of the Plan's Move Operations, sorted.
 fn moved_to(plan: &Plan) -> Vec<String> {
-    let mut found: Vec<String> =
-        plan.operations.iter().filter(|op| op.kind == OperationKind::Move).map(|op| op.destination.join("/")).collect();
+    let mut found: Vec<String> = plan
+        .operations
+        .iter()
+        .filter(|op| op.kind == OperationKind::Move)
+        .map(|op| op.destination.join("/"))
+        .collect();
     found.sort();
     found
 }
@@ -217,9 +301,19 @@ fn rename_fills_in_name_ext_and_modified_and_keeps_the_extension() {
     set_modified(&write(dir.path(), "talk.pptx", "a"), 1_000_000_000);
     set_modified(&write(dir.path(), "old.final.pptx", "b"), 946_684_799);
 
-    let plan = plan_with(dir.path(), dir.path(), &move_rule("Slides", Some("{modified} {name} ({ext})")));
+    let plan = plan_with(
+        dir.path(),
+        dir.path(),
+        &move_rule("Slides", Some("{modified} {name} ({ext})")),
+    );
 
-    assert_eq!(moved_to(&plan), ["Slides/1999-12-31 old.final (pptx).pptx", "Slides/2001-09-09 talk (pptx).pptx"]);
+    assert_eq!(
+        moved_to(&plan),
+        [
+            "Slides/1999-12-31 old.final (pptx).pptx",
+            "Slides/2001-09-09 talk (pptx).pptx"
+        ]
+    );
 }
 
 #[test]
@@ -233,7 +327,10 @@ fn rename_dates_before_1970_and_in_leap_years_are_right() {
     result.entries[0].modified = -1;
     result.entries[1].modified = 1_709_208_000_000;
 
-    assert_eq!(moved_to(&build_rule_plan(&result, &config)), ["Slides/1969-12-31.pptx", "Slides/2024-02-29.pptx"]);
+    assert_eq!(
+        moved_to(&build_rule_plan(&result, &config)),
+        ["Slides/1969-12-31.pptx", "Slides/2024-02-29.pptx"]
+    );
 }
 
 #[test]
@@ -247,7 +344,14 @@ fn a_name_taken_on_disk_gets_a_clash_suffix_even_in_another_letter_case() {
 
     let plan = plan_with(dir.path(), dir.path(), &move_rule("Slides", None));
 
-    assert_eq!(moved_to(&plan), ["Slides/notes (1).pptx", "Slides/talk (2).pptx", "Slides/talk.pptx"]);
+    assert_eq!(
+        moved_to(&plan),
+        [
+            "Slides/notes (1).pptx",
+            "Slides/talk (2).pptx",
+            "Slides/talk.pptx"
+        ]
+    );
 }
 
 #[test]
@@ -259,7 +363,14 @@ fn names_clashing_within_the_plan_get_clash_suffixes() {
 
     let plan = plan_with(dir.path(), dir.path(), &move_rule("Slides", None));
 
-    assert_eq!(moved_to(&plan), ["Slides/Notes.pptx", "Slides/notes (1).pptx", "Slides/notes (2).pptx"]);
+    assert_eq!(
+        moved_to(&plan),
+        [
+            "Slides/Notes.pptx",
+            "Slides/notes (1).pptx",
+            "Slides/notes (2).pptx"
+        ]
+    );
 }
 
 #[test]
@@ -267,7 +378,11 @@ fn a_relative_target_that_is_protected_proposes_nothing() {
     let dir = scan_root();
     write(dir.path(), "talk.pptx", "slides");
 
-    for target in ["Files Cleaner Trash", "project/node_modules", "Keynote.app/Slides"] {
+    for target in [
+        "Files Cleaner Trash",
+        "project/node_modules",
+        "Keynote.app/Slides",
+    ] {
         let plan = plan_with(dir.path(), dir.path(), &move_rule(target, None));
         assert!(plan.operations.is_empty(), "{target}: {:?}", summary(&plan));
     }

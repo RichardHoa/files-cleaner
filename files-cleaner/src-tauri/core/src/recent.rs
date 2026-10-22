@@ -38,7 +38,13 @@ struct Stored {
 pub fn record_recent_scan_root(store: &Path, scan_root: &Path) -> io::Result<()> {
     let mut entries = read(store);
     entries.retain(|entry| entry.path != scan_root);
-    entries.insert(0, Stored { path: scan_root.to_path_buf(), last_scanned: millis(SystemTime::now()) });
+    entries.insert(
+        0,
+        Stored {
+            path: scan_root.to_path_buf(),
+            last_scanned: millis(SystemTime::now()),
+        },
+    );
     entries.truncate(KEEP);
     write(store, &entries)
 }
@@ -48,7 +54,11 @@ pub fn record_recent_scan_root(store: &Path, scan_root: &Path) -> io::Result<()>
 pub fn recent_scan_roots(store: &Path) -> Vec<RecentScanRoot> {
     read(store)
         .into_iter()
-        .map(|entry| RecentScanRoot { exists: entry.path.is_dir(), path: entry.path, last_scanned: entry.last_scanned })
+        .map(|entry| RecentScanRoot {
+            exists: entry.path.is_dir(),
+            path: entry.path,
+            last_scanned: entry.last_scanned,
+        })
         .collect()
 }
 
@@ -64,7 +74,10 @@ pub fn remove_recent_scan_root(store: &Path, scan_root: &Path) -> io::Result<()>
 }
 
 fn read(store: &Path) -> Vec<Stored> {
-    fs::read(store).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default()
+    fs::read(store)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
 }
 
 /// Writes to a temporary file first, so a crash mid-write leaves the old
@@ -74,6 +87,9 @@ fn write(store: &Path, entries: &[Stored]) -> io::Result<()> {
         fs::create_dir_all(folder)?;
     }
     let temporary = store.with_extension("json.tmp");
-    fs::write(&temporary, serde_json::to_vec_pretty(entries).expect("entries always serialise"))?;
+    fs::write(
+        &temporary,
+        serde_json::to_vec_pretty(entries).expect("entries always serialise"),
+    )?;
     fs::rename(&temporary, store)
 }

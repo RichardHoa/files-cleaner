@@ -9,30 +9,98 @@ use std::path::Path;
 /// Names that mean a developer folder wherever they appear.
 const ALWAYS: &[&str] = &[
     // Version control
-    ".git", ".hg", ".svn", ".bzr", "_darcs", ".jj", ".pijul",
+    ".git",
+    ".hg",
+    ".svn",
+    ".bzr",
+    "_darcs",
+    ".jj",
+    ".pijul",
     // JavaScript and TypeScript
-    "node_modules", "bower_components", "jspm_packages", ".pnpm-store", ".yarn", ".npm",
-    ".next", ".nuxt", ".output", ".svelte-kit", ".angular", ".astro", ".vite", ".parcel-cache",
-    ".turbo", ".vercel", ".netlify", ".expo", ".docusaurus", ".nx", ".eslintcache",
+    "node_modules",
+    "bower_components",
+    "jspm_packages",
+    ".pnpm-store",
+    ".yarn",
+    ".npm",
+    ".next",
+    ".nuxt",
+    ".output",
+    ".svelte-kit",
+    ".angular",
+    ".astro",
+    ".vite",
+    ".parcel-cache",
+    ".turbo",
+    ".vercel",
+    ".netlify",
+    ".expo",
+    ".docusaurus",
+    ".nx",
+    ".eslintcache",
     // Python
-    "__pycache__", "__pypackages__", "site-packages", ".venv", ".tox", ".nox", ".mypy_cache",
-    ".pytest_cache", ".ruff_cache", ".pytype", ".pyre", ".hypothesis", ".ipynb_checkpoints",
-    ".eggs", ".pdm-build", ".direnv", "htmlcov",
+    "__pycache__",
+    "__pypackages__",
+    "site-packages",
+    ".venv",
+    ".tox",
+    ".nox",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".pytype",
+    ".pyre",
+    ".hypothesis",
+    ".ipynb_checkpoints",
+    ".eggs",
+    ".pdm-build",
+    ".direnv",
+    "htmlcov",
     // Rust
-    ".cargo", ".rustup",
+    ".cargo",
+    ".rustup",
     // JVM: Java, Kotlin, Scala, Clojure
-    ".gradle", ".m2", ".mvn", ".kotlin", ".bsp", ".metals", ".bloop", ".cpcache", ".lsp",
+    ".gradle",
+    ".m2",
+    ".mvn",
+    ".kotlin",
+    ".bsp",
+    ".metals",
+    ".bloop",
+    ".cpcache",
+    ".lsp",
     // Apple: Swift, Xcode, CocoaPods
-    "DerivedData", "xcuserdata", ".build", ".swiftpm",
+    "DerivedData",
+    "xcuserdata",
+    ".build",
+    ".swiftpm",
     // Android and native builds
-    ".cxx", ".externalNativeBuild", "CMakeFiles", ".ccls-cache", ".clangd",
+    ".cxx",
+    ".externalNativeBuild",
+    "CMakeFiles",
+    ".ccls-cache",
+    ".clangd",
     // Haskell, OCaml, Elm, Zig, Dart, Ruby, R
-    ".stack-work", "dist-newstyle", "_opam", "elm-stuff", "zig-cache", ".zig-cache",
-    ".dart_tool", ".pub-cache", ".bundle", ".Rproj.user",
+    ".stack-work",
+    "dist-newstyle",
+    "_opam",
+    "elm-stuff",
+    "zig-cache",
+    ".zig-cache",
+    ".dart_tool",
+    ".pub-cache",
+    ".bundle",
+    ".Rproj.user",
     // Infrastructure and static sites
-    ".terraform", ".serverless", ".aws-sam", ".jekyll-cache",
+    ".terraform",
+    ".serverless",
+    ".aws-sam",
+    ".jekyll-cache",
     // Editors and IDEs
-    ".idea", ".vscode", ".vs", ".fleet",
+    ".idea",
+    ".vscode",
+    ".vs",
+    ".fleet",
 ];
 
 /// Name endings and beginnings that mean a developer folder.
@@ -52,17 +120,38 @@ const CONTENT_MARKERS: &[(&str, &str)] = &[
 /// photos is fine to clean), so they are developer folders only next to a
 /// project file that creates them.
 const NEXT_TO_FILE: &[(&str, &[&str])] = &[
-    ("target", &["Cargo.toml", "pom.xml", "build.sbt", "project.clj"]),
+    (
+        "target",
+        &["Cargo.toml", "pom.xml", "build.sbt", "project.clj"],
+    ),
     (
         "build",
         &[
-            "package.json", "build.gradle", "build.gradle.kts", "settings.gradle",
-            "settings.gradle.kts", "CMakeLists.txt", "meson.build", "setup.py", "pyproject.toml",
+            "package.json",
+            "build.gradle",
+            "build.gradle.kts",
+            "settings.gradle",
+            "settings.gradle.kts",
+            "CMakeLists.txt",
+            "meson.build",
+            "setup.py",
+            "pyproject.toml",
             "pubspec.yaml",
         ],
     ),
-    ("dist", &["package.json", "setup.py", "setup.cfg", "pyproject.toml"]),
-    ("out", &["package.json", "build.gradle", "build.gradle.kts", "CMakeLists.txt"]),
+    (
+        "dist",
+        &["package.json", "setup.py", "setup.cfg", "pyproject.toml"],
+    ),
+    (
+        "out",
+        &[
+            "package.json",
+            "build.gradle",
+            "build.gradle.kts",
+            "CMakeLists.txt",
+        ],
+    ),
     ("coverage", &["package.json"]),
     ("vendor", &["go.mod", "composer.json", "Gemfile"]),
     ("Pods", &["Podfile"]),
@@ -113,13 +202,17 @@ pub fn reason(path: &Path, is_folder: bool) -> Option<String> {
             continue;
         }
         if let Some(file) = files.iter().find(|f| parent.join(f).exists()) {
-            return Some(format!("{name} is a developer folder (it sits next to {file})"));
+            return Some(format!(
+                "{name} is a developer folder (it sits next to {file})"
+            ));
         }
     }
     for (folder, extensions) in NEXT_TO_EXTENSION {
         if is(folder) {
             if let Some(file) = file_with_extension(parent, extensions) {
-                return Some(format!("{name} is a developer folder (it sits next to {file})"));
+                return Some(format!(
+                    "{name} is a developer folder (it sits next to {file})"
+                ));
             }
         }
     }

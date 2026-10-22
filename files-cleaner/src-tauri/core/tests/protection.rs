@@ -34,10 +34,25 @@ fn skips_developer_folders_for_many_languages() {
     let dir = scan_root();
     write(dir.path(), "keep.txt", "k");
     for folder in [
-        "py/.tox", "py/.mypy_cache", "py/.pytest_cache", "py/mylib.egg-info", "py/htmlcov",
-        "web/.next", "web/.svelte-kit", "web/bower_components", "apple/DerivedData",
-        "apple/.build", "hs/.stack-work", "hs/dist-newstyle", "dart/.dart_tool", "zig/zig-cache",
-        "c/CMakeFiles", "c/cmake-build-debug", "infra/.terraform", "ide/.idea", "vcs/.hg",
+        "py/.tox",
+        "py/.mypy_cache",
+        "py/.pytest_cache",
+        "py/mylib.egg-info",
+        "py/htmlcov",
+        "web/.next",
+        "web/.svelte-kit",
+        "web/bower_components",
+        "apple/DerivedData",
+        "apple/.build",
+        "hs/.stack-work",
+        "hs/dist-newstyle",
+        "dart/.dart_tool",
+        "zig/zig-cache",
+        "c/CMakeFiles",
+        "c/cmake-build-debug",
+        "infra/.terraform",
+        "ide/.idea",
+        "vcs/.hg",
     ] {
         write(dir.path(), &format!("{folder}/inside.txt"), "x");
     }
@@ -54,9 +69,17 @@ fn skips_environments_and_browser_profiles_whatever_they_are_called() {
     write(dir.path(), "project/main.py", "print()");
     write(dir.path(), "project/my-env/pyvenv.cfg", "home = /usr/bin");
     write(dir.path(), "project/my-env/lib/site.py", "py");
-    write(dir.path(), "conda/envs/science/conda-meta/history.json", "{}");
+    write(
+        dir.path(),
+        "conda/envs/science/conda-meta/history.json",
+        "{}",
+    );
     write(dir.path(), "scraper/google_profile/Local State", "{}");
-    write(dir.path(), "scraper/google_profile/Default/History.db", "db");
+    write(
+        dir.path(),
+        "scraper/google_profile/Default/History.db",
+        "db",
+    );
 
     let result = scan(dir.path(), &empty_config(dir.path())).unwrap();
 
@@ -86,7 +109,16 @@ fn common_build_folder_names_are_skipped_only_next_to_a_project_file() {
 
     assert_eq!(
         names(&result),
-        ["App.csproj", "go.mod", "house.jpg", "invoice.pdf", "old.zip", "package.json", "plan.pdf", "pom.xml"]
+        [
+            "App.csproj",
+            "go.mod",
+            "house.jpg",
+            "invoice.pdf",
+            "old.zip",
+            "package.json",
+            "plan.pdf",
+            "pom.xml"
+        ]
     );
     assert_eq!(result.skipped, 6);
 }
@@ -137,7 +169,11 @@ fn skips_os_metadata_files_from_every_os() {
 fn skips_app_libraries() {
     let dir = scan_root();
     write(dir.path(), "song.mp3", "mp3");
-    write(dir.path(), "Pictures/Photos Library.photoslibrary/database/db", "db");
+    write(
+        dir.path(),
+        "Pictures/Photos Library.photoslibrary/database/db",
+        "db",
+    );
     write(dir.path(), "Music/Music/Media/track.m4a", "m4a");
     write(dir.path(), "Music/iTunes/iTunes Library.xml", "xml");
     write(dir.path(), "Music/Old.musiclibrary/x", "x");
@@ -205,7 +241,16 @@ fn warning(root: &Path, home: &Path) -> String {
 #[cfg(target_os = "macos")]
 fn warns_about_system_folders_as_the_scan_root() {
     let home = scan_root();
-    for root in ["/System", "/Library/Fonts", "/Applications", "/usr/bin", "/bin", "/sbin", "/private/etc", "/Volumes"] {
+    for root in [
+        "/System",
+        "/Library/Fonts",
+        "/Applications",
+        "/usr/bin",
+        "/bin",
+        "/sbin",
+        "/private/etc",
+        "/Volumes",
+    ] {
         warning(Path::new(root), home.path());
     }
 }
@@ -222,7 +267,12 @@ fn warns_about_a_scan_root_that_reaches_a_system_folder_through_a_symlink() {
 #[cfg(target_os = "macos")]
 fn warns_about_a_volume_root_as_the_scan_root() {
     let home = scan_root();
-    let volume = fs::read_dir("/Volumes").unwrap().next().unwrap().unwrap().path();
+    let volume = fs::read_dir("/Volumes")
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
     warning(&volume, home.path());
 }
 
@@ -246,7 +296,10 @@ fn warns_about_protected_folders_and_anything_inside_them_as_the_scan_root() {
 fn warns_about_a_never_touch_path_as_the_scan_root_but_scans_it() {
     let home = scan_root();
     write(home.path(), "Downloads/Keep/a.txt", "a");
-    let config = config(r#"{ "neverTouch": ["~/Downloads/Keep"], "rules": [] }"#, home.path());
+    let config = config(
+        r#"{ "neverTouch": ["~/Downloads/Keep"], "rules": [] }"#,
+        home.path(),
+    );
     let keep = home.path().join("Downloads/Keep");
 
     let reason = scan_root_warning(&keep, &config).unwrap();
@@ -261,7 +314,10 @@ fn warns_about_a_never_touch_path_as_the_scan_root_but_scans_it() {
 fn an_ordinary_folder_has_no_warning() {
     let home = scan_root();
     write(home.path(), "Downloads/a.txt", "a");
-    assert_eq!(scan_root_warning(&home.path().join("Downloads"), &empty_config(home.path())), None);
+    assert_eq!(
+        scan_root_warning(&home.path().join("Downloads"), &empty_config(home.path())),
+        None
+    );
 }
 
 #[test]
@@ -387,8 +443,21 @@ mod linux {
     fn warns_about_system_folders_as_the_scan_root() {
         let home = scan_root();
         for root in [
-            "/usr", "/usr/share", "/etc", "/bin", "/sbin", "/lib", "/lib64", "/boot", "/proc", "/sys", "/dev",
-            "/run", "/var/log", "/opt", "/snap",
+            "/usr",
+            "/usr/share",
+            "/etc",
+            "/bin",
+            "/sbin",
+            "/lib",
+            "/lib64",
+            "/boot",
+            "/proc",
+            "/sys",
+            "/dev",
+            "/run",
+            "/var/log",
+            "/opt",
+            "/snap",
         ] {
             let reason = warning(Path::new(root), home.path());
             assert!(reason.contains("is a System Folder"), "{root}: {reason}");
@@ -403,7 +472,10 @@ mod linux {
             let reason = warning(&home.path().join(folder), home.path());
             assert!(reason.contains("is a System Folder"), "{folder}: {reason}");
         }
-        assert_eq!(scan_root_warning(&home.path().join("Documents"), &empty_config(home.path())), None);
+        assert_eq!(
+            scan_root_warning(&home.path().join("Documents"), &empty_config(home.path())),
+            None
+        );
     }
 
     #[test]
@@ -424,12 +496,31 @@ mod linux {
     #[test]
     fn disk_roots_are_protected_but_folders_on_the_disk_are_not() {
         let home = scan_root();
-        for root in ["/", "/mnt", "/mnt/usb", "/media", "/media/me", "/media/me/USB STICK", "/run/media/me/disk"] {
+        for root in [
+            "/",
+            "/mnt",
+            "/mnt/usb",
+            "/media",
+            "/media/me",
+            "/media/me/USB STICK",
+            "/run/media/me/disk",
+        ] {
             let reason = warning(Path::new(root), home.path());
-            assert!(reason.contains("is a Disk Root") || reason.contains("System Folder"), "{root}: {reason}");
+            assert!(
+                reason.contains("is a Disk Root") || reason.contains("System Folder"),
+                "{root}: {reason}"
+            );
         }
-        for root in ["/mnt/usb/Photos", "/media/me/USB STICK/Photos", "/run/media/me/disk/Photos"] {
-            assert_eq!(scan_root_warning(Path::new(root), &empty_config(home.path())), None, "{root}");
+        for root in [
+            "/mnt/usb/Photos",
+            "/media/me/USB STICK/Photos",
+            "/run/media/me/disk/Photos",
+        ] {
+            assert_eq!(
+                scan_root_warning(Path::new(root), &empty_config(home.path())),
+                None,
+                "{root}"
+            );
         }
     }
 }
@@ -442,8 +533,14 @@ mod windows {
     fn warns_about_system_folders_as_the_scan_root() {
         let home = scan_root();
         for root in [
-            r"C:\Windows", r"C:\Windows\System32", r"C:\Program Files", r"C:\Program Files (x86)\App",
-            r"C:\ProgramData", r"C:\$Recycle.Bin", r"C:\System Volume Information", r"c:\windows",
+            r"C:\Windows",
+            r"C:\Windows\System32",
+            r"C:\Program Files",
+            r"C:\Program Files (x86)\App",
+            r"C:\ProgramData",
+            r"C:\$Recycle.Bin",
+            r"C:\System Volume Information",
+            r"c:\windows",
         ] {
             let reason = warning(Path::new(root), home.path());
             assert!(reason.contains("is a System Folder"), "{root}: {reason}");
@@ -475,7 +572,12 @@ mod windows {
         let hidden = write(dir.path(), "hidden.txt", "h");
         let system = write(dir.path(), "system.txt", "s");
         for (path, flag) in [(&hidden, "+h"), (&system, "+s")] {
-            let status = std::process::Command::new("attrib").arg(flag).arg(path).creation_flags(0).status().unwrap();
+            let status = std::process::Command::new("attrib")
+                .arg(flag)
+                .arg(path)
+                .creation_flags(0)
+                .status()
+                .unwrap();
             assert!(status.success());
         }
 

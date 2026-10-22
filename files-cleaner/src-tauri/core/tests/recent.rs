@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use files_cleaner_core::{record_recent_scan_root, recent_scan_roots, remove_recent_scan_root};
+use files_cleaner_core::{recent_scan_roots, record_recent_scan_root, remove_recent_scan_root};
 use tempfile::TempDir;
 
 /// An app data folder with a folder per name in it, standing in for Scan
@@ -22,7 +22,10 @@ fn setup(names: &[&str]) -> (TempDir, PathBuf, Vec<PathBuf>) {
 }
 
 fn paths(store: &Path) -> Vec<PathBuf> {
-    recent_scan_roots(store).into_iter().map(|recent| recent.path).collect()
+    recent_scan_roots(store)
+        .into_iter()
+        .map(|recent| recent.path)
+        .collect()
 }
 
 #[test]
@@ -43,7 +46,10 @@ fn scanning_a_folder_again_moves_it_to_the_front_without_a_repeat() {
         record_recent_scan_root(&store, folder).unwrap();
     }
 
-    assert_eq!(paths(&store), [folders[0].clone(), folders[2].clone(), folders[1].clone()]);
+    assert_eq!(
+        paths(&store),
+        [folders[0].clone(), folders[2].clone(), folders[1].clone()]
+    );
 }
 
 #[test]
@@ -54,16 +60,25 @@ fn only_the_newest_three_are_kept() {
         record_recent_scan_root(&store, folder).unwrap();
     }
 
-    assert_eq!(paths(&store), [folders[3].clone(), folders[2].clone(), folders[1].clone()]);
+    assert_eq!(
+        paths(&store),
+        [folders[3].clone(), folders[2].clone(), folders[1].clone()]
+    );
 }
 
 #[test]
 fn each_one_says_when_it_was_last_scanned_and_whether_it_still_exists() {
     let (_dir, store, folders) = setup(&["a", "b"]);
-    let before = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as i64;
+    let before = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
     record_recent_scan_root(&store, &folders[0]).unwrap();
     record_recent_scan_root(&store, &folders[1]).unwrap();
-    let after = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as i64;
+    let after = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
     fs::remove_dir(&folders[0]).unwrap();
 
     let recent = recent_scan_roots(&store);
@@ -71,7 +86,11 @@ fn each_one_says_when_it_was_last_scanned_and_whether_it_still_exists() {
     assert!(recent[0].exists);
     assert!(!recent[1].exists, "a deleted folder is listed as missing");
     for one in &recent {
-        assert!((before..=after).contains(&one.last_scanned), "{} not in {before}..={after}", one.last_scanned);
+        assert!(
+            (before..=after).contains(&one.last_scanned),
+            "{} not in {before}..={after}",
+            one.last_scanned
+        );
     }
 }
 

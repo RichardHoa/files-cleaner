@@ -16,7 +16,10 @@ fn the_example_config_loads() {
     let config = load_config(EXAMPLE_CONFIG, Path::new("/Users/me")).unwrap();
 
     assert_eq!(config.trash_destination, TrashDestination::HoldingFolder);
-    assert_eq!(config.never_touch, [PathBuf::from("/Users/me/Downloads/Keep")]);
+    assert_eq!(
+        config.never_touch,
+        [PathBuf::from("/Users/me/Downloads/Keep")]
+    );
     assert!(config.rules.is_empty());
     assert!(!EXAMPLE_CONFIG.contains("\"rules\"") && !EXAMPLE_CONFIG.contains("\"duplicates\""));
 }
@@ -32,16 +35,30 @@ fn settings_default_to_the_holding_folder() {
 
 #[test]
 fn reads_every_setting_value() {
-    let config = load_config(r#"{ "trashDestination": "holdingFolder" }"#, Path::new("/Users/me")).unwrap();
+    let config = load_config(
+        r#"{ "trashDestination": "holdingFolder" }"#,
+        Path::new("/Users/me"),
+    )
+    .unwrap();
     assert_eq!(config.trash_destination, TrashDestination::HoldingFolder);
 }
 
 #[test]
 fn the_old_duplicate_handling_setting_is_ignored() {
-    for value in [r#""trash""#, r#""followRules""#, r#""leave""#, r#""delete""#, "3"] {
+    for value in [
+        r#""trash""#,
+        r#""followRules""#,
+        r#""leave""#,
+        r#""delete""#,
+        "3",
+    ] {
         let text = format!(r#"{{ "duplicates": {value}, "neverTouch": ["~/Keep"] }}"#);
         let config = load_config(&text, Path::new("/Users/me")).unwrap();
-        assert_eq!(config.never_touch, [PathBuf::from("/Users/me/Keep")], "{value}");
+        assert_eq!(
+            config.never_touch,
+            [PathBuf::from("/Users/me/Keep")],
+            "{value}"
+        );
     }
 }
 
@@ -58,7 +75,11 @@ fn invalid_json_reports_line_and_column() {
     let err = error("{\n  \"trashDestination\": \"holdingFolder\"\n  \"rules\": []\n}");
 
     assert_eq!((err.line, err.column), (Some(3), Some(3)));
-    assert!(!err.message.contains("line"), "position is not repeated in the message: {}", err.message);
+    assert!(
+        !err.message.contains("line"),
+        "position is not repeated in the message: {}",
+        err.message
+    );
 }
 
 #[test]
@@ -70,7 +91,9 @@ fn unknown_setting_values_are_rejected_with_their_line() {
 
 #[test]
 fn misspelled_keys_are_rejected() {
-    let err = error(r#"{ "rules": [{ "name": "x", "match": { "extension": ["dmg"] }, "then": { "trash": true } }] }"#);
+    let err = error(
+        r#"{ "rules": [{ "name": "x", "match": { "extension": ["dmg"] }, "then": { "trash": true } }] }"#,
+    );
 
     assert!(err.message.contains("extension"), "{}", err.message);
 }
@@ -91,7 +114,11 @@ fn a_rule_must_match_on_something() {
     let err = error("{ \"rules\": [\n  { \"name\": \"Everything\", \"match\": {}, \"then\": { \"trash\": true } }\n] }");
 
     assert_eq!(err.line, Some(2));
-    assert!(err.message.contains("extensions or nameGlob"), "{}", err.message);
+    assert!(
+        err.message.contains("extensions or nameGlob"),
+        "{}",
+        err.message
+    );
 }
 
 #[test]
@@ -102,9 +129,15 @@ fn a_rule_must_either_trash_or_move() {
         r#"{ "trash": true, "moveTo": "Old" }"#,
         r#"{ "trash": true, "rename": "{name}" }"#,
     ] {
-        let text = format!(r#"{{ "rules": [{{ "name": "x", "match": {{ "nameGlob": "*" }}, "then": {then} }}] }}"#);
+        let text = format!(
+            r#"{{ "rules": [{{ "name": "x", "match": {{ "nameGlob": "*" }}, "then": {then} }}] }}"#
+        );
         let err = error(&text);
-        assert!(err.message.contains("trash") && err.message.contains("moveTo"), "{then}: {}", err.message);
+        assert!(
+            err.message.contains("trash") && err.message.contains("moveTo"),
+            "{then}: {}",
+            err.message
+        );
     }
 }
 
@@ -134,9 +167,15 @@ fn move_targets_resolve_home_absolute_and_relative_paths() {
     assert_eq!(
         targets,
         [
-            (&RuleTarget::Absolute("/Users/me/Documents/Study".into()), None),
+            (
+                &RuleTarget::Absolute("/Users/me/Documents/Study".into()),
+                None
+            ),
             (&RuleTarget::Absolute(absolute.into()), None),
-            (&RuleTarget::RelativeToScanRoot("Screenshots".into()), Some("{modified} {name}")),
+            (
+                &RuleTarget::RelativeToScanRoot("Screenshots".into()),
+                Some("{modified} {name}")
+            ),
         ]
     );
 }
@@ -149,13 +188,24 @@ fn move_targets_inside_protected_paths_are_rejected_with_their_line() {
     #[cfg(target_os = "linux")]
     let system = ["/usr/local/stuff", "/etc/stuff", "~/.config/stuff"];
     #[cfg(target_os = "windows")]
-    let system = [r"C:\\Windows\\Junk", r"C:\\Program Files\\Stuff", r"~\\AppData\\Stuff"];
-    for target in system.into_iter().chain(["~/Downloads/Keep/more", "~/code/node_modules/x"]) {
+    let system = [
+        r"C:\\Windows\\Junk",
+        r"C:\\Program Files\\Stuff",
+        r"~\\AppData\\Stuff",
+    ];
+    for target in system
+        .into_iter()
+        .chain(["~/Downloads/Keep/more", "~/code/node_modules/x"])
+    {
         let text = format!(
             "{{ \"neverTouch\": [\"~/Downloads/Keep\"],\n  \"rules\": [\n    {{ \"name\": \"x\", \"match\": {{ \"nameGlob\": \"*\" }},\n      \"then\": {{ \"moveTo\": \"{target}\" }} }}\n  ] }}"
         );
         let err = load_config(&text, home.path()).unwrap_err();
-        assert!(err.message.contains("protected"), "{target}: {}", err.message);
+        assert!(
+            err.message.contains("protected"),
+            "{target}: {}",
+            err.message
+        );
         assert_eq!(err.line, Some(4), "{target}");
     }
 }

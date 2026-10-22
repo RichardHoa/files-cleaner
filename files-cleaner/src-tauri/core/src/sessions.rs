@@ -130,7 +130,10 @@ impl JournaledOperation {
                 destination: self.destination.clone(),
                 planned: self.planned,
             },
-            Phase::Undo | Phase::Redo => Record::Intent { operation_id: self.id.clone(), phase },
+            Phase::Undo | Phase::Redo => Record::Intent {
+                operation_id: self.id.clone(),
+                phase,
+            },
         }
     }
 
@@ -177,7 +180,11 @@ pub(crate) struct SessionJournal {
 impl SessionJournal {
     pub fn read(journal_dir: &Path, id: &str) -> Result<SessionJournal, SessionError> {
         let (header, records) = journal::read(journal_dir, id)?;
-        let mut session = SessionJournal { header, finished: false, operations: Vec::new() };
+        let mut session = SessionJournal {
+            header,
+            finished: false,
+            operations: Vec::new(),
+        };
         for record in &records {
             session.apply(record);
         }
@@ -187,7 +194,13 @@ impl SessionJournal {
     /// Brings the Session up to date with `record`, as just read or written.
     pub fn apply(&mut self, record: &Record) {
         match record {
-            Record::Operation { operation_id, kind, source, destination, planned } => {
+            Record::Operation {
+                operation_id,
+                kind,
+                source,
+                destination,
+                planned,
+            } => {
                 self.operations.push(JournaledOperation {
                     id: operation_id.clone(),
                     kind: *kind,
@@ -199,12 +212,20 @@ impl SessionJournal {
                     interrupted: Some(Phase::Run),
                 });
             }
-            Record::Intent { operation_id, phase } => {
+            Record::Intent {
+                operation_id,
+                phase,
+            } => {
                 if let Some(op) = self.operation(operation_id) {
                     op.interrupted = Some(*phase);
                 }
             }
-            Record::Outcome { operation_id, phase, outcome, reason: note } => {
+            Record::Outcome {
+                operation_id,
+                phase,
+                outcome,
+                reason: note,
+            } => {
                 if let Some(op) = self.operation(operation_id) {
                     op.state = next_state(op.state, *phase, *outcome);
                     op.note = note.clone();
@@ -222,7 +243,10 @@ impl SessionJournal {
 
     fn info(&self) -> SessionInfo {
         let carried_out = self.operations.iter().filter(|op| {
-            matches!(op.state, OperationState::Done | OperationState::Undone | OperationState::Unrecoverable)
+            matches!(
+                op.state,
+                OperationState::Done | OperationState::Undone | OperationState::Unrecoverable
+            )
         });
         let mut done = 0;
         let mut total_size = 0;
@@ -232,7 +256,12 @@ impl SessionJournal {
             total_size += op.planned.size;
             *kind_counts.entry(op.kind).or_insert(0) += 1;
         }
-        let in_state = |state| self.operations.iter().filter(|op| op.state == state).count();
+        let in_state = |state| {
+            self.operations
+                .iter()
+                .filter(|op| op.state == state)
+                .count()
+        };
         let restored = in_state(OperationState::Undone);
         let left_to_undo = in_state(OperationState::Done);
         let status = if restored > 0 && restored == done {
@@ -264,9 +293,9 @@ impl SessionJournal {
         state: OperationState,
         only: Option<&'a HashSet<&str>>,
     ) -> impl DoubleEndedIterator<Item = &'a JournaledOperation> {
-        self.operations
-            .iter()
-            .filter(move |op| op.state == state && only.is_none_or(|ids| ids.contains(op.id.as_str())))
+        self.operations.iter().filter(move |op| {
+            op.state == state && only.is_none_or(|ids| ids.contains(op.id.as_str()))
+        })
     }
 }
 
@@ -275,7 +304,11 @@ impl SessionJournal {
 /// Session IDs sort by start time, so only the Journals on the page are
 /// read. A Journal that can't be understood (say, left empty by a crash) is
 /// left out, so it doesn't hide the others; its page is one short.
-pub fn list_sessions(journal_dir: &Path, offset: usize, limit: usize) -> Result<SessionPage, SessionError> {
+pub fn list_sessions(
+    journal_dir: &Path,
+    offset: usize,
+    limit: usize,
+) -> Result<SessionPage, SessionError> {
     let mut ids = journal::session_ids(journal_dir)?;
     ids.sort_unstable_by(|a, b| b.cmp(a));
     let mut sessions = Vec::new();
@@ -286,11 +319,17 @@ pub fn list_sessions(journal_dir: &Path, offset: usize, limit: usize) -> Result<
             Err(e) => return Err(e),
         }
     }
-    Ok(SessionPage { total: ids.len(), sessions })
+    Ok(SessionPage {
+        total: ids.len(),
+        sessions,
+    })
 }
 
 /// Session `session_id` and each of its Operations, from its Journal.
-pub fn session_details(session_id: &str, journal_dir: &Path) -> Result<SessionDetails, SessionError> {
+pub fn session_details(
+    session_id: &str,
+    journal_dir: &Path,
+) -> Result<SessionDetails, SessionError> {
     let session = SessionJournal::read(journal_dir, session_id)?;
     let root = &session.header.scan_root;
     let operations = session
@@ -308,5 +347,8 @@ pub fn session_details(session_id: &str, journal_dir: &Path) -> Result<SessionDe
             note: op.note.clone(),
         })
         .collect();
-    Ok(SessionDetails { info: session.info(), operations })
+    Ok(SessionDetails {
+        info: session.info(),
+        operations,
+    })
 }
