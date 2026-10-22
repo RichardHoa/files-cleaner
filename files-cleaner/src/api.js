@@ -3,6 +3,7 @@
 const { invoke, Channel } = window.__TAURI__.core;
 const dialog = window.__TAURI__.dialog;
 const opener = window.__TAURI__.opener;
+const events = window.__TAURI__.event;
 
 /** The OS's path separator: "/" on macOS and Linux, "\" on Windows. */
 export const pathSeparator = window.__TAURI__.path.sep();
@@ -63,6 +64,30 @@ export const recentScanRoots = () => invoke("recent_scan_roots");
 
 /** Takes `scanRoot` off the Recent Scan Roots. */
 export const removeRecentScanRoot = (scanRoot) => invoke("remove_recent_scan_root", { scanRoot });
+
+// The Grouping Models' status is `{ state, downloaded, total, error }`, `state` being "notInstalled",
+// "downloading", "paused" or "installed", `downloaded` and `total` in bytes, and `error` why the last
+// download failed, or null.
+
+export const groupingModelsStatus = () => invoke("grouping_models_status");
+
+/** Starts or resumes the download in the background; rejects if the disk is too full for it. */
+export const downloadGroupingModels = () => invoke("download_grouping_models");
+
+/** Pauses the download, keeping what's downloaded so far. */
+export const pauseGroupingModels = () => invoke("pause_grouping_models");
+
+/** Cancels the download, or removes the installed Grouping Models. */
+export const removeGroupingModels = () => invoke("remove_grouping_models");
+
+/** Calls `onStatus(status)` on every change; resolves to a function that stops listening. */
+export const onGroupingModelsStatus = (onStatus) => events.listen("grouping-models", (event) => onStatus(event.payload));
+
+/** Whether to offer the Grouping Models before Home: until the offer is answered, unless they're installed. */
+export const groupingModelsOfferPending = () => invoke("grouping_models_offer_pending");
+
+/** Remembers the answer to the first-open offer, "download" or "notNow", so it isn't asked again. */
+export const answerGroupingModelsOffer = (answer) => invoke("answer_grouping_models_offer", { answer });
 
 /** The folder the user picked, or null if they cancelled. */
 export const pickFolder = () => dialog.open({ directory: true, multiple: false, title: "Pick a folder to clean" });

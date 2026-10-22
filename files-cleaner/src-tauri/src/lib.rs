@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
 
+mod models;
+
 use files_cleaner_core::{
     self as core, Config, Plan, RecentScanRoot, RunProgress, ScanProgress, ScanResult, SessionDetails, SessionPage,
     Summary, EXAMPLE_CONFIG,
@@ -14,11 +16,17 @@ use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 
+use models::GroupingModels;
+
 const CONFIG_FILE_NAME: &str = "config.json";
 /// The Journal folder, inside the app data folder.
 const SESSIONS_FOLDER_NAME: &str = "sessions";
 /// The Recent Scan Roots, inside the app data folder.
 const RECENT_FILE_NAME: &str = "recent-scan-roots.json";
+/// The Grouping Models' folder, inside the app data folder.
+const MODELS_FOLDER_NAME: &str = "grouping-models";
+/// The answer to the first-open offer of the Grouping Models, inside the app data folder.
+const MODELS_OFFER_FILE_NAME: &str = "grouping-models-offer.json";
 
 /// The latest scan and, once built, its Plan, kept here so the UI doesn't
 /// send them back. One lock holds both, so a Plan never outlives its scan.
@@ -247,12 +255,62 @@ fn remove_recent_scan_root(app: AppHandle, scan_root: PathBuf) -> Result<(), Com
     core::remove_recent_scan_root(&recent_store(&app)?, &scan_root).map_err(CommandError::new)
 }
 
+/// The Grouping Models' status: `{ state, downloaded, total, error }`.
+/// Changes are also sent as the `grouping-models` event.
+#[tauri::command]
+fn grouping_models_status(models: State<'_, Arc<GroupingModels>>) -> models::Status {
+    models.status()
+}
+
+/// Starts or resumes downloading the Grouping Models in the background,
+/// unless the disk is too full for them.
+#[tauri::command]
+fn download_grouping_models(models: State<'_, Arc<GroupingModels>>) -> Result<models::Status, CommandError> {
+    models.download().map_err(CommandError::new)
+}
+
+/// Pauses the download, keeping what's downloaded so far.
+#[tauri::command]
+fn pause_grouping_models(models: State<'_, Arc<GroupingModels>>) -> models::Status {
+    models.pause()
+}
+
+/// Cancels the download, or removes the installed Grouping Models.
+#[tauri::command]
+fn remove_grouping_models(models: State<'_, Arc<GroupingModels>>) -> Result<models::Status, CommandError> {
+    models.remove().map_err(CommandError::new)
+}
+
+/// Whether to offer the Grouping Models before Home: only until the offer
+/// is answered, and never once they're installed.
+#[tauri::command]
+fn grouping_models_offer_pending(app: AppHandle, models: State<'_, Arc<GroupingModels>>) -> Result<bool, CommandError> {
+    Ok(!models.installed() && !app_data_path(&app, MODELS_OFFER_FILE_NAME)?.exists())
+}
+
+/// Remembers the answer to the first-open offer, `download` or `notNow`,
+/// so it isn't asked again.
+#[tauri::command]
+fn answer_grouping_models_offer(app: AppHandle, answer: String) -> Result<(), CommandError> {
+    let path = app_data_path(&app, MODELS_OFFER_FILE_NAME)?;
+    if let Some(folder) = path.parent() {
+        fs::create_dir_all(folder).map_err(CommandError::new)?;
+    }
+    let text = serde_json::to_string(&serde_json::json!({ "answer": answer })).map_err(CommandError::new)?;
+    fs::write(path, text).map_err(CommandError::new)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(Latest::default())
+        .setup(|app| {
+            let folder = app.path().app_data_dir()?.join(MODELS_FOLDER_NAME);
+            app.manage(Arc::new(GroupingModels::new(app.handle().clone(), folder)));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             load_config,
             open_config,
@@ -265,7 +323,13 @@ pub fn run() {
             session_details,
             list_sessions,
             recent_scan_roots,
-            remove_recent_scan_root
+            remove_recent_scan_root,
+            grouping_models_status,
+            download_grouping_models,
+            pause_grouping_models,
+            remove_grouping_models,
+            grouping_models_offer_pending,
+            answer_grouping_models_offer
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -7,6 +7,7 @@ import * as scanResults from "./screens/scan-results.js";
 import * as session from "./screens/session.js";
 import * as suggestedFolders from "./screens/suggested-folders.js";
 import { buildPlan, scan } from "./api.js";
+import { offerGroupingModelsOnce } from "./models-offer.js";
 import { stepFlow } from "./steps.js";
 
 const root = document.querySelector("#app");
@@ -33,3 +34,4 @@ function show(screen, ...args) {
 }
 
 nav.home();
+offerGroupingModelsOnce();
