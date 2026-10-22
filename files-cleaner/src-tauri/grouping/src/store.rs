@@ -20,6 +20,9 @@ pub struct CardStore {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Stored {
     pub card: Card,
+    /// A PDF with no text that OCR couldn't read either; it has an empty card.
+    #[serde(default)]
+    pub scanned: bool,
     pub embedding: Option<Vector>,
 }
 

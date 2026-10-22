@@ -2,8 +2,10 @@
 //! (ADR-0004). A small LLM writes a card per file, an embedding model embeds
 //! the cards, and the cards are clustered; each group is named after its
 //! most common topic and anchored to a matching existing subfolder.
-//! Archives, images and installers are never read: each kind is one group,
-//! unless the file's name ties it to a group of read files.
+//! Archives, images and installers are never read. PDFs with no text
+//! (scans) are read by OCR, and the ones it can't read, or all of them
+//! with no OCR engine, are a kind too: each kind is one group, unless the
+//! file's name ties it to a group of read files.
 //!
 //! Everything that needs llama.cpp or PDFium lives in this crate, so `core`
 //! stays pure Rust. `analyse` is the entry point; `Analysis::regroup` groups
@@ -14,6 +16,7 @@ mod cluster;
 mod kinds;
 mod llama;
 mod marks;
+mod ocr;
 mod read;
 mod store;
 mod trace;
@@ -139,8 +142,8 @@ pub struct SuggestedFolder {
     pub files: Vec<PathBuf>,
     /// The existing subfolder of the Scan Root it matches, if any.
     pub existing: Option<PathBuf>,
-    /// Whether it gathers a kind that is never read: archives, images or
-    /// installers.
+    /// Whether it gathers a kind that is never read: archives, images,
+    /// installers or scanned PDFs.
     pub fixed_kind: bool,
 }
 
@@ -154,7 +157,7 @@ pub struct Analysis {
     files: Vec<PathBuf>,
     cards: Vec<Card>,
     vectors: Vec<Vector>,
-    /// The loose files of each kind that is never read.
+    /// The loose files of each kind that is never read, scanned PDFs among them.
     fixed: BTreeMap<&'static str, Vec<PathBuf>>,
     subfolders: Vec<Subfolder>,
 }
@@ -215,7 +218,7 @@ pub fn analyse(
 
     let (card_id, embedding_id) = (models.card_model_id(), models.embedding_model_id());
     let ids = ModelIds { card: &card_id, embedding: &embedding_id };
-    let all: Vec<&ScanEntry> = to_read.iter().copied().chain(samples.iter().flat_map(|(_, s)| s.iter().copied())).collect();
+    let mut all: Vec<&ScanEntry> = to_read.iter().copied().chain(samples.iter().flat_map(|(_, s)| s.iter().copied())).collect();
     let mut stored: Vec<(Option<blake3::Hash>, Stored)> = Vec::with_capacity(all.len());
     let mut last_report: Option<Instant> = None;
     for (finished, entry) in all.iter().enumerate() {
@@ -231,7 +234,8 @@ pub fn analyse(
             Some(found) => found,
             None => {
                 let content = read::read(&entry.path, &entry.name, input.pdfium);
-                let made = Stored { card: models.card(&content).unwrap_or_default(), embedding: None };
+                let card = if content.scanned { Card::default() } else { models.card(&content).unwrap_or_default() };
+                let made = Stored { card, scanned: content.scanned, embedding: None };
                 if let Some(h) = &hash {
                     input.store.put(&ids, h, &made);
                 }
@@ -246,6 +250,19 @@ pub fn analyse(
     if cancel.load(Ordering::Relaxed) {
         return Err(Stopped::Cancelled);
     }
+
+    // Loose scanned PDFs are a kind of their own, grouped like images; one
+    // sampled from a subfolder still stands for it by its name.
+    let scanned: Vec<bool> = stored.iter().enumerate().map(|(i, (_, s))| i < to_read.len() && s.scanned).collect();
+    for (entry, _) in to_read.iter().zip(&scanned).filter(|(_, &s)| s) {
+        fixed.entry(kinds::SCANNED_PDFS).or_default().push(entry.path.clone());
+    }
+    let mut flags = scanned.iter();
+    to_read.retain(|_| !flags.next().unwrap());
+    let mut flags = scanned.iter();
+    all.retain(|_| !flags.next().unwrap());
+    let mut flags = scanned.iter();
+    stored.retain(|_| !flags.next().unwrap());
 
     // Every file is carded before any is embedded, then the cards missing a
     // vector and the names of subfolders with nothing to sample are embedded.
@@ -437,7 +454,7 @@ impl Analysis {
         let _ = writeln!(
             out,
             "Folder threshold {:.2} · existing folder threshold {:.2} · smallest folder {}\n\
-             Same topic, or topics sharing a mark, count as 1.00. Folders of archives, images and installers aren't listed.\n",
+             Same topic, or topics sharing a mark, count as 1.00. Folders of archives, images, installers and scanned PDFs aren't listed.\n",
             settings.folder_threshold, settings.existing_folder_threshold, settings.smallest_folder
         );
         for (name, members) in folders {

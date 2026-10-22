@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::read::Content;
+use crate::read::{Content, READER_VERSION};
 
 /// What the LLM says about one file. Every field may be empty.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -70,10 +70,10 @@ Look for it in the title, headers and first lines as well as the file name. \"\"
 \"type\": what kind of document it is, in 1 to 3 English words (e.g. \"invoice\", \"lecture notes\", \"resume\").\n\
 \"summary\": one short sentence on what the file is about, in the file's language.";
 
-/// Identifies the prompt, so cards written with an earlier one aren't used:
-/// changing the prompt reads every file again.
+/// Identifies the prompt and how files are read for it, so cards written
+/// with an earlier one aren't used: changing either reads every file again.
 pub fn prompt_id() -> String {
-    let id = blake3::hash(format!("{SYSTEM}\n{INSTRUCTIONS}\n{LLM_CHARS}").as_bytes());
+    let id = blake3::hash(format!("{SYSTEM}\n{INSTRUCTIONS}\n{LLM_CHARS}\n{READER_VERSION}").as_bytes());
     id.to_hex()[..8].to_string()
 }
 

@@ -1,5 +1,6 @@
 //! File kinds by extension. Archives, images and installers are never read:
-//! each of those kinds becomes one Suggested Folder of its own.
+//! each of those kinds becomes one Suggested Folder of its own, as do PDFs
+//! found to be scans that OCR can't read either.
 
 /// The kind of a file with extension `ext` (lowercased, without the dot),
 /// named as its folder would be.
@@ -26,6 +27,9 @@ pub fn kind(ext: &str) -> &'static str {
         _ => "Other",
     }
 }
+
+/// PDFs with no text to read: a kind of their own, found by opening them.
+pub const SCANNED_PDFS: &str = "Scanned PDFs";
 
 /// Kinds that are never read: each goes into one folder of its own,
 /// whatever the files are called.
