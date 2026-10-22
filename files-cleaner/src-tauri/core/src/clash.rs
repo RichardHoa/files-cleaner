@@ -30,6 +30,19 @@ pub fn free_name(name: &str, taken: &HashSet<String>) -> String {
         .expect("there is always a free suffix")
 }
 
+/// `name`, a folder's, if `taken` (lowercased names) doesn't hold it, or
+/// else the first free name with a Clash Suffix at its end: a folder has no
+/// extension, so `v1.2` becomes `v1.2 (1)`.
+pub fn free_folder_name(name: &str, taken: &HashSet<String>) -> String {
+    if !taken.contains(&name.to_lowercase()) {
+        return name.to_string();
+    }
+    (1..)
+        .map(|n| format!("{name} ({n})"))
+        .find(|candidate| !taken.contains(&candidate.to_lowercase()))
+        .expect("there is always a free suffix")
+}
+
 /// `name` split before its extension's dot, which stays with the extension.
 /// A leading dot doesn't start an extension.
 pub fn split_extension(name: &str) -> (&str, &str) {

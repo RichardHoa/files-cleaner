@@ -8,3 +8,10 @@
 
 # Temp folders left behind by core integration tests
 /core/test-tmp/
+
+# Temp folders left behind by grouping integration tests
+/grouping/test-tmp/
+
+# Libraries build.rs puts in place for bundling
+/pdfium/
+/vulkan/

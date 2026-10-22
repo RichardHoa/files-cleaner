@@ -105,6 +105,9 @@ pub enum Reason {
     /// Every item in the folder leaves it, so the folder would be left
     /// empty.
     EmptiedFolder,
+    /// The item goes into, or is trashed from, the Suggested Folder named
+    /// `folder`, or, for Create Folder, is that folder.
+    SuggestedFolder { folder: String },
 }
 
 /// Proposes the duplicate step: every non-Keeper copy in a Duplicate Group
@@ -166,14 +169,19 @@ pub fn build_rule_plan(scan: &ScanResult, config: &Config) -> Plan {
 }
 
 /// Makes a Plan of `operations` and of creating the folders in `created`,
-/// each with the Rule that needs it: in order, with the folders the Plan
+/// each with the Reason it is needed: in order, with the folders the Plan
 /// empties offered for Trash and moves to another disk marked as errors.
-fn finish(root: &Path, config: &Config, mut operations: Vec<Operation>, mut created: Vec<(PathBuf, String)>) -> Plan {
+pub(crate) fn finish(
+    root: &Path,
+    config: &Config,
+    mut operations: Vec<Operation>,
+    mut created: Vec<(PathBuf, Reason)>,
+) -> Plan {
     operations.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
 
     // Sorted by path, each folder comes before the folders inside it.
     created.sort_by(|a, b| a.0.cmp(&b.0));
-    let created = created.into_iter().map(|(folder, rule)| create_folder_operation(root, folder, rule));
+    let created = created.into_iter().map(|(folder, reason)| create_folder_operation(root, folder, reason));
     let mut operations: Vec<Operation> = created.chain(operations).collect();
     for op in &mut operations {
         op.error = across_disks(op);
@@ -269,7 +277,7 @@ fn empties(folder: &Path, leaving: &HashSet<&Path>, arriving: &[&Path], known: &
 #[derive(Default)]
 struct Folders {
     taken: HashMap<PathBuf, HashSet<String>>,
-    created: Vec<(PathBuf, String)>,
+    created: Vec<(PathBuf, Reason)>,
 }
 
 impl Folders {
@@ -279,7 +287,7 @@ impl Folders {
         if !self.taken.contains_key(folder) {
             for missing in folder.ancestors().take_while(|f| !f.exists()) {
                 if !self.created.iter().any(|(f, _)| f == missing) {
-                    self.created.push((missing.to_path_buf(), rule.name.clone()));
+                    self.created.push((missing.to_path_buf(), Reason::Rule { rule: rule.name.clone() }));
                 }
             }
         }
@@ -302,7 +310,7 @@ fn protected_below(protection: &Protection, folder: &Path, root: &Path) -> bool 
 
 /// Trashes `entry` into this Session's folder in the Holding Folder,
 /// keeping its path from the Scan Root.
-fn trash(root: &Path, entry: &ScanEntry, reason: Reason) -> Operation {
+pub(crate) fn trash(root: &Path, entry: &ScanEntry, reason: Reason) -> Operation {
     let destination = in_holding_folder(&entry.relative_path);
     Operation {
         id: format!("trash:{}", entry.relative_path.join("/")),
@@ -343,7 +351,7 @@ fn in_holding_folder(relative_path: &[String]) -> Vec<String> {
     [HOLDING_FOLDER_NAME, THIS_SESSION_FOLDER].into_iter().map(String::from).chain(relative_path.iter().cloned()).collect()
 }
 
-fn move_to(root: &Path, entry: &ScanEntry, destination: PathBuf, reason: Reason) -> Operation {
+pub(crate) fn move_to(root: &Path, entry: &ScanEntry, destination: PathBuf, reason: Reason) -> Operation {
     Operation {
         id: format!("move:{}", entry.relative_path.join("/")),
         kind: OperationKind::Move,
@@ -358,7 +366,7 @@ fn move_to(root: &Path, entry: &ScanEntry, destination: PathBuf, reason: Reason)
     }
 }
 
-fn create_folder_operation(root: &Path, folder: PathBuf, rule: String) -> Operation {
+fn create_folder_operation(root: &Path, folder: PathBuf, reason: Reason) -> Operation {
     let names = names_below(root, &folder);
     Operation {
         id: format!("createFolder:{}", folder.display()),
@@ -368,7 +376,7 @@ fn create_folder_operation(root: &Path, folder: PathBuf, rule: String) -> Operat
         destination: names,
         destination_path: folder,
         planned: SourceState { size: 0, modified: 0, is_package: false, is_folder: false },
-        reason: Reason::Rule { rule },
+        reason,
         ticked: true,
         error: None,
     }

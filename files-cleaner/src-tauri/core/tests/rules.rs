@@ -64,6 +64,7 @@ fn reasons(plan: &Plan) -> Vec<(String, String)> {
                 Reason::Duplicate { .. } => "duplicate".to_string(),
                 Reason::Rule { rule } => rule.clone(),
                 Reason::EmptiedFolder => "emptied folder".to_string(),
+                Reason::SuggestedFolder { folder } => folder.clone(),
             };
             (op.relative_path.join("/"), why)
         })

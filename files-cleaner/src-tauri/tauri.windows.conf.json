@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "resources": {
+      "pdfium/*": "pdfium/",
+      "vulkan/vulkan-1.dll": "vulkan-1.dll"
+    }
+  }
+}
