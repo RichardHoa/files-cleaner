@@ -1,10 +1,13 @@
 # Builds, tests and packages the app on each OS it ships for, with the
 # grouping engine's llama.cpp on Metal (macOS) or Vulkan (Windows, Linux).
+# Pushing a version tag (v0.1.0) also publishes the installers as a GitHub
+# Release, once every OS has built.
 name: Platforms
 
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -23,22 +26,53 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Linux packages (Tauri, Vulkan headers and shader compiler)
+      - name: Install Linux packages (Tauri, Vulkan and SPIR-V headers, shader compiler)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev \
             libayatana-appindicator3-dev librsvg2-dev \
-            libvulkan-dev glslc
+            libvulkan-dev spirv-headers glslc
 
-      # Sets VULKAN_SDK, which build.rs needs to bundle vulkan-1.dll.
-      - name: Install the Vulkan SDK
+      # Sets VULKAN_SDK. The runtime brings vulkan-1.dll, which build.rs bundles.
+      - name: Install the Vulkan SDK and runtime
         if: runner.os == 'Windows'
         uses: jakoch/install-vulkan-sdk-action@v1
         with:
           vulkan_version: latest
+          install_runtime: true
           cache: true
+
+      - name: Show where vulkan-1.dll is
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-ChildItem -Recurse -ErrorAction SilentlyContinue -Filter vulkan-1.dll `
+            $env:VULKAN_SDK, "$env:SystemRoot\System32" | Select-Object -ExpandProperty FullName
+
+      # llama.cpp builds with Ninja, as its own Windows CI does: under the
+      # Visual Studio generator its shader tool fails with C1041 (a PDB clash).
+      - name: Set up the MSVC command line for Ninja
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build with Ninja
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "CMAKE_GENERATOR=Ninja" >> "$GITHUB_ENV"
+
+      # cl.exe can't open files past MAX_PATH (260), and llama.cpp's shader
+      # tool nests its build ~270 characters deep under src-tauri/target,
+      # failing with C1041. Cargo builds through a short junction instead;
+      # the files stay in src-tauri/target for the cache and the upload.
+      - name: Shorten the target path
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $target = New-Item -ItemType Directory -Force files-cleaner/src-tauri/target
+          New-Item -ItemType Junction -Path D:\t -Target $target.FullName
+          "CARGO_TARGET_DIR=D:\t" >> $env:GITHUB_ENV
 
       - uses: actions/setup-node@v4
         with:
@@ -77,3 +111,28 @@ jobs:
           name: bundle-${{ matrix.os }}
           path: files-cleaner/src-tauri/target/release/bundle/
           retention-days: 7
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bundle-*
+
+      # The installers only: the .app inside the macOS bundle is a folder,
+      # which the .dmg already carries.
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            bundle-macos-latest/dmg/*.dmg
+            bundle-windows-latest/msi/*.msi
+            bundle-windows-latest/nsis/*.exe
+            bundle-ubuntu-24.04/deb/*.deb
+            bundle-ubuntu-24.04/rpm/*.rpm
+            bundle-ubuntu-24.04/appimage/*.AppImage

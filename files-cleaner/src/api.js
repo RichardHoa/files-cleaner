@@ -89,8 +89,38 @@ export const groupingModelsOfferPending = () => invoke("grouping_models_offer_pe
 /** Remembers the answer to the first-open offer, "download" or "notNow", so it isn't asked again. */
 export const answerGroupingModelsOffer = (answer) => invoke("answer_grouping_models_offer", { answer });
 
+// The Suggested Folders are `{ folders, ungrouped, summaries }`: `folders` largest first, each
+// `{ name, files, existing, fixedKind }`, `existing` the matched subfolder's path or null; `ungrouped` the
+// files left where they are; `summaries` each read file's one-sentence summary, keyed by path.
+
+/**
+ * Reads the loose files of the latest scan with the Grouping Models and groups them by `settings`, as
+ * `regroup` takes them, calling `onProgress({ finished, total, current })` as it goes: `{ grouping, device }`,
+ * `device` where the models ran or null. Rejects once `cancelAnalysis` stops it.
+ */
+export function analyseLooseFiles(settings, onProgress) {
+  const channel = new Channel();
+  channel.onmessage = onProgress;
+  return invoke("analyse_loose_files", { settings, onProgress: channel });
+}
+
+/** Stops the running analysis; the files read so far aren't read again next time. */
+export const cancelAnalysis = () => invoke("cancel_analysis");
+
+/** The latest analysis grouped again by `{ folderThreshold, existingFolderThreshold, smallestFolder }`, with no model run. */
+export const regroup = (settings) => invoke("regroup", { settings });
+
+/**
+ * Plans the choices for each Suggested Folder over the latest scan, as `buildPlan` does for the duplicate
+ * step, with `reason` `{ type: "suggestedFolder", folder }`. `folders` is `[{ name, choice, files }]`, `choice`
+ * one of `{ type: "createHere" }`, `{ type: "addTo", folder }`, `{ type: "createIn", folder }`,
+ * `{ type: "trashAll" }` or `{ type: "skip" }`, and `files` `[[path, "inFolder" | "trash" | "takeOut"]]`.
+ * Rejects if a name can't be a folder name.
+ */
+export const buildSuggestedFoldersPlan = (folders) => invoke("build_suggested_folders_plan", { folders });
+
 /** The folder the user picked, or null if they cancelled. */
-export const pickFolder = () => dialog.open({ directory: true, multiple: false, title: "Pick a folder to clean" });
+export const pickFolder = (title = "Pick a folder to clean") => dialog.open({ directory: true, multiple: false, title });
 
 /**
  * Opens the file manager (Finder, Explorer or the Linux one) on the folder holding `path`, with it selected. A Package is selected, not opened.

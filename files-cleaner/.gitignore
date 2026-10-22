@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Grouping traces: prompts, replies and similarity reports (debug builds)
+prompts

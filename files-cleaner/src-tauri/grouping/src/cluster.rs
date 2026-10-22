@@ -30,17 +30,20 @@ impl Similarities {
     }
 }
 
-/// Clusters files by their vectors, counting two files with the same topic
-/// key as similarity 1: the LLM has already said they belong together,
-/// however differently they are worded. A file with no topic never counts
-/// as the same topic.
-pub fn cluster(vectors: &[Vector], topics: &[Option<String>], threshold: f32, min_size: usize) -> Clusters {
+/// Clusters files by their vectors, counting two files `same_topic` says
+/// share a topic as similarity 1: the LLM has already said they belong
+/// together, however differently they are worded.
+pub fn cluster(
+    vectors: &[Vector],
+    same_topic: impl Fn(usize, usize) -> bool,
+    threshold: f32,
+    min_size: usize,
+) -> Clusters {
     let n = vectors.len();
     let mut sims = Similarities { n, values: vec![1.0; n * n] };
     for i in 0..n {
         for j in i + 1..n {
-            let same_topic = topics[i].is_some() && topics[i] == topics[j];
-            sims.set(i, j, if same_topic { 1.0 } else { cosine(&vectors[i], &vectors[j]) });
+            sims.set(i, j, similarity(&vectors[i], &vectors[j], same_topic(i, j)));
         }
     }
     agglomerate(sims, threshold, min_size)
@@ -101,6 +104,15 @@ fn agglomerate(mut link: Similarities, threshold: f32, min_size: usize) -> Clust
     groups.sort_by(|a, b| b.len().cmp(&a.len()).then(a[0].cmp(&b[0])));
     ungrouped.sort();
     Clusters { groups, ungrouped }
+}
+
+/// How alike two files are: 1 when they share a topic, else their cosine.
+pub fn similarity(a: &[f32], b: &[f32], same_topic: bool) -> f32 {
+    if same_topic {
+        1.0
+    } else {
+        cosine(a, b)
+    }
 }
 
 pub fn normalized(mut v: Vector) -> Vector {

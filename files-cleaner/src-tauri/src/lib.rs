@@ -4,14 +4,16 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::convert::Infallible;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 mod models;
 
 use files_cleaner_core::{
     self as core, Config, Plan, RecentScanRoot, RunProgress, ScanProgress, ScanResult, SessionDetails, SessionPage,
-    Summary, EXAMPLE_CONFIG,
+    SuggestedFolderChoice, Summary, EXAMPLE_CONFIG,
 };
+use files_cleaner_grouping::{self as grouping, Analysis, CardStore, Grouping, LlamaModels};
 use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
@@ -27,6 +29,15 @@ const RECENT_FILE_NAME: &str = "recent-scan-roots.json";
 const MODELS_FOLDER_NAME: &str = "grouping-models";
 /// The answer to the first-open offer of the Grouping Models, inside the app data folder.
 const MODELS_OFFER_FILE_NAME: &str = "grouping-models-offer.json";
+/// The cards the Grouping Models wrote, inside the app data folder.
+const CARDS_FOLDER_NAME: &str = "grouping-cards";
+/// The bundled PDFium library, inside the app's resources.
+#[cfg(target_os = "macos")]
+const PDFIUM_LIBRARY: &str = "pdfium/libpdfium.dylib";
+#[cfg(target_os = "windows")]
+const PDFIUM_LIBRARY: &str = "pdfium/pdfium.dll";
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+const PDFIUM_LIBRARY: &str = "pdfium/libpdfium.so";
 
 /// The latest scan and, once built, its Plan, kept here so the UI doesn't
 /// send them back. One lock holds both, so a Plan never outlives its scan.
@@ -36,6 +47,14 @@ struct Latest(Mutex<Option<Scanned>>);
 struct Scanned {
     scan: Arc<ScanResult>,
     plan: Option<Plan>,
+}
+
+/// The latest analysis of a scan's loose files with that scan, kept for
+/// regrouping, and the cancel flag of the analysis running now, if any.
+#[derive(Default)]
+struct Analysing {
+    latest: Mutex<Option<(Arc<ScanResult>, Analysis)>>,
+    cancel: Mutex<Arc<AtomicBool>>,
 }
 
 /// An error the UI can show: what went wrong and, for a config error,
@@ -164,8 +183,7 @@ async fn scan(
 #[tauri::command]
 async fn build_plan(app: AppHandle, latest: State<'_, Latest>) -> Result<Plan, CommandError> {
     let loaded = read_config(&app)?;
-    let scan = latest.0.lock().unwrap().as_ref().map(|s| Arc::clone(&s.scan));
-    let scan = scan.ok_or_else(|| CommandError::new("Scan a folder first"))?;
+    let scan = latest_scan(&latest)?;
     let planned = Arc::clone(&scan);
     let plan = blocking(move || Ok::<_, Infallible>(core::build_plan(&planned, &loaded.config))).await?;
     // Kept only if no newer scan came in while planning.
@@ -255,6 +273,107 @@ fn remove_recent_scan_root(app: AppHandle, scan_root: PathBuf) -> Result<(), Com
     core::remove_recent_scan_root(&recent_store(&app)?, &scan_root).map_err(CommandError::new)
 }
 
+/// The latest scan, or an error asking for one.
+fn latest_scan(latest: &Latest) -> Result<Arc<ScanResult>, CommandError> {
+    let scan = latest.0.lock().unwrap().as_ref().map(|s| Arc::clone(&s.scan));
+    scan.ok_or_else(|| CommandError::new("Scan a folder first"))
+}
+
+/// PDFium as bundled with the app, if it's there; without it, PDFs are
+/// read by name.
+fn pdfium_library(app: &AppHandle) -> Option<PathBuf> {
+    let path = app.path().resource_dir().ok()?.join(PDFIUM_LIBRARY);
+    path.is_file().then_some(path)
+}
+
+/// What an analysis found, for the Suggested Folders step.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AnalysisResult {
+    grouping: Grouping,
+    /// Where the Grouping Models ran; `None` when every card was stored.
+    device: Option<String>,
+}
+
+/// Reads the loose files of the latest scan with the Grouping Models, off
+/// the UI thread, sending progress to `on_progress`, and suggests folders
+/// for them by `settings`. The models are loaded for this analysis only. The analysis is
+/// kept for `regroup`; `cancel_analysis` stops it.
+#[tauri::command]
+async fn analyse_loose_files(
+    app: AppHandle,
+    latest: State<'_, Latest>,
+    analysing: State<'_, Analysing>,
+    models: State<'_, Arc<GroupingModels>>,
+    settings: grouping::Settings,
+    on_progress: Channel<grouping::Progress>,
+) -> Result<AnalysisResult, CommandError> {
+    // Set first, so a Cancel that comes in while starting stops this analysis.
+    let cancel = Arc::new(AtomicBool::new(false));
+    *analysing.cancel.lock().unwrap() = Arc::clone(&cancel);
+    let scan = latest_scan(&latest)?;
+    let (llm, embedding) = models.files().ok_or_else(|| CommandError::new("Download the grouping models first"))?;
+    let store = CardStore::open(app_data_path(&app, CARDS_FOLDER_NAME)?);
+    let pdfium = pdfium_library(&app);
+    let analysed = Arc::clone(&scan);
+    let analysis = blocking(move || {
+        // Dropped when the analysis ends, freeing the models' memory.
+        let mut models = LlamaModels::new(&llm, &embedding);
+        let input =
+            grouping::Input { scan: &analysed, settings, store: &store, pdfium: pdfium.as_deref() };
+        // A closed window can't receive progress; the analysis carries on.
+        grouping::analyse(&input, &mut models, &cancel, |progress| {
+            let _ = on_progress.send(progress);
+        })
+    })
+    .await?;
+    let result = AnalysisResult { grouping: analysis.grouping.clone(), device: analysis.device.clone() };
+    *analysing.latest.lock().unwrap() = Some((scan, analysis));
+    Ok(result)
+}
+
+/// Stops the running analysis between files; the cards made so far are kept.
+#[tauri::command]
+fn cancel_analysis(analysing: State<'_, Analysing>) {
+    analysing.cancel.lock().unwrap().store(true, Ordering::Relaxed);
+}
+
+/// The latest scan's analysis grouped again by `settings`, with no model run.
+#[tauri::command]
+fn regroup(
+    latest: State<'_, Latest>,
+    analysing: State<'_, Analysing>,
+    settings: grouping::Settings,
+) -> Result<Grouping, CommandError> {
+    let scan = latest_scan(&latest)?;
+    let analysed = analysing.latest.lock().unwrap();
+    let (_, analysis) = analysed
+        .as_ref()
+        .filter(|(analysed, _)| Arc::ptr_eq(analysed, &scan))
+        .ok_or_else(|| CommandError::new("Read the files first"))?;
+    Ok(analysis.regroup(&settings))
+}
+
+/// Plans the user's choices for each Suggested Folder over the latest scan.
+/// The Plan is kept for `run_plan`, which runs it as its own Session.
+#[tauri::command]
+async fn build_suggested_folders_plan(
+    app: AppHandle,
+    latest: State<'_, Latest>,
+    folders: Vec<SuggestedFolderChoice>,
+) -> Result<Plan, CommandError> {
+    let loaded = read_config(&app)?;
+    let scan = latest_scan(&latest)?;
+    let planned = Arc::clone(&scan);
+    // Finding names already taken reads the destination folders.
+    let plan = blocking(move || core::build_suggested_folders_plan(&planned, &loaded.config, &folders)).await?;
+    // Kept only if no newer scan came in while planning.
+    if let Some(scanned) = latest.0.lock().unwrap().as_mut().filter(|s| Arc::ptr_eq(&s.scan, &scan)) {
+        scanned.plan = Some(plan.clone());
+    }
+    Ok(plan)
+}
+
 /// The Grouping Models' status: `{ state, downloaded, total, error }`.
 /// Changes are also sent as the `grouping-models` event.
 #[tauri::command]
@@ -302,10 +421,15 @@ fn answer_grouping_models_offer(app: AppHandle, answer: String) -> Result<(), Co
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // While developing, each prompt and reply and a similarity report go to
+    // `files-cleaner/prompts/` (ignored by git), for tuning the grouping.
+    #[cfg(debug_assertions)]
+    grouping::trace_to(concat!(env!("CARGO_MANIFEST_DIR"), "/../prompts"));
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(Latest::default())
+        .manage(Analysing::default())
         .setup(|app| {
             let folder = app.path().app_data_dir()?.join(MODELS_FOLDER_NAME);
             app.manage(Arc::new(GroupingModels::new(app.handle().clone(), folder)));
@@ -329,7 +453,11 @@ pub fn run() {
             pause_grouping_models,
             remove_grouping_models,
             grouping_models_offer_pending,
-            answer_grouping_models_offer
+            answer_grouping_models_offer,
+            analyse_loose_files,
+            cancel_analysis,
+            regroup,
+            build_suggested_folders_plan
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -12,7 +12,8 @@
       {
         "title": "Files Cleaner",
         "width": 1100,
-        "height": 720
+        "height": 720,
+        "dragDropEnabled": false
       }
     ],
     "security": {
@@ -49,6 +50,9 @@
           "vulkan-loader"
         ]
       }
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15"
     },
     "windows": {
       "webviewInstallMode": {

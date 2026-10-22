@@ -111,6 +111,12 @@ impl GroupingModels {
         MODELS.iter().all(|model| self.file(model).is_file())
     }
 
+    /// The two model files, the card writer's then the embedding model's,
+    /// once both are installed.
+    pub fn files(&self) -> Option<(PathBuf, PathBuf)> {
+        self.installed().then(|| (self.file(&MODELS[0]), self.file(&MODELS[1])))
+    }
+
     pub fn status(&self) -> Status {
         let inner = self.inner.lock().unwrap();
         self.status_of(&inner)

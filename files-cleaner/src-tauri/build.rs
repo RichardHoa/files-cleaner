@@ -81,16 +81,24 @@ fn fetch_pdfium(folder: &Path, os: &str, arch: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Copies `vulkan-1.dll` from the Vulkan SDK on the build machine into
-/// `folder`, to be installed next to the app's executable.
+/// Copies `vulkan-1.dll` from the build machine into `folder`, to be
+/// installed next to the app's executable. Recent Vulkan SDKs leave it out
+/// of `Bin`: the Vulkan Runtime, which GPU drivers also install, puts it in
+/// System32.
 fn copy_vulkan_loader(folder: &Path) -> Result<(), String> {
     let to = folder.join("vulkan-1.dll");
     if to.exists() {
         return Ok(());
     }
     let sdk = env::var("VULKAN_SDK").map_err(|_| "VULKAN_SDK isn't set; install the Vulkan SDK".to_string())?;
-    let from = Path::new(&sdk).join("Bin").join("vulkan-1.dll");
+    let system32 = Path::new(&env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string())).join("System32");
+    let candidates =
+        [Path::new(&sdk).join("Bin"), Path::new(&sdk).join("runtime").join("x64"), system32].map(|f| f.join("vulkan-1.dll"));
+    let from = candidates.iter().find(|path| path.is_file()).ok_or_else(|| {
+        let looked: Vec<String> = candidates.iter().map(|path| path.display().to_string()).collect();
+        format!("no vulkan-1.dll in {}; install the Vulkan Runtime", looked.join(", "))
+    })?;
     fs::create_dir_all(folder).map_err(|e| e.to_string())?;
-    fs::copy(&from, &to).map_err(|e| format!("{}: {e}", from.display()))?;
+    fs::copy(from, &to).map_err(|e| format!("{}: {e}", from.display()))?;
     Ok(())
 }

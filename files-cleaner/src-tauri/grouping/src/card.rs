@@ -60,6 +60,23 @@ const LLM_CHARS: usize = 1200;
 
 const SYSTEM: &str = "You label files so they can be sorted into folders. Reply with one JSON object and nothing else.";
 
+/// What the LLM is asked for, after the file.
+const INSTRUCTIONS: &str = "Reply with a JSON object with these keys:\n\
+\"topic\": the course, project, organization, person, product or subject this file belongs to, \
+in 1 to 4 words, in the file's language. Name it as a person would name a folder for it, so related files \
+get the same topic: when the file gives a full name and a code, use the full name (\"Linear Algebra\", not \"MATH221\"); \
+use the broad subject rather than one part of it (\"TOEFL\", not \"TOEFL Listening Section 2\"). \
+Look for it in the title, headers and first lines as well as the file name. \"\" if unclear.\n\
+\"type\": what kind of document it is, in 1 to 3 English words (e.g. \"invoice\", \"lecture notes\", \"resume\").\n\
+\"summary\": one short sentence on what the file is about, in the file's language.";
+
+/// Identifies the prompt, so cards written with an earlier one aren't used:
+/// changing the prompt reads every file again.
+pub fn prompt_id() -> String {
+    let id = blake3::hash(format!("{SYSTEM}\n{INSTRUCTIONS}\n{LLM_CHARS}").as_bytes());
+    id.to_hex()[..8].to_string()
+}
+
 /// The card prompt in Qwen's chat template, written out.
 pub fn prompt(content: &Content) -> String {
     let body = if content.body.is_empty() {
@@ -69,12 +86,7 @@ pub fn prompt(content: &Content) -> String {
     };
     let user = format!(
         "File name: {}\n\
-         Start of the file:\n\"\"\"\n{body}\n\"\"\"\n\n\
-         Reply with a JSON object with these keys:\n\
-         \"topic\": the specific course, project, organization, person, product or subject this file belongs to, \
-         in 1 to 4 words, in the file's language (e.g. \"CS101\", \"IELTS Writing\", \"Công ty ABC\"); \"\" if unclear.\n\
-         \"type\": what kind of document it is, in 1 to 3 English words (e.g. \"invoice\", \"lecture notes\", \"resume\").\n\
-         \"summary\": one short sentence on what the file is about, in the file's language.",
+         Start of the file:\n\"\"\"\n{body}\n\"\"\"\n\n{INSTRUCTIONS}",
         content.name
     );
     format!("<|im_start|>system\n{SYSTEM}<|im_end|>\n<|im_start|>user\n{user}<|im_end|>\n<|im_start|>assistant\n")

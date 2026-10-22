@@ -15,10 +15,10 @@ use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::sampling::LlamaSampler;
 use llama_cpp_2::{list_llama_ggml_backend_devices, LlamaBackendDeviceType};
 
-use crate::card::{parse_card, prompt, Card};
+use crate::card::{parse_card, prompt, prompt_id, Card};
 use crate::cluster::Vector;
 use crate::read::Content;
-use crate::Models;
+use crate::{trace, Models};
 
 /// Tokens the LLM sees per file: the prompt plus the card.
 const LLM_CONTEXT: u32 = 2048;
@@ -65,8 +65,9 @@ impl LlamaModels {
 }
 
 impl Models for LlamaModels {
+    /// The model and the prompt it's given.
     fn card_model_id(&self) -> String {
-        file_name(&self.llm_path)
+        format!("{} {}", file_name(&self.llm_path), prompt_id())
     }
 
     fn embedding_model_id(&self) -> String {
@@ -77,10 +78,12 @@ impl Models for LlamaModels {
         let backend = backend()?;
         let model = &self.llm()?.model;
         let vocab = model.vocab();
-        let mut tokens = vocab.tokenize(prompt(content).as_bytes(), false, true);
+        let prompt = prompt(content);
+        let mut tokens = vocab.tokenize(prompt.as_bytes(), false, true);
         // A prompt too long for the context loses the end of the file's text.
         let room = LLM_CONTEXT as usize - MAX_NEW_TOKENS;
-        if tokens.len() > room {
+        let cut = tokens.len() > room;
+        if cut {
             let end = tokens.split_off(tokens.len() - 5);
             tokens.truncate(room - end.len());
             tokens.extend(end);
@@ -107,7 +110,16 @@ impl Models for LlamaModels {
             batch.add(token, position as i32, &[0], true).map_err(|e| e.to_string())?;
             context.decode(&mut batch).map_err(|e| e.to_string())?;
         }
-        Ok(parse_card(&String::from_utf8_lossy(&vocab.detokenize(&reply, true, false))))
+        let reply = String::from_utf8_lossy(&vocab.detokenize(&reply, true, false)).into_owned();
+        let card = parse_card(&reply);
+        if trace::enabled() {
+            let cut = if cut { format!("\n(cut to {room} tokens: the end of the file's text was left out)\n") } else { String::new() };
+            trace::write(
+                &format!("{}.txt", content.name),
+                &format!("=== PROMPT ===\n{prompt}{cut}\n=== REPLY ===\n{reply}\n\n=== CARD ===\n{card:#?}\n"),
+            );
+        }
+        Ok(card)
     }
 
     fn embed(&mut self, texts: &[String]) -> Result<Vec<Vector>, String> {

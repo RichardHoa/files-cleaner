@@ -1,0 +1,180 @@
+/* Suggested Folders: laid out like the Plan (header, then cards one above the other), with each card
+   holding its own files. Flat surfaces and hairline dividers; the name field looks like text until
+   it's edited. Files drag between cards; the card a file would drop into gets an accent outline. */
+.analysis-progress {
+  width: min(100%, 420px);
+}
+
+.folder-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 var(--space-4);
+}
+
+.folder-card {
+  padding: var(--space-3);
+}
+
+.folder-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+}
+
+.folder-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  width: 60%;
+  margin-left: calc(-1 * var(--space-1));
+  padding: var(--space-0-5) var(--space-1);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+}
+
+.folder-name:hover,
+.folder-name:focus {
+  border-color: var(--border-control);
+  background: var(--surface);
+}
+
+.folder-name[aria-invalid="true"] {
+  border-color: var(--error);
+}
+
+.folder-name-error {
+  margin: var(--space-1) 0 0;
+}
+
+.folder-name-error:empty {
+  display: none;
+}
+
+.folder-card-choice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+}
+
+.folder-where {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.folder-card-choice select {
+  font: inherit;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-control);
+  background: var(--surface);
+  color: inherit;
+}
+
+.folder-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+}
+
+.folder-file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-1-5) var(--space-1);
+  border-bottom: 1px solid var(--border);
+}
+
+.folder-file-name {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.folder-file-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--space-3);
+  font-size: var(--font-sm);
+}
+
+.folder-file.out .folder-file-name,
+.folder-files.skipped .folder-file-name {
+  color: var(--muted);
+}
+
+.folder-files.skipped button.link {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.folder-file[draggable="true"] {
+  cursor: grab;
+}
+
+.folder-file.dragging {
+  opacity: 0.5;
+}
+
+.drop-target {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.left-section {
+  border-radius: var(--radius-sm);
+  padding-bottom: var(--space-2);
+}
+
+.left-kind {
+  margin: var(--space-4) 0 var(--space-1);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.folder-file-date {
+  flex-shrink: 0;
+  font-size: var(--font-sm);
+}
+
+.left-files {
+  margin-bottom: var(--space-2);
+}
+
+.grouping-settings {
+  margin: var(--space-2) 0;
+}
+
+.grouping-settings summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.grouping-setting {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-2) 0;
+}
+
+.grouping-setting span {
+  min-width: 18em;
+}
+
+.grouping-setting input {
+  width: min(100%, 240px);
+}
+
+.grouping-setting output {
+  font-variant-numeric: tabular-nums;
+}

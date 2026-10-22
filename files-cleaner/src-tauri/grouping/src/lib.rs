@@ -2,7 +2,8 @@
 //! (ADR-0004). A small LLM writes a card per file, an embedding model embeds
 //! the cards, and the cards are clustered; each group is named after its
 //! most common topic and anchored to a matching existing subfolder.
-//! Archives, images and installers are never read: each kind is one group.
+//! Archives, images and installers are never read: each kind is one group,
+//! unless the file's name ties it to a group of read files.
 //!
 //! Everything that needs llama.cpp or PDFium lives in this crate, so `core`
 //! stays pure Rust. `analyse` is the entry point; `Analysis::regroup` groups
@@ -12,23 +13,26 @@ mod card;
 mod cluster;
 mod kinds;
 mod llama;
+mod marks;
 mod read;
 mod store;
+mod trace;
 
 use std::collections::{BTreeMap, HashSet};
-use std::fmt;
+use std::fmt::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use files_cleaner_core::{ScanEntry, ScanResult};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub use card::Card;
 pub use cluster::Vector;
 pub use llama::LlamaModels;
 pub use read::{pdf_child_main, Content};
 pub use store::CardStore;
+pub use trace::trace_to;
 
 use cluster::{centroid, cosine, normalized};
 use store::{content_hash, ModelIds, Stored};
@@ -52,7 +56,7 @@ pub trait Models {
 }
 
 /// How the files are grouped.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     /// How closely files must match to share a folder, 0–1.
@@ -122,6 +126,8 @@ pub struct Grouping {
     pub folders: Vec<SuggestedFolder>,
     /// Files in no Suggested Folder, which stay where they are.
     pub ungrouped: Vec<PathBuf>,
+    /// The kind of each file, grouped or not, such as "Documents".
+    pub kinds: BTreeMap<PathBuf, &'static str>,
     /// Each read file's one-sentence summary, where it has one.
     pub summaries: BTreeMap<PathBuf, String>,
 }
@@ -282,7 +288,12 @@ pub fn analyse(
         })
         .collect();
     let mut analysis = Analysis {
-        grouping: Grouping { folders: Vec::new(), ungrouped: Vec::new(), summaries: BTreeMap::new() },
+        grouping: Grouping {
+            folders: Vec::new(),
+            ungrouped: Vec::new(),
+            kinds: BTreeMap::new(),
+            summaries: BTreeMap::new(),
+        },
         device: models.device(),
         files: to_read.iter().map(|e| e.path.clone()).collect(),
         cards,
@@ -302,22 +313,49 @@ impl Analysis {
         let mut folders = Vec::new();
         let mut ungrouped = Vec::new();
         let mut used_names: HashSet<String> = HashSet::new();
+
+        let topics: Vec<Option<String>> = self.cards.iter().map(Card::topic_key).collect();
+        // The same topic, or topics sharing a mark: "IELTS Speaking" and "IELTS Writing".
+        let same_topic = |i: usize, j: usize| match (&topics[i], &topics[j]) {
+            (Some(a), Some(b)) => a == b || marks::share_mark(&self.cards[i].topic, &self.cards[j].topic),
+            _ => false,
+        };
+        let clusters =
+            cluster::cluster(&self.vectors, same_topic, settings.folder_threshold, settings.smallest_folder);
+        let mut named: Vec<(String, &[usize])> = Vec::new();
+
+        // A file that is never read joins the first group with a file name
+        // sharing a mark with its own: `Lab5_StudentID.zip` with `Lab5_Report.docx`.
+        let group_marks: Vec<HashSet<String>> = clusters
+            .groups
+            .iter()
+            .map(|members| members.iter().flat_map(|&i| marks::name_marks(&file_name(&self.files[i]))).collect())
+            .collect();
+        let mut joined: Vec<Vec<PathBuf>> = vec![Vec::new(); clusters.groups.len()];
+        let mut fixed: BTreeMap<&str, Vec<PathBuf>> = BTreeMap::new();
         for (kind, files) in &self.fixed {
+            for file in files {
+                let own = marks::name_marks(&file_name(file));
+                match group_marks.iter().position(|g| own.iter().any(|m| g.contains(m))) {
+                    Some(g) => joined[g].push(file.clone()),
+                    None => fixed.entry(kind).or_default().push(file.clone()),
+                }
+            }
+        }
+
+        for (kind, files) in fixed {
             if files.len() < settings.smallest_folder {
-                ungrouped.extend(files.iter().cloned());
+                ungrouped.extend(files);
                 continue;
             }
             used_names.insert(kind.to_lowercase());
             let existing = kinds::matching_folder(kind, &folder_names)
                 .and_then(|name| self.subfolders.iter().find(|f| f.name == name))
                 .map(|f| f.path.clone());
-            folders.push(SuggestedFolder { name: kind.to_string(), files: files.clone(), existing, fixed_kind: true });
+            folders.push(SuggestedFolder { name: kind.to_string(), files, existing, fixed_kind: true });
         }
 
-        let topics: Vec<Option<String>> = self.cards.iter().map(Card::topic_key).collect();
-        let clusters =
-            cluster::cluster(&self.vectors, &topics, settings.folder_threshold, settings.smallest_folder);
-        for members in &clusters.groups {
+        for (members, joined) in clusters.groups.iter().zip(joined) {
             let centre = centroid(members.iter().map(|&i| &self.vectors[i])).unwrap_or_default();
             let existing = self
                 .subfolders
@@ -326,7 +364,15 @@ impl Analysis {
                 .max_by(|a, b| a.1.total_cmp(&b.1))
                 .filter(|(_, s)| *s >= settings.existing_folder_threshold)
                 .map(|(f, _)| f.path.clone());
-            let base = most_common(members.iter().map(|&i| self.cards[i].topic.as_str()))
+            // Topics that differ but share a mark name the folder after it: "IELTS".
+            let member_topics: Vec<&str> =
+                members.iter().map(|&i| self.cards[i].topic.trim()).filter(|t| !t.is_empty()).collect();
+            let agreed = members.iter().filter_map(|&i| topics[i].as_ref()).collect::<HashSet<_>>().len() <= 1;
+            let base = (!agreed)
+                .then(|| marks::shared_mark(&member_topics))
+                .flatten()
+                .map(str::to_string)
+                .or_else(|| most_common(member_topics.iter().copied()))
                 .or_else(|| most_common(members.iter().map(|&i| self.cards[i].kind.as_str())))
                 .map(|label| capitalized(&label))
                 .unwrap_or_else(|| self.majority_kind(members));
@@ -337,12 +383,23 @@ impl Analysis {
                 name = format!("{base} ({n})");
                 n += 1;
             }
-            let files = members.iter().map(|&i| self.files[i].clone()).collect();
+            named.push((name.clone(), members));
+            let files = members.iter().map(|&i| self.files[i].clone()).chain(joined).collect();
             folders.push(SuggestedFolder { name, files, existing, fixed_kind: false });
         }
         ungrouped.extend(clusters.ungrouped.iter().map(|&i| self.files[i].clone()));
+        if trace::enabled() {
+            let similarity = |i: usize, j: usize| cluster::similarity(&self.vectors[i], &self.vectors[j], same_topic(i, j));
+            trace::write("_similarity.txt", &self.similarity_report(settings, &named, &clusters.ungrouped, similarity));
+        }
         folders.sort_by(|a, b| b.files.len().cmp(&a.files.len()).then_with(|| a.name.cmp(&b.name)));
         ungrouped.sort();
+        let kinds = folders
+            .iter()
+            .flat_map(|f| &f.files)
+            .chain(&ungrouped)
+            .map(|p| (p.clone(), kinds::kind(&extension(p))))
+            .collect();
         let summaries = self
             .files
             .iter()
@@ -350,18 +407,93 @@ impl Analysis {
             .filter(|(_, card)| !card.summary.is_empty())
             .map(|(path, card)| (path.clone(), card.summary.clone()))
             .collect();
-        Grouping { folders, ungrouped, summaries }
+        Grouping { folders, ungrouped, kinds, summaries }
+    }
+
+    /// For tuning the thresholds: each Suggested Folder made of read files,
+    /// with the files outside it most like it, then each file left where it
+    /// is with the folder most like it. "Like" is the average similarity to
+    /// the folder's files, what clustering compares with the folder threshold.
+    fn similarity_report(
+        &self,
+        settings: &Settings,
+        folders: &[(String, &[usize])],
+        ungrouped: &[usize],
+        similarity: impl Fn(usize, usize) -> f32,
+    ) -> String {
+        /// Outside files listed per folder.
+        const NEAREST: usize = 10;
+        let n = self.files.len();
+        let mut home: Vec<Option<&str>> = vec![None; n];
+        for (name, members) in folders {
+            members.iter().for_each(|&i| home[i] = Some(name));
+        }
+        let label = |i: usize| format!("{}  [topic: {}]", file_name(&self.files[i]), self.cards[i].topic);
+        let average = |i: usize, members: &[usize]| {
+            let others: Vec<f32> = members.iter().filter(|&&j| j != i).map(|&j| similarity(i, j)).collect();
+            others.iter().sum::<f32>() / others.len().max(1) as f32
+        };
+        let mut out = String::new();
+        let _ = writeln!(
+            out,
+            "Folder threshold {:.2} · existing folder threshold {:.2} · smallest folder {}\n\
+             Same topic, or topics sharing a mark, count as 1.00. Folders of archives, images and installers aren't listed.\n",
+            settings.folder_threshold, settings.existing_folder_threshold, settings.smallest_folder
+        );
+        for (name, members) in folders {
+            let inside = members.iter().map(|&i| average(i, members)).sum::<f32>() / members.len() as f32;
+            let _ = writeln!(out, "== {name} ({} files), average inside {inside:.2}", members.len());
+            for &i in members.iter() {
+                let _ = writeln!(out, "   in   {:.2}  {}", average(i, members), label(i));
+            }
+            let mut outside: Vec<(f32, usize)> =
+                (0..n).filter(|i| !members.contains(i)).map(|i| (average(i, members), i)).collect();
+            outside.sort_by(|a, b| b.0.total_cmp(&a.0));
+            for &(score, i) in outside.iter().take(NEAREST) {
+                let place = home[i].map_or("left where it is".to_string(), |f| format!("in {f}"));
+                let _ = writeln!(out, "   out  {score:.2}  {}  ({place})", label(i));
+            }
+            let centre = centroid(members.iter().map(|&i| &self.vectors[i])).unwrap_or_default();
+            for f in &self.subfolders {
+                let _ = writeln!(out, "   existing {:.2}  {}/", cosine(&centre, &f.centroid), f.name);
+            }
+            out.push('\n');
+        }
+        let _ = writeln!(out, "== Left where they are");
+        for &i in ungrouped {
+            let nearest_file = (0..n).filter(|&j| j != i).map(|j| (similarity(i, j), j)).max_by(|a, b| a.0.total_cmp(&b.0));
+            let nearest_folder =
+                folders.iter().map(|(name, members)| (average(i, members), name)).max_by(|a, b| a.0.total_cmp(&b.0));
+            let _ = write!(out, "   {}", label(i));
+            if let Some((score, name)) = nearest_folder {
+                let _ = write!(out, "\n        nearest folder {score:.2} {name}");
+            }
+            if let Some((score, j)) = nearest_file {
+                let _ = write!(out, "\n        nearest file   {score:.2} {}", file_name(&self.files[j]));
+            }
+            out.push('\n');
+        }
+        out
     }
 
     /// The kind most of `members` are, as a folder name.
     fn majority_kind(&self, members: &[usize]) -> String {
         let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
         for &i in members {
-            let ext = self.files[i].extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-            *counts.entry(kinds::kind(&ext)).or_insert(0) += 1;
+            *counts.entry(kinds::kind(&extension(&self.files[i]))).or_insert(0) += 1;
         }
         counts.into_iter().max_by_key(|&(_, c)| c).map_or("Files", |(k, _)| k).to_string()
     }
+}
+
+/// The extension of `path`, lowercased; empty if none.
+fn extension(path: &Path) -> String {
+    path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default()
+}
+
+/// The file name of `path`, or nothing.
+fn file_name(path: &Path) -> String {
+    path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
 /// The non-empty label most files carry (ignoring case), as first written;
