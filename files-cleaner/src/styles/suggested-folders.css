@@ -167,6 +167,11 @@
   margin: var(--space-2) 0;
 }
 
+.grouping-setting-actions {
+  display: flex;
+  gap: var(--space-3);
+}
+
 .grouping-setting span {
   min-width: 18em;
 }

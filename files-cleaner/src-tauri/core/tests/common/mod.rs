@@ -20,6 +20,19 @@ pub fn scan_root() -> TempDir {
         .unwrap()
 }
 
+/// `path` with symlinks resolved, in the form the app gives it: on Windows
+/// `C:\…`, not the `\\?\C:\…` that `fs::canonicalize` returns.
+pub fn real_path(path: &Path) -> PathBuf {
+    let real = fs::canonicalize(path).unwrap();
+    #[cfg(windows)]
+    {
+        if let Some(plain) = real.to_str().and_then(|s| s.strip_prefix(r"\\?\")).filter(|s| !s.starts_with(r"UNC\")) {
+            return PathBuf::from(plain);
+        }
+    }
+    real
+}
+
 /// Writes `contents` to `root/relative`, creating parent folders.
 pub fn write(root: &Path, relative: &str, contents: &str) -> PathBuf {
     let path = root.join(relative);

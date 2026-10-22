@@ -1,7 +1,9 @@
 //! Suggested Folders from what's inside the loose files of a Scan Root
 //! (ADR-0004). A small LLM writes a card per file, an embedding model embeds
 //! the cards, and the cards are clustered; each group is named after its
-//! most common topic and anchored to a matching existing subfolder.
+//! most common topic and anchored to a matching existing subfolder. Then
+//! the LLM is asked where each read file left out of every group belongs,
+//! if anywhere, among the groups and subfolders nearest it.
 //! Archives, images and installers are never read. PDFs with no text
 //! (scans) are read by OCR, and the ones it can't read, or all of them
 //! with no OCR engine, are a kind too: each kind is one group, unless the
@@ -17,11 +19,12 @@ mod kinds;
 mod llama;
 mod marks;
 mod ocr;
+mod place;
 mod read;
 mod store;
 mod trace;
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -33,11 +36,13 @@ use serde::{Deserialize, Serialize};
 pub use card::Card;
 pub use cluster::Vector;
 pub use llama::LlamaModels;
+pub use place::{Choice, Question};
 pub use read::{pdf_child_main, Content};
 pub use store::CardStore;
-pub use trace::trace_to;
+pub use trace::{clear_trace, trace_to};
 
 use cluster::{centroid, cosine, normalized};
+use place::Answer;
 use store::{content_hash, ModelIds, Stored};
 
 /// The two Grouping Models, behind an interface so the engine can be driven
@@ -51,6 +56,9 @@ pub trait Models {
     /// The card for a file. An error leaves the file with an empty card, so
     /// it is grouped by its name alone.
     fn card(&mut self, content: &Content) -> Result<Card, String>;
+    /// The folder a file left out of every Suggested Folder belongs in, by
+    /// its place in `question.folders`, or `None`. An error leaves it out.
+    fn place(&mut self, question: &Question) -> Result<Option<usize>, String>;
     /// One vector per text, in order.
     fn embed(&mut self, texts: &[String]) -> Result<Vec<Vector>, String>;
     /// Where the models ran, such as "Metal GPU" or "CPU"; `None` if they
@@ -92,11 +100,13 @@ pub struct Input<'a> {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Progress {
-    /// Files read so far.
+    /// Files read, or placed, so far.
     pub finished: usize,
     pub total: usize,
-    /// The file being read.
+    /// The file being read or placed.
     pub current: PathBuf,
+    /// Whether the files are read, or the files left out are being placed.
+    pub placing: bool,
 }
 
 /// The longest an analysis waits between progress reports.
@@ -160,6 +170,9 @@ pub struct Analysis {
     /// The loose files of each kind that is never read, scanned PDFs among them.
     fixed: BTreeMap<&'static str, Vec<PathBuf>>,
     subfolders: Vec<Subfolder>,
+    /// What the LLM answered for each placing question, by its prompt: the
+    /// folder's label, or none.
+    answers: HashMap<String, Option<String>>,
 }
 
 /// An existing subfolder of the Scan Root, a place a group may go.
@@ -168,7 +181,21 @@ struct Subfolder {
     name: String,
     /// The centroid of its sampled files' vectors, or of its name's.
     centroid: Vector,
+    /// Its sampled files' topics, each once.
+    topics: Vec<String>,
 }
+
+/// Where a file the LLM places goes.
+#[derive(Clone, Copy)]
+enum Target {
+    /// A Suggested Folder, by its place in the folders.
+    Folder(usize),
+    Subfolder(usize),
+}
+
+/// A placing question the LLM hasn't answered: the file, by its place in
+/// the read files, the prompt and the question.
+type Unanswered = (usize, String, Question);
 
 /// Files sampled from inside each existing subfolder to describe it.
 const FOLDER_SAMPLE: usize = 5;
@@ -176,8 +203,9 @@ const FOLDER_SAMPLE: usize = 5;
 const EMBED_CHUNK: usize = 16;
 
 /// Reads the loose files of `input.scan`, has `models` card and embed them
-/// (or takes their stored cards), and groups them by `input.settings`.
-/// Cards are stored as they're made, so a cancelled analysis keeps them.
+/// (or takes their stored cards), groups them by `input.settings`, and has
+/// `models` place the files left out (or takes the stored answers). Cards
+/// and answers are stored as they're made, so a cancelled analysis keeps them.
 /// `cancel` is checked between files; `on_progress` is called at most every
 /// `PROGRESS_INTERVAL`, and once at the end of reading.
 pub fn analyse(
@@ -226,15 +254,32 @@ pub fn analyse(
             return Err(Stopped::Cancelled);
         }
         if last_report.is_none_or(|t| t.elapsed() >= PROGRESS_INTERVAL) {
-            on_progress(Progress { finished, total: all.len(), current: entry.path.clone() });
+            on_progress(Progress { finished, total: all.len(), current: entry.path.clone(), placing: false });
             last_report = Some(Instant::now());
         }
+        let started = Instant::now();
         let hash = content_hash(&entry.path);
+        let name = &entry.name;
         let entry = match hash.as_ref().and_then(|h| input.store.get(&ids, h)) {
-            Some(found) => found,
+            Some(found) => {
+                trace::append(trace::TIMINGS, &format!("{name}: saved card, {}\n", trace::secs(started.elapsed())));
+                found
+            }
             None => {
+                trace::append(trace::TIMINGS, &format!("{name}\n"));
                 let content = read::read(&entry.path, &entry.name, input.pdfium);
+                let read_time = started.elapsed();
                 let card = if content.scanned { Card::default() } else { models.card(&content).unwrap_or_default() };
+                trace::append(
+                    trace::TIMINGS,
+                    &format!(
+                        "  read {} · card {} · total {}{}\n",
+                        trace::secs(read_time),
+                        if content.scanned { "skipped (scanned)".to_string() } else { trace::secs(started.elapsed() - read_time) },
+                        trace::secs(started.elapsed()),
+                        if content.body.is_empty() { " · by name only" } else { "" }
+                    ),
+                );
                 let made = Stored { card, scanned: content.scanned, embedding: None };
                 if let Some(h) = &hash {
                     input.store.put(&ids, h, &made);
@@ -245,7 +290,7 @@ pub fn analyse(
         stored.push((hash, entry));
     }
     if let Some(last) = all.last() {
-        on_progress(Progress { finished: all.len(), total: all.len(), current: last.path.clone() });
+        on_progress(Progress { finished: all.len(), total: all.len(), current: last.path.clone(), placing: false });
     }
     if cancel.load(Ordering::Relaxed) {
         return Err(Stopped::Cancelled);
@@ -295,13 +340,10 @@ pub fn analyse(
     let subfolders = samples
         .iter()
         .filter_map(|(folder, sample)| {
-            let centroid = if sample.is_empty() {
-                name_vectors.next()
-            } else {
-                let sampled: Vec<Vector> = stored.by_ref().take(sample.len()).map(|(_, v)| v).collect();
-                centroid(&sampled)
-            }?;
-            Some(Subfolder { path: scan.root.join(folder), name: folder.to_string(), centroid })
+            let sampled: Vec<(Card, Vector)> = stored.by_ref().take(sample.len()).collect();
+            let centroid = if sample.is_empty() { name_vectors.next() } else { centroid(sampled.iter().map(|(_, v)| v)) }?;
+            let topics = distinct(sampled.iter().map(|(c, _)| c.topic.as_str()));
+            Some(Subfolder { path: scan.root.join(folder), name: folder.to_string(), centroid, topics })
         })
         .collect();
     let mut analysis = Analysis {
@@ -311,21 +353,53 @@ pub fn analyse(
             kinds: BTreeMap::new(),
             summaries: BTreeMap::new(),
         },
-        device: models.device(),
+        device: None,
         files: to_read.iter().map(|e| e.path.clone()).collect(),
         cards,
         vectors,
         fixed,
         subfolders,
+        answers: HashMap::new(),
     };
+
+    // Placing a file changes no other file's question, so one round asks them all.
+    let (_, unanswered) = analysis.grouped(&input.settings);
+    let mut last_report: Option<Instant> = None;
+    for (finished, (file, prompt, question)) in unanswered.iter().enumerate() {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(Stopped::Cancelled);
+        }
+        if last_report.is_none_or(|t| t.elapsed() >= PROGRESS_INTERVAL) {
+            let current = analysis.files[*file].clone();
+            on_progress(Progress { finished, total: unanswered.len(), current, placing: true });
+            last_report = Some(Instant::now());
+        }
+        let answer = input.store.get_answer(&card_id, prompt).unwrap_or_else(|| {
+            let chosen = models.place(question);
+            let answer = Answer { folder: chosen.as_ref().ok().copied().flatten().map(|i| place::label(&question.folders[i])) };
+            // A failed question is asked again next time.
+            if chosen.is_ok() {
+                input.store.put_answer(&card_id, prompt, &answer);
+            }
+            answer
+        });
+        analysis.answers.insert(prompt.clone(), answer.folder);
+    }
+    analysis.device = models.device();
     analysis.grouping = analysis.regroup(&input.settings);
     Ok(analysis)
 }
 
 impl Analysis {
     /// The Suggested Folders by `settings`, from what the models already
-    /// said: no model runs.
+    /// said: no model runs. A file left out goes where the LLM placed it
+    /// when it was asked the same question.
     pub fn regroup(&self, settings: &Settings) -> Grouping {
+        self.grouped(settings).0
+    }
+
+    /// The grouping, and the placing questions that have no answer yet.
+    fn grouped(&self, settings: &Settings) -> (Grouping, Vec<Unanswered>) {
         let folder_names: Vec<String> = self.subfolders.iter().map(|f| f.name.clone()).collect();
         let mut folders = Vec::new();
         let mut ungrouped = Vec::new();
@@ -340,6 +414,8 @@ impl Analysis {
         let clusters =
             cluster::cluster(&self.vectors, same_topic, settings.folder_threshold, settings.smallest_folder);
         let mut named: Vec<(String, &[usize])> = Vec::new();
+        // Each Suggested Folder of read files, by its place in `folders`, with its centroid and topics.
+        let mut topical: Vec<(usize, Vector, Vec<String>)> = Vec::new();
 
         // A file that is never read joins the first group with a file name
         // sharing a mark with its own: `Lab5_StudentID.zip` with `Lab5_Report.docx`.
@@ -393,21 +469,56 @@ impl Analysis {
                 .or_else(|| most_common(members.iter().map(|&i| self.cards[i].kind.as_str())))
                 .map(|label| capitalized(&label))
                 .unwrap_or_else(|| self.majority_kind(members));
-            let mut name = base.clone();
-            // A Clash Suffix, as for names taken on disk.
-            let mut n = 1;
-            while !used_names.insert(name.to_lowercase()) {
-                name = format!("{base} ({n})");
-                n += 1;
-            }
+            let name = unused_name(&mut used_names, &base);
             named.push((name.clone(), members));
+            topical.push((folders.len(), centre, distinct(member_topics.iter().copied())));
             let files = members.iter().map(|&i| self.files[i].clone()).chain(joined).collect();
             folders.push(SuggestedFolder { name, files, existing, fixed_kind: false });
         }
-        ungrouped.extend(clusters.ungrouped.iter().map(|&i| self.files[i].clone()));
+
+        // Every question is put before any file is placed, so none depends on another's answer.
+        let questions: Vec<(usize, String, Question, Vec<Target>)> = clusters
+            .ungrouped
+            .iter()
+            .filter_map(|&i| {
+                let (question, targets) = self.question(i, &folders, &topical)?;
+                Some((i, place::prompt(&question), question, targets))
+            })
+            .collect();
+        let mut unanswered = Vec::new();
+        let mut placed: BTreeMap<usize, String> = BTreeMap::new();
+        // The Suggested Folder made for each subfolder a file was placed in.
+        let mut made: HashMap<usize, usize> = HashMap::new();
+        for (i, prompt, question, targets) in questions {
+            let Some(answer) = self.answers.get(&prompt) else {
+                unanswered.push((i, prompt, question));
+                continue;
+            };
+            let Some(c) = answer.as_ref().and_then(|name| question.folders.iter().position(|f| &place::label(f) == name)) else {
+                continue;
+            };
+            let folder = match targets[c] {
+                Target::Folder(k) => k,
+                Target::Subfolder(s) => *made.entry(s).or_insert_with(|| {
+                    let subfolder = &self.subfolders[s];
+                    let name = unused_name(&mut used_names, &subfolder.name);
+                    folders.push(SuggestedFolder {
+                        name,
+                        files: Vec::new(),
+                        existing: Some(subfolder.path.clone()),
+                        fixed_kind: false,
+                    });
+                    folders.len() - 1
+                }),
+            };
+            folders[folder].files.push(self.files[i].clone());
+            placed.insert(i, folders[folder].name.clone());
+        }
+        ungrouped.extend(clusters.ungrouped.iter().filter(|i| !placed.contains_key(i)).map(|&i| self.files[i].clone()));
         if trace::enabled() {
             let similarity = |i: usize, j: usize| cluster::similarity(&self.vectors[i], &self.vectors[j], same_topic(i, j));
-            trace::write("_similarity.txt", &self.similarity_report(settings, &named, &clusters.ungrouped, similarity));
+            let report = self.similarity_report(settings, &named, &clusters.ungrouped, &placed, similarity);
+            trace::write("_similarity.txt", &report);
         }
         folders.sort_by(|a, b| b.files.len().cmp(&a.files.len()).then_with(|| a.name.cmp(&b.name)));
         ungrouped.sort();
@@ -424,18 +535,54 @@ impl Analysis {
             .filter(|(_, card)| !card.summary.is_empty())
             .map(|(path, card)| (path.clone(), card.summary.clone()))
             .collect();
-        Grouping { folders, ungrouped, kinds, summaries }
+        (Grouping { folders, ungrouped, kinds, summaries }, unanswered)
+    }
+
+    /// The placing question for read file `i`, left out of every folder,
+    /// and where each of its choices goes: the Suggested Folders of read
+    /// files and the subfolders none of them goes into, most like it first.
+    /// `None` when its card is empty or there's nowhere to go.
+    fn question(
+        &self,
+        i: usize,
+        folders: &[SuggestedFolder],
+        topical: &[(usize, Vector, Vec<String>)],
+    ) -> Option<(Question, Vec<Target>)> {
+        let card = &self.cards[i];
+        if card.topic.is_empty() && card.summary.is_empty() {
+            return None;
+        }
+        let mut choices: Vec<(f32, Choice, Target)> = topical
+            .iter()
+            .map(|(k, centre, topics)| {
+                let choice = Choice { name: folders[*k].name.clone(), topics: topics.clone(), existing: false };
+                (cosine(&self.vectors[i], centre), choice, Target::Folder(*k))
+            })
+            .collect();
+        let taken: HashSet<&PathBuf> = folders.iter().filter_map(|f| f.existing.as_ref()).collect();
+        choices.extend(self.subfolders.iter().enumerate().filter(|(_, f)| !taken.contains(&f.path)).map(|(s, f)| {
+            let choice = Choice { name: f.name.clone(), topics: f.topics.clone(), existing: true };
+            (cosine(&self.vectors[i], &f.centroid), choice, Target::Subfolder(s))
+        }));
+        choices.sort_by(|a, b| b.0.total_cmp(&a.0));
+        choices.truncate(place::CHOICES);
+        if choices.is_empty() {
+            return None;
+        }
+        let (choices, targets): (Vec<Choice>, Vec<Target>) = choices.into_iter().map(|(_, c, t)| (c, t)).unzip();
+        Some((Question { file_name: file_name(&self.files[i]), card: card.clone(), folders: choices }, targets))
     }
 
     /// For tuning the thresholds: each Suggested Folder made of read files,
-    /// with the files outside it most like it, then each file left where it
-    /// is with the folder most like it. "Like" is the average similarity to
+    /// with the files outside it most like it, then each file left out of
+    /// every folder with the folder most like it and where the LLM placed it. "Like" is the average similarity to
     /// the folder's files, what clustering compares with the folder threshold.
     fn similarity_report(
         &self,
         settings: &Settings,
         folders: &[(String, &[usize])],
         ungrouped: &[usize],
+        placed: &BTreeMap<usize, String>,
         similarity: impl Fn(usize, usize) -> f32,
     ) -> String {
         /// Outside files listed per folder.
@@ -476,7 +623,7 @@ impl Analysis {
             }
             out.push('\n');
         }
-        let _ = writeln!(out, "== Left where they are");
+        let _ = writeln!(out, "== Left out of every folder");
         for &i in ungrouped {
             let nearest_file = (0..n).filter(|&j| j != i).map(|j| (similarity(i, j), j)).max_by(|a, b| a.0.total_cmp(&b.0));
             let nearest_folder =
@@ -487,6 +634,9 @@ impl Analysis {
             }
             if let Some((score, j)) = nearest_file {
                 let _ = write!(out, "\n        nearest file   {score:.2} {}", file_name(&self.files[j]));
+            }
+            if let Some(folder) = placed.get(&i) {
+                let _ = write!(out, "\n        placed by the model in {folder}");
             }
             out.push('\n');
         }
@@ -501,6 +651,24 @@ impl Analysis {
         }
         counts.into_iter().max_by_key(|&(_, c)| c).map_or("Files", |(k, _)| k).to_string()
     }
+}
+
+/// `base`, with a Clash Suffix if it's in `used` (ignoring case), as for
+/// names taken on disk; the name is then used.
+fn unused_name(used: &mut HashSet<String>, base: &str) -> String {
+    let mut name = base.to_string();
+    let mut n = 1;
+    while !used.insert(name.to_lowercase()) {
+        name = format!("{base} ({n})");
+        n += 1;
+    }
+    name
+}
+
+/// The non-empty labels, trimmed, each once (ignoring case), as first written.
+fn distinct<'a>(labels: impl Iterator<Item = &'a str>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    labels.map(str::trim).filter(|l| !l.is_empty() && seen.insert(l.to_lowercase())).map(str::to_string).collect()
 }
 
 /// The extension of `path`, lowercased; empty if none.

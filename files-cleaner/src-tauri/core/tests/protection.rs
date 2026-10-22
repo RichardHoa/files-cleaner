@@ -119,6 +119,8 @@ fn skips_os_metadata_files_from_every_os() {
     write(dir.path(), "photo.jpg", "jpg");
     write(dir.path(), ".DS_Store", "ds");
     write(dir.path(), "sub/.localized", "");
+    // Windows doesn't allow a carriage return in a file name.
+    #[cfg(not(windows))]
     write(dir.path(), "sub/Icon\r", "icon");
     write(dir.path(), "sub/Thumbs.db", "thumbs");
     write(dir.path(), "sub/desktop.ini", "ini");
@@ -128,7 +130,7 @@ fn skips_os_metadata_files_from_every_os() {
     let result = scan(dir.path(), &empty_config(dir.path())).unwrap();
 
     assert_eq!(names(&result), ["photo.jpg"]);
-    assert_eq!(result.skipped, 7);
+    assert_eq!(result.skipped, if cfg!(windows) { 6 } else { 7 });
 }
 
 #[test]

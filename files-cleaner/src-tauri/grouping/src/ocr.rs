@@ -33,7 +33,11 @@ pub fn recognize(page: &Page) -> Option<String> {
     use objc2_foundation::{NSArray, NSData, NSDictionary};
     use objc2_vision::{VNImageRequestHandler, VNRecognizeTextRequest, VNRequest, VNRequestTextRecognitionLevel};
 
+    // Timings go to stderr for the parent's trace (`read::pdf_child`).
+    let step = std::time::Instant::now();
     let data = NSData::with_bytes(&page.png()?);
+    eprintln!("  PNG encode {}", crate::trace::secs(step.elapsed()));
+    let step = std::time::Instant::now();
     let handler = VNImageRequestHandler::initWithData_options(VNImageRequestHandler::alloc(), &data, &NSDictionary::new());
     let request = VNRecognizeTextRequest::new();
     request.setRecognitionLevel(VNRequestTextRecognitionLevel::Accurate);
@@ -50,6 +54,7 @@ pub fn recognize(page: &Page) -> Option<String> {
         .filter_map(|line| line.topCandidates(1).firstObject())
         .map(|text| text.string().to_string())
         .collect();
+    eprintln!("  Vision {} ({} lines)", crate::trace::secs(step.elapsed()), lines.len());
     Some(lines.join("\n"))
 }
 

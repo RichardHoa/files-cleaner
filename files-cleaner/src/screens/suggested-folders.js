@@ -4,11 +4,12 @@
 // a Plan: one card per folder, with its name, where it goes, what to do with it and its files, then
 // the files left where they are, by kind and newest first. A file can be dragged into another folder,
 // or out to the files left where they are. The Grouping settings group the files again, with no model
-// run, and are remembered. Approving runs the Plan as its own Session.
+// run, and are remembered; from there the files can also be read again from scratch. Approving runs the Plan as its own Session.
 import {
   analyseLooseFiles,
   buildSuggestedFoldersPlan,
   cancelAnalysis,
+  clearGroupingCards,
   describeError,
   groupingModelsStatus,
   pathSeparator,
@@ -43,8 +44,14 @@ let settingsOpen = false;
 /** The file or folder's own name, from its full `path`. */
 const fileName = (path) => splitPath(path, pathSeparator).name;
 
-/** "Reading 12 of 85 files…" from the analysis's `{ finished, total }` progress, then the file it is on. */
-const describeAnalysisProgress = ({ finished, total, current }) => `Reading ${count(finished)} of ${plural(total, "file")}…\n${current}`;
+/**
+ * "Reading 12 of 85 files…" from the analysis's `{ finished, total, placing }` progress, or, while it places
+ * the files left out, "Finding folders for files left out: 3 of 9…", then the file it is on.
+ */
+const describeAnalysisProgress = ({ finished, total, current, placing }) =>
+  placing
+    ? `Finding folders for files left out: ${count(finished)} of ${count(total)}…\n${current}`
+    : `Reading ${count(finished)} of ${plural(total, "file")}…\n${current}`;
 
 export async function render(root, nav, result) {
   const screen = el("div");
@@ -394,6 +401,17 @@ export async function render(root, nav, result) {
     };
     const reset = el("button", { type: "button", className: "link" }, "Reset");
     reset.addEventListener("click", () => apply({ ...DEFAULT_SETTINGS }));
+    const readAgain = el("button", { type: "button", className: "link" }, "Read every file again");
+    readAgain.addEventListener("click", async () => {
+      readAgain.disabled = true;
+      try {
+        await clearGroupingCards();
+        analyse();
+      } catch (error) {
+        showStatus(status, describeError(error), true);
+        readAgain.disabled = false;
+      }
+    });
     const panel = el(
       "details",
       { className: "grouping-settings", open: settingsOpen },
@@ -401,7 +419,8 @@ export async function render(root, nav, result) {
       el("p", { className: "note" }, "Lower groups more files together; higher keeps folders tighter. Changing these starts your edits over."),
       slider("Files share a folder at", "folderThreshold"),
       slider("A folder goes into an existing one at", "existingFolderThreshold"),
-      reset,
+      el("div", { className: "grouping-setting-actions" }, reset, readAgain),
+      el("p", { className: "note" }, "Reading again forgets what was read before, so it takes as long as the first time."),
       status,
     );
     panel.addEventListener("toggle", () => (settingsOpen = panel.open));

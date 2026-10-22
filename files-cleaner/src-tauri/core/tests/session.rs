@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
-use common::{empty_config, scan_root, write};
+use common::{empty_config, real_path, scan_root, write};
 use files_cleaner_core::{
     build_plan, list_sessions, lock_sessions, redo_operations, run, run_with_progress, scan, session_details, undo,
     undo_operations, OperationKind, OperationState, Plan, SessionError, SessionInfo, SessionStatus,
@@ -225,7 +225,7 @@ fn sessions_are_listed_newest_first_with_their_status() {
     assert_eq!(sessions[0].status, SessionStatus::PartlyUndone);
     assert_eq!(sessions[1].status, SessionStatus::Undone);
     assert_eq!(sessions[2].status, SessionStatus::Completed);
-    assert_eq!(sessions[2].scan_root, fs::canonicalize(first.path()).unwrap());
+    assert_eq!(sessions[2].scan_root, real_path(first.path()));
     assert_eq!(sessions[2].trash_destination, TrashDestination::HoldingFolder);
     assert_eq!(sessions[2].done, 2);
 }
@@ -278,7 +278,7 @@ fn a_damaged_journal_doesnt_hide_the_other_sessions() {
 
 /// Session `id`'s Operations as `(relative source, state)`, in run order.
 fn states(journal: &Path, root: &Path, id: &str) -> Vec<(String, OperationState)> {
-    let root = fs::canonicalize(root).unwrap();
+    let root = real_path(root);
     session_details(id, journal)
         .unwrap()
         .operations
@@ -327,7 +327,7 @@ fn session_details_give_each_operation_its_paths_from_the_scan_root() {
         details.operations.iter().map(|op| (op.relative_path.clone(), op.relative_destination.clone())).collect();
     let held = |path: &str| names(&format!("{HOLDING_FOLDER_NAME}/{}/{path}", summary.session_id));
     assert_eq!(paths, [(names("a/b/copy.txt"), held("a/b/copy.txt")), (names("top.txt"), held("top.txt"))]);
-    let root = fs::canonicalize(dir.path()).unwrap();
+    let root = real_path(dir.path());
     assert_eq!(details.operations[1].source, root.join("top.txt"), "the absolute paths stay");
     assert_eq!(details.operations[1].destination, root.join(HOLDING_FOLDER_NAME).join(&summary.session_id).join("top.txt"));
 }

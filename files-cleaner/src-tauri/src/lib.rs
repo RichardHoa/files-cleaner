@@ -338,6 +338,14 @@ fn cancel_analysis(analysing: State<'_, Analysing>) {
     analysing.cancel.lock().unwrap().store(true, Ordering::Relaxed);
 }
 
+/// Forgets the cards the Grouping Models wrote, and the traces of earlier
+/// analyses, so the next analysis reads every file again.
+#[tauri::command]
+fn clear_grouping_cards(app: AppHandle) -> Result<(), CommandError> {
+    grouping::clear_trace();
+    CardStore::open(app_data_path(&app, CARDS_FOLDER_NAME)?).clear().map_err(CommandError::new)
+}
+
 /// The latest scan's analysis grouped again by `settings`, with no model run.
 #[tauri::command]
 fn regroup(
@@ -457,6 +465,7 @@ pub fn run() {
             analyse_loose_files,
             cancel_analysis,
             regroup,
+            clear_grouping_cards,
             build_suggested_folders_plan
         ])
         .run(tauri::generate_context!())

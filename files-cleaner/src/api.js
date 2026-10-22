@@ -95,7 +95,8 @@ export const answerGroupingModelsOffer = (answer) => invoke("answer_grouping_mod
 
 /**
  * Reads the loose files of the latest scan with the Grouping Models and groups them by `settings`, as
- * `regroup` takes them, calling `onProgress({ finished, total, current })` as it goes: `{ grouping, device }`,
+ * `regroup` takes them, calling `onProgress({ finished, total, current, placing })` as it goes (`placing` once
+ * the files left out of every folder are being placed): `{ grouping, device }`,
  * `device` where the models ran or null. Rejects once `cancelAnalysis` stops it.
  */
 export function analyseLooseFiles(settings, onProgress) {
@@ -109,6 +110,9 @@ export const cancelAnalysis = () => invoke("cancel_analysis");
 
 /** The latest analysis grouped again by `{ folderThreshold, existingFolderThreshold, smallestFolder }`, with no model run. */
 export const regroup = (settings) => invoke("regroup", { settings });
+
+/** Forgets what the Grouping Models said about every file, so the next analysis reads them all again. */
+export const clearGroupingCards = () => invoke("clear_grouping_cards");
 
 /**
  * Plans the choices for each Suggested Folder over the latest scan, as `buildPlan` does for the duplicate

@@ -3,20 +3,20 @@ mod common;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use common::{empty_config, scan_root, symlink, write};
+use common::{empty_config, real_path, scan_root, symlink, write};
 use files_cleaner_core::{scan, scan_with_progress, ScanResult};
 
-/// Paths of the scanned entries relative to the Scan Root, sorted. Also
-/// checks each entry's `relative_path` names the same path.
+/// Paths of the scanned entries relative to the Scan Root, `/`-separated
+/// and sorted. Also checks each entry's `relative_path` names the same path.
 fn relative_paths(result: &ScanResult, root: &Path) -> Vec<String> {
-    let root = fs::canonicalize(root).unwrap();
+    let root = real_path(root);
     let mut paths: Vec<String> = result
         .entries
         .iter()
         .map(|e| {
             let relative = e.path.strip_prefix(&root).unwrap();
             assert_eq!(relative, e.relative_path.iter().collect::<PathBuf>(), "{}", e.path.display());
-            relative.to_string_lossy().into_owned()
+            e.relative_path.join("/")
         })
         .collect();
     paths.sort();

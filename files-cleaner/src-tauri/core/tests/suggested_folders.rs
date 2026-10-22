@@ -1,6 +1,6 @@
 mod common;
 
-use common::{empty_config, scan_root, write};
+use common::{empty_config, real_path, scan_root, write};
 use files_cleaner_core::{
     build_suggested_folders_plan, scan, FileChoice, FolderChoice, OperationKind, Reason, SuggestedFolderChoice,
 };
@@ -19,7 +19,7 @@ fn create_here_plans_the_folder_then_a_move_per_file() {
     let folder = SuggestedFolderChoice {
         name: "CS101".to_string(),
         choice: FolderChoice::CreateHere,
-        files: vec![(lecture.canonicalize().unwrap(), FileChoice::InFolder), (slides.canonicalize().unwrap(), FileChoice::InFolder)],
+        files: vec![(real_path(&lecture), FileChoice::InFolder), (real_path(&slides), FileChoice::InFolder)],
     };
     let plan = build_suggested_folders_plan(&scan, &config, &[folder]).unwrap();
 

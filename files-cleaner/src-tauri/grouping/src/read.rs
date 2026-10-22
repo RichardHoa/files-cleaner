@@ -8,13 +8,15 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use crate::ocr;
+use crate::{ocr, trace};
 
 /// What the models are given about one file.
 #[derive(Debug, Clone)]
 pub struct Content {
     /// The file name as words.
     pub name: String,
+    /// The file name as it is on disk, which names its trace.
+    pub file_name: String,
     /// What's inside, at most `MAX_CHARS`; empty when read by name only.
     pub body: String,
     /// A PDF with no text layer, such as a scan, that OCR couldn't read
@@ -83,25 +85,25 @@ pub fn read(path: &Path, name: &str, pdfium: Option<&Path>) -> Content {
         _ if PLAIN_TEXT.contains(&ext.as_str()) => plain_text(path),
         _ => None,
     };
-    let name = name_words(name);
+    let (file_name, name) = (name.to_string(), name_words(name));
     let clean = |text: String| truncate(&collapse_whitespace(&text), MAX_CHARS);
     let readable = |body: &str| body.chars().filter(|c| c.is_alphabetic()).count() >= 20;
     let Some(body) = inside.map(clean) else {
-        return Content { name, body: String::new(), scanned: false };
+        return Content { name, file_name, body: String::new(), scanned: false };
     };
     let has_text = readable(&body);
     if has_text && (!pdf || plain_word_share(&body) >= PDF_PLAIN_WORDS) {
-        return Content { name, body, scanned: false };
+        return Content { name, file_name, body, scanned: false };
     }
     if !pdf {
-        return Content { name, body: String::new(), scanned: false };
+        return Content { name, file_name, body: String::new(), scanned: false };
     }
     // A PDF that opened with next to no text is pages of images, as a scan
     // is; one with garbled text still shows it right. Either way the pages
     // are read as pictures.
     match pdfium.and_then(|pdfium| pdf_text(pdfium, path, PdfReading::Ocr)).map(clean) {
-        Some(body) if readable(&body) => Content { name, body, scanned: false },
-        _ => Content { name, body: String::new(), scanned: !has_text },
+        Some(body) if readable(&body) => Content { name, file_name, body, scanned: false },
+        _ => Content { name, file_name, body: String::new(), scanned: !has_text },
     }
 }
 
@@ -202,23 +204,34 @@ fn pdf_text(pdfium: &Path, path: &Path, reading: PdfReading) -> Option<String> {
         .arg(path)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        // The child's timings, on stderr, are kept only when tracing.
+        .stderr(if trace::enabled() { Stdio::piped() } else { Stdio::null() })
         .spawn()
         .ok()?;
     let started = Instant::now();
-    // The child prints at most `MAX_CHARS` characters, well under a pipe's
-    // buffer, so it never blocks on a full pipe while we wait.
-    loop {
+    // The child prints at most `MAX_CHARS` characters, and a few lines of
+    // timings, well under a pipe's buffer, so it never blocks on a full
+    // pipe while we wait.
+    let outcome = loop {
         match child.try_wait() {
-            Ok(Some(status)) if status.success() => break,
-            Ok(Some(_)) | Err(_) => return None,
+            Ok(Some(status)) if status.success() => break "done",
+            Ok(Some(_)) | Err(_) => break "failed",
             Ok(None) if started.elapsed() >= reading.timeout() => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return None;
+                break "timed out";
             }
             Ok(None) => std::thread::sleep(PDF_POLL),
         }
+    };
+    if let Some(mut stderr) = child.stderr.take() {
+        let mut steps = String::new();
+        let _ = stderr.read_to_string(&mut steps);
+        let steps: String = steps.lines().map(|l| format!("    {l}\n")).collect();
+        trace::append(trace::TIMINGS, &format!("  {}: {outcome} after {}\n{steps}", reading.flag(), trace::secs(started.elapsed())));
+    }
+    if outcome != "done" {
+        return None;
     }
     let mut text = String::new();
     child.stdout.take()?.read_to_string(&mut text).ok()?;
@@ -240,13 +253,17 @@ pub fn pdf_child_main() -> Option<i32> {
     })
 }
 
+/// Each step's time goes to stderr as it ends, so the parent sees how far
+/// a child it killed got.
 fn pdf_child(pdfium: &Path, path: &Path, reading: PdfReading) -> Result<(), String> {
+    let step = Instant::now();
     let pdfium = Pdfium::new(Pdfium::bind_to_library(pdfium).map_err(|e| e.to_string())?);
     // Opened through a seekable reader, not read into memory: PDFium reads
     // the cross-reference table and then only the objects of the pages it
     // is asked for, so a 2 GB PDF costs about what a 2 MB one does.
     let doc = pdfium.load_pdf_from_file(path, None).map_err(|e| e.to_string())?;
     let pages = doc.pages();
+    eprintln!("load PDFium and open ({} pages): {}", pages.len(), trace::secs(step.elapsed()));
     let render = PdfRenderConfig::new()
         .scale_page_by_factor(OCR_SCALE)
         .set_maximum_width(OCR_MAX_PIXELS)
@@ -257,13 +274,20 @@ fn pdf_child(pdfium: &Path, path: &Path, reading: PdfReading) -> Result<(), Stri
     };
     let mut text = String::new();
     for index in 0..pages.len().min(count) {
+        let step = Instant::now();
         let page = pages.get(index).map_err(|e| e.to_string())?;
         match reading {
-            PdfReading::TextLayer => text.push_str(&page.text().map_err(|e| e.to_string())?.all()),
+            PdfReading::TextLayer => {
+                text.push_str(&page.text().map_err(|e| e.to_string())?.all());
+                eprintln!("page {}: text layer {}", index + 1, trace::secs(step.elapsed()));
+            }
             PdfReading::Ocr => {
                 let bitmap = page.render_with_config(&render).map_err(|e| e.to_string())?;
+                eprintln!("page {}: render {}x{} {}", index + 1, bitmap.width(), bitmap.height(), trace::secs(step.elapsed()));
+                let step = Instant::now();
                 let image =
                     ocr::Page { width: bitmap.width() as u32, height: bitmap.height() as u32, rgba: bitmap.as_rgba_bytes() };
+                eprintln!("page {}: to RGBA {}", index + 1, trace::secs(step.elapsed()));
                 // No OCR engine reads one page if it reads none.
                 text.push_str(&ocr::recognize(&image).ok_or("OCR failed")?);
             }

@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::atomic::AtomicBool;
 
 use files_cleaner_core::{load_config, scan};
-use files_cleaner_grouping::{analyse, Card, CardStore, Content, Input, Models, Settings, Vector};
+use files_cleaner_grouping::{analyse, Card, CardStore, Content, Input, Models, Question, Settings, Vector};
 
 /// Cards and vectors fixed by what each file says.
 struct FakeModels;
@@ -24,6 +24,10 @@ impl Models for FakeModels {
 
     fn embed(&mut self, texts: &[String]) -> Result<Vec<Vector>, String> {
         Ok(texts.iter().map(|t| if t.starts_with("CS101") { vec![1.0, 0.0] } else { vec![0.0, 1.0] }).collect())
+    }
+
+    fn place(&mut self, _: &Question) -> Result<Option<usize>, String> {
+        Ok(None)
     }
 
     fn device(&self) -> Option<String> {
@@ -93,6 +97,13 @@ impl Models for TopicModels {
             .collect())
     }
 
+    /// The first folder holding a topic that shares a word with the file's.
+    fn place(&mut self, question: &Question) -> Result<Option<usize>, String> {
+        let words: Vec<String> = question.card.topic.split_whitespace().map(str::to_lowercase).collect();
+        let shares = |t: &String| t.split_whitespace().any(|w| words.contains(&w.to_lowercase()));
+        Ok(question.folders.iter().position(|f| f.topics.iter().any(shares)))
+    }
+
     fn device(&self) -> Option<String> {
         None
     }
@@ -126,4 +137,59 @@ fn topics_sharing_a_mark_group_and_a_named_archive_joins_them() {
     names.sort();
     assert_eq!(names, ["Lab5_Report.txt", "Lab5_StudentID.zip", "speaking.txt", "writing.txt"]);
     assert_eq!(grouping.ungrouped, [scan.root.join("recipe.txt")]);
+}
+
+#[test]
+fn a_cleared_store_reads_every_file_again() {
+    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("test-tmp");
+    fs::create_dir_all(&base).unwrap();
+    let dir = tempfile::Builder::new().prefix("scan-").tempdir_in(&base).unwrap();
+    let root = dir.path();
+    fs::write(root.join("writing.txt"), "IELTS Writing | band descriptors").unwrap();
+    fs::write(root.join("speaking.txt"), "IELTS Speaking | band descriptors").unwrap();
+    let store_dir = tempfile::tempdir().unwrap();
+    let config = load_config(r#"{ "rules": [] }"#, root).unwrap();
+    let scan = scan(root, &config).unwrap();
+    let store = CardStore::open(store_dir.path());
+    let input = Input { scan: &scan, settings: Settings::default(), store: &store, pdfium: None };
+    let embedded = |models: &mut TopicModels| {
+        analyse(&input, models, &AtomicBool::new(false), |_| {}).unwrap();
+        std::mem::take(&mut models.embedded)
+    };
+    let mut models = TopicModels { embedded: 0 };
+
+    assert_eq!(embedded(&mut models), 2);
+    assert_eq!(embedded(&mut models), 0);
+    store.clear().unwrap();
+    assert_eq!(embedded(&mut models), 2);
+}
+
+#[test]
+fn a_file_left_out_goes_where_the_model_places_it_and_stays_there_on_regroup() {
+    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("test-tmp");
+    fs::create_dir_all(&base).unwrap();
+    let dir = tempfile::Builder::new().prefix("scan-").tempdir_in(&base).unwrap();
+    let root = dir.path();
+    fs::write(root.join("writing.txt"), "IELTS Writing | band descriptors").unwrap();
+    fs::write(root.join("speaking.txt"), "IELTS Speaking | band descriptors").unwrap();
+    fs::write(root.join("collocations.txt"), "English Writing | collocations").unwrap();
+    fs::write(root.join("recipe.txt"), "Banh mi | recipe").unwrap();
+    let store_dir = tempfile::tempdir().unwrap();
+    let config = load_config(r#"{ "rules": [] }"#, root).unwrap();
+    let scan = scan(root, &config).unwrap();
+    let store = CardStore::open(store_dir.path());
+
+    let input = Input { scan: &scan, settings: Settings::default(), store: &store, pdfium: None };
+    let analysis = analyse(&input, &mut TopicModels { embedded: 0 }, &AtomicBool::new(false), |_| {}).unwrap();
+
+    for grouping in [analysis.grouping.clone(), analysis.regroup(&Settings::default())] {
+        assert_eq!(grouping.folders.len(), 1);
+        let folder = &grouping.folders[0];
+        assert_eq!(folder.name, "IELTS");
+        let mut names: Vec<String> =
+            folder.files.iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        names.sort();
+        assert_eq!(names, ["collocations.txt", "speaking.txt", "writing.txt"]);
+        assert_eq!(grouping.ungrouped, [scan.root.join("recipe.txt")]);
+    }
 }
