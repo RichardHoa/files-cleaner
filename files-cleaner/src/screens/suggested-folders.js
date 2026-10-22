@@ -1,10 +1,12 @@
 // Suggested Folders: the step after the duplicate step, given a fresh scan of the Scan Root.
 // It needs the Grouping Models: without them it offers them, or shows their download. With them, it
 // reads the loose files (Cancel goes back with nothing changed), then shows the Suggested Folders as
-// a Plan: one card per folder, with its name, where it goes, what to do with it and its files, then
-// the files left where they are, by kind and newest first. A file can be dragged into another folder,
-// or out to the files left where they are. The Grouping settings group the files again, with no model
-// run, and are remembered; from there the files can also be read again from scratch. Approving runs the Plan as its own Session.
+// a Plan, laid out like Mail: a sidebar lists the files left where they are, then each folder, and
+// the pane beside it lists the one picked, with its name, where it goes, what to do with it and its
+// files. Files are selected as in Finder, then moved by dragging them onto a folder in the sidebar,
+// from their right-click menu, or with "Move to…". The Grouping settings group the files again, with
+// no model run, and are remembered; from there the files can also be read again from scratch.
+// Approving runs the Plan as its own Session.
 import {
   analyseLooseFiles,
   buildSuggestedFoldersPlan,
@@ -18,11 +20,12 @@ import {
   runPlan,
 } from "../api.js";
 import { el } from "../dom.js";
-import { drawMore } from "../file-list.js";
+import { drawMore, revealMenu } from "../file-list.js";
 import { count, formatDate, formatSize, plural, splitPath } from "../format.js";
 import { icon } from "../icons.js";
 import { groupingModelsPanel } from "../models-panel.js";
 import { describeRunProgress, describeSummary } from "../outcomes.js";
+import { clickSelection } from "../row-selection.js";
 import { busy, showStatus } from "../status.js";
 import {
   byKindNewestFirst,
@@ -36,7 +39,7 @@ import {
 } from "../suggested-choices.js";
 
 /** How many of a card's files are listed before "Show more". */
-const FILES_SHOWN = 10;
+const FILES_SHOWN = 50;
 const SETTINGS_KEY = "suggested-folders-settings";
 /** Whether the Grouping settings are open, kept while they regroup the screen. */
 let settingsOpen = false;
@@ -133,16 +136,33 @@ export async function render(root, nav, result) {
       return;
     }
 
-    // Dragging a file: its path, while a drag is on.
+    // The files being dragged, while a drag is on.
     let dragged = null;
     const left = new Set(grouping.ungrouped);
-    const leftSection = el("section", { className: "left-section" });
-    const redraws = [];
-    const move = (path, to) => {
-      moveFile(choices, left, path, to);
-      redraws.forEach((redraw) => redraw());
-      drawLeft();
+    // What the pane lists: a Suggested Folder's choice, or null for the files left where they are.
+    let current = choices[0];
+    // The files selected in the pane, and the one last clicked without Shift.
+    let selection = new Set();
+    let anchor = null;
+    const sidebar = el("nav", { className: "folder-sidebar", ariaLabel: "Folders" });
+    const pane = el("section", { className: "folder-pane" });
+    const selectionBar = el("div", { className: "selection-bar", hidden: true });
+    const menu = revealMenu();
+    const displayName = (choice) => choice.name.trim() || "No name";
+    const move = (paths, to) => {
+      for (const path of paths) moveFile(choices, left, path, to);
+      selection = new Set();
+      drawPane();
     };
+    const show = (to) => {
+      current = to;
+      selection = new Set();
+      anchor = null;
+      drawPane();
+    };
+    /** Where the selected files can go from the pane: every folder but the one listed, or back where they are. */
+    const destinations = () => [...(current ? [null] : []), ...choices.filter((choice) => choice !== current)];
+    const destinationLabel = (to) => (to ? `Move to ${displayName(to)}` : "Leave where it is");
 
     const heading = el("h1", {});
     const run = el("button", { type: "button", className: "primary" });
@@ -174,6 +194,7 @@ export async function render(root, nav, result) {
       else drawHeader();
     });
 
+    const panels = new Map(choices.map((choice) => [choice, folderPanel(choice)]));
     screen.replaceChildren(
       el(
         "header",
@@ -188,42 +209,128 @@ export async function render(root, nav, result) {
       ),
       status,
       settingsPanel,
-      el("div", { className: "folder-cards" }, ...choices.map(folderCard)),
-      leftSection,
+      el("div", { className: "folder-split" }, sidebar, pane),
+      menu.node,
       deviceNote,
     );
-    drawHeader();
-    drawLeft();
-    dropTarget(leftSection, null);
+    drawPane();
 
-    /** The files left where they are, each one draggable into a folder. */
-    function drawLeft() {
-      leftSection.replaceChildren(
-        el("h2", {}, `Left where they are (${count(left.size)})`),
-        ...(left.size ? leftLists([...left], (path) => draggable(leftRow(path), path)) : [el("p", { className: "note" }, "Drag a file here to leave it where it is.")]),
+    /** The pane: the listed folder's settings and files, or the files left where they are. */
+    function drawPane() {
+      if (current) {
+        const panel = panels.get(current);
+        pane.replaceChildren(selectionBar, panel.node);
+        panel.draw();
+      } else {
+        pane.replaceChildren(selectionBar, ...leftPanel());
+        changed();
+      }
+    }
+
+    /** Brings the sidebar, the selection and the header up to date after the pane changed. */
+    function changed() {
+      drawSidebar();
+      drawSelection();
+      drawHeader();
+    }
+
+    /** The folders, files left where they are first; clicking one lists it, and a file dragged onto one goes into it. */
+    function drawSidebar() {
+      const item = (to, label, n, className = "") => {
+        const node = el(
+          "button",
+          { type: "button", className: `folder-sidebar-item ${className}`, ariaCurrent: String(to === current), title: label },
+          icon("folder"),
+          el("span", { className: "folder-sidebar-name" }, label),
+          el("span", { className: "muted folder-sidebar-count" }, count(n)),
+        );
+        node.addEventListener("click", () => show(to));
+        dropTarget(node, to);
+        return node;
+      };
+      sidebar.replaceChildren(
+        item(null, "Left where they are", left.size),
+        el("hr", { className: "folder-sidebar-divider" }),
+        ...choices.map((choice) =>
+          item(choice, displayName(choice), choice.files.size, nameMissing(choice) ? "unnamed" : choice.choice === "skip" ? "skipped" : ""),
+        ),
       );
     }
 
-    /** Makes `row` drag the file at `path`. */
-    function draggable(row, path) {
+    /** Marks the selected rows in the pane, and shows what can be done with them. */
+    function drawSelection() {
+      const rows = [...pane.querySelectorAll("[data-path]")];
+      const shown = new Set(rows.map((row) => row.dataset.path));
+      selection = new Set([...selection].filter((path) => shown.has(path)));
+      for (const row of rows) row.classList.toggle("selected", selection.has(row.dataset.path));
+      selectionBar.hidden = selection.size === 0;
+      if (selection.size === 0) return;
+      const targets = destinations();
+      const to = el(
+        "select",
+        { ariaLabel: "Move the selected files" },
+        el("option", { value: "", disabled: true, selected: true }, "Move to…"),
+        ...targets.map((target, i) => el("option", { value: i }, target ? displayName(target) : "Leave where they are")),
+      );
+      to.value = "";
+      to.addEventListener("change", () => move([...selection], targets[Number(to.value)]));
+      const clear = el("button", { type: "button", className: "link" }, "Deselect");
+      clear.addEventListener("click", () => {
+        selection = new Set();
+        drawSelection();
+      });
+      selectionBar.replaceChildren(el("span", {}, `${plural(selection.size, "file")} selected`), to, clear);
+    }
+
+    /**
+     * Makes `row`, listing the file at `path`, selectable as in Finder, with a right-click menu to move the
+     * selection, and draggable onto a folder in the sidebar, taking the whole selection when it is in it.
+     */
+    function selectable(row, path) {
+      row.dataset.path = path;
+      row.tabIndex = 0;
       row.draggable = true;
+      const select = ({ toggle, range }) => {
+        const order = [...pane.querySelectorAll("[data-path]")].map((node) => node.dataset.path);
+        selection = clickSelection(selection, order, anchor, path, { toggle, range });
+        if (!range) anchor = path;
+        drawSelection();
+      };
+      row.addEventListener("click", (event) => {
+        if (event.target.closest("button")) return;
+        select({ toggle: event.metaKey || event.ctrlKey, range: event.shiftKey });
+      });
+      row.addEventListener("keydown", (event) => {
+        if (event.key !== " " || event.target !== row) return;
+        event.preventDefault();
+        select({ toggle: true, range: false });
+      });
+      row.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        if (!selection.has(path)) select({ toggle: false, range: false });
+        const paths = [...selection];
+        const items = destinations().map((to) => ({ label: destinationLabel(to), action: () => move(paths, to) }));
+        menu.open(paths, row, event, items);
+      });
       row.addEventListener("dragstart", (event) => {
-        dragged = path;
+        dragged = selection.has(path) ? [...selection] : [path];
         event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData("text/plain", path);
-        row.classList.add("dragging");
+        event.dataTransfer.setData("text/plain", dragged.join("\n"));
+        for (const node of pane.querySelectorAll("[data-path]")) {
+          if (dragged.includes(node.dataset.path)) node.classList.add("dragging");
+        }
       });
       row.addEventListener("dragend", () => {
         dragged = null;
-        row.classList.remove("dragging");
+        for (const node of pane.querySelectorAll(".dragging")) node.classList.remove("dragging");
       });
       return row;
     }
 
-    /** Makes `node` take a dragged file into the Suggested Folder `to`, or leave it where it is when `to` is null. */
+    /** Makes `node` take the dragged files into the Suggested Folder `to`, or leave them where they are when `to` is null. */
     function dropTarget(node, to) {
       const holds = (path) => (to ? to.files.has(path) : left.has(path));
-      const accepts = () => dragged !== null && !holds(dragged);
+      const accepts = () => dragged !== null && dragged.some((path) => !holds(path));
       node.addEventListener("dragover", (event) => {
         if (!accepts()) return;
         event.preventDefault();
@@ -241,8 +348,18 @@ export async function render(root, nav, result) {
       });
     }
 
-    /** The card for one Suggested Folder. */
-    function folderCard(choice) {
+    /** The files left where they are, by kind, for the pane. */
+    function leftPanel() {
+      return [
+        el("h2", {}, `Left where they are (${count(left.size)})`),
+        ...(left.size
+          ? leftLists([...left], (path) => selectable(leftRow(path), path))
+          : [el("p", { className: "note" }, "Drag a file onto “Left where they are” to leave it where it is.")]),
+      ];
+    }
+
+    /** The pane for one Suggested Folder: its name, where it goes, what to do with it, and its files. */
+    function folderPanel(choice) {
       const name = el("input", { type: "text", className: "folder-name", value: choice.name, ariaLabel: "Folder name", spellcheck: false });
       const nameError = el("p", { className: "status error folder-name-error" });
       const size = el("span", { className: "muted" });
@@ -259,6 +376,7 @@ export async function render(root, nav, result) {
       );
       pick.value = choice.choice;
       const list = el("ul", { className: "folder-files", ariaLabel: "Files" });
+      const empty = el("p", { className: "note" }, "No files. Drag files onto this folder in the list to add them.");
       const more = el("div", { className: "plan-more" });
       let limit = FILES_SHOWN;
 
@@ -283,7 +401,7 @@ export async function render(root, nav, result) {
       name.addEventListener("input", () => {
         choice.name = name.value;
         drawName();
-        drawHeader();
+        changed();
       });
 
       const drawName = () => {
@@ -320,12 +438,12 @@ export async function render(root, nav, result) {
         const actions = state === "inFolder" ? [button("Trash", "trash"), button("Take out", "takeOut")] : [button("Put back", "inFolder")];
         const row = el(
           "li",
-          { className: "folder-file", title: "Drag to another folder" },
+          { className: "folder-file" },
           el("span", { className: "folder-file-name", title: summaryOf(path) }, fileName(path), el("span", { className: "muted" }, note)),
           el("span", { className: "folder-file-actions" }, ...actions),
         );
         row.classList.toggle("out", state !== "inFolder");
-        return draggable(row, path);
+        return selectable(row, path);
       }
 
       function draw() {
@@ -336,26 +454,25 @@ export async function render(root, nav, result) {
         const shown = Math.min(paths.length, limit);
         list.classList.toggle("skipped", choice.choice === "skip");
         list.replaceChildren(...paths.slice(0, shown).map(fileRow));
+        empty.hidden = paths.length > 0;
         drawMore(more, paths.length, shown, (next) => {
           limit = next;
           draw();
         });
-        drawHeader();
+        changed();
       }
 
       const node = el(
-        "section",
-        { className: "plan-card folder-card" },
-        el("div", { className: "folder-card-head" }, icon("folder"), name, size),
+        "div",
+        { className: "folder-panel" },
+        el("div", { className: "folder-panel-head" }, icon("folder"), name, size),
         nameError,
-        el("div", { className: "folder-card-choice" }, where, pick),
+        el("div", { className: "folder-panel-choice" }, where, pick),
         list,
+        empty,
         more,
       );
-      draw();
-      redraws.push(draw);
-      dropTarget(node, choice);
-      return node;
+      return { node, draw };
     }
 
     /** A file left where it is: its name, with its summary on hover, and when it was last changed. */

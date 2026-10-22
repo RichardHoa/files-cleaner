@@ -24,8 +24,9 @@ export function drawMore(node, total, shown, setLimit) {
 }
 
 /**
- * A right-click menu with "Show in folder". `node` goes on the page once; `open(paths, row, event)`
+ * A right-click menu with "Show in folder". `node` goes on the page once; `open(paths, row, event, items)`
  * opens it for the `contextmenu` `event` on `row`, and Show in folder selects `paths` in the file manager.
+ * `items`, `[{ label, action }]`, go above Show in folder, each closing the menu once its `action()` ran.
  */
 export function revealMenu() {
   const menu = el("div", { className: "row-menu file-menu", role: "menu", hidden: true });
@@ -42,12 +43,20 @@ export function revealMenu() {
   const closeOnEscape = (event) => {
     if (event.key === "Escape") close();
   };
-  function open(paths, row, event) {
+  function open(paths, row, event, items = []) {
+    const buttons = items.map(({ label, action }) => {
+      const button = el("button", { type: "button", role: "menuitem" }, label);
+      button.addEventListener("click", () => {
+        close();
+        action();
+      });
+      return button;
+    });
     const reveal = el("button", { type: "button", role: "menuitem" }, "Show in folder");
     reveal.addEventListener("click", () =>
       revealInFileManager(paths).then(close, (error) => menu.replaceChildren(el("p", { className: "status error" }, describeError(error)))),
     );
-    menu.replaceChildren(reveal);
+    menu.replaceChildren(...buttons, buttons.length ? el("hr", { className: "menu-separator" }) : "", reveal);
     menu.hidden = false;
     // At the pointer, kept inside the window; opened from the keyboard, under the row.
     const fromKeyboard = event.clientX === 0 && event.clientY === 0;
@@ -59,7 +68,7 @@ export function revealMenu() {
     document.addEventListener("pointerdown", closeOutside, true);
     document.addEventListener("keydown", closeOnEscape);
     window.addEventListener("scroll", close);
-    reveal.focus();
+    (buttons[0] ?? reveal).focus();
   }
   return { node: menu, open };
 }

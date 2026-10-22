@@ -6,10 +6,10 @@
 //! if anywhere, among the groups and subfolders nearest it.
 //! Archives, images and installers are never read. PDFs with no text
 //! (scans) are read by OCR, and the ones it can't read, or all of them
-//! with no OCR engine, are a kind too: each kind is one group, unless the
+//! without OCR's languages, are a kind too: each kind is one group, unless the
 //! file's name ties it to a group of read files.
 //!
-//! Everything that needs llama.cpp or PDFium lives in this crate, so `core`
+//! Everything that needs llama.cpp, PDFium or Tesseract lives in this crate, so `core`
 //! stays pure Rust. `analyse` is the entry point; `Analysis::regroup` groups
 //! again with new settings and runs no model.
 
@@ -98,6 +98,9 @@ pub struct Input<'a> {
     /// The PDFium library bundled with the app; without it, PDFs are read
     /// by name.
     pub pdfium: Option<&'a Path>,
+    /// The folder of OCR's language files, once downloaded; without it,
+    /// scanned PDFs are read by name.
+    pub tessdata: Option<&'a Path>,
 }
 
 /// How far an analysis has got.
@@ -302,7 +305,7 @@ pub fn analyse(
             }
             None => {
                 trace::time(&format!("{name}\n"));
-                let content = read::read(&entry.path, &entry.name, input.pdfium);
+                let content = read::read(&entry.path, &entry.name, input.pdfium, input.tessdata);
                 let read_time = started.elapsed();
                 let card = if content.scanned {
                     Card::default()

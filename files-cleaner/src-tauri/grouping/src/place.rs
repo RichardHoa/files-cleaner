@@ -79,10 +79,13 @@ pub fn prompt(question: &Question) -> String {
     folders.push_str("- none (it fits none of these)\n");
     let user = format!(
         "A file:\nName: {}\nTopic: {}\nType: {}\nSummary: {}\n\nFolders:\n{folders}\n\
-         Which folder would a person keep this file in? Choose a folder when the file belongs with the files in it: \
-         the same course, project or organization, the same subject, or study material for the same subject or exam \
+         Which folder would a person keep this file in? Judge by what the file is about. \
+         Choose a folder when the file is about the same course, project, organization or subject as the files in it, \
+         or is study material for that subject or exam \
          (a calculus lecture goes with calculus homework; vocabulary notes go with language exam papers). \
-         Reply \"none\" only when the file is unrelated to every folder. \
+         Being written in the same language, or being something one could read for practice, is not enough: \
+         a report on politics or health does not go with language exam papers. \
+         If no folder is about the file's subject, reply \"none\". \
          Reply with the folder name exactly as written above, or \"none\".",
         question.file_name, card.topic, card.kind, card.summary
     );

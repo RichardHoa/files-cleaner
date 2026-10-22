@@ -83,6 +83,7 @@ fn three_files_on_one_topic_make_one_suggested_folder() {
         settings: Settings::default(),
         store: &store,
         pdfium: None,
+        tessdata: None,
     };
     let analysis = analyse(&input, &mut FakeModels, &AtomicBool::new(false), |_| {}).unwrap();
 
@@ -192,6 +193,7 @@ fn topics_sharing_a_mark_group_and_a_named_archive_joins_them() {
         settings: Settings::default(),
         store: &store,
         pdfium: None,
+        tessdata: None,
     };
     let analysis = analyse(
         &input,
@@ -247,6 +249,7 @@ fn a_cleared_store_reads_every_file_again() {
         settings: Settings::default(),
         store: &store,
         pdfium: None,
+        tessdata: None,
     };
     let embedded = |models: &mut TopicModels| {
         analyse(&input, models, &AtomicBool::new(false), |_| {}).unwrap();
@@ -291,6 +294,7 @@ fn a_file_left_out_goes_where_the_model_places_it_and_stays_there_on_regroup() {
         settings: Settings::default(),
         store: &store,
         pdfium: None,
+        tessdata: None,
     };
     let analysis = analyse(
         &input,

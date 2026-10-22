@@ -1,22 +1,108 @@
-/* Suggested Folders: laid out like the Plan (header, then cards one above the other), with each card
-   holding its own files. Flat surfaces and hairline dividers; the name field looks like text until
-   it's edited. Files drag between cards; the card a file would drop into gets an accent outline. */
+/* Suggested Folders: laid out like Mail, a sidebar of folders beside a pane listing the one picked.
+   The sidebar stays in view while the pane scrolls, so a file is never dragged further than across
+   it. Flat surfaces and hairline dividers; the name field looks like text until it's edited. The
+   sidebar row a file would drop into gets an accent outline. */
 .analysis-progress {
   width: min(100%, 420px);
 }
 
-.folder-cards {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
+.folder-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
   margin: var(--space-2) 0 var(--space-4);
 }
 
-.folder-card {
-  padding: var(--space-3);
+.folder-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
 }
 
-.folder-card-head {
+@media (min-width: 760px) {
+  .folder-split {
+    grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+    gap: var(--space-6);
+  }
+
+  .folder-sidebar {
+    position: sticky;
+    top: var(--space-4);
+    max-height: calc(100vh - 2 * var(--space-4));
+    overflow-y: auto;
+    padding: 0 var(--space-3) 0 0;
+    border-bottom: 0;
+    border-right: 1px solid var(--border);
+  }
+}
+
+.folder-sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  background: none;
+  text-align: left;
+}
+
+.folder-sidebar-item:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+
+.folder-sidebar-item[aria-current="true"] {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.folder-sidebar-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.folder-sidebar-count {
+  font-size: var(--font-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.folder-sidebar-item.skipped .folder-sidebar-name {
+  color: var(--muted);
+}
+
+.folder-sidebar-item.unnamed .folder-sidebar-name {
+  color: var(--error);
+}
+
+.folder-sidebar-divider {
+  width: 100%;
+  margin: var(--space-1) 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.folder-pane h2 {
+  margin-top: 0;
+}
+
+.selection-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.selection-bar[hidden] {
+  display: none;
+}
+
+.folder-panel-head {
   display: flex;
   align-items: center;
   gap: var(--space-1-5);
@@ -54,7 +140,7 @@
   display: none;
 }
 
-.folder-card-choice {
+.folder-panel-choice {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -68,7 +154,7 @@
   overflow-wrap: anywhere;
 }
 
-.folder-card-choice select {
+.folder-pane select {
   font: inherit;
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-sm);
@@ -85,6 +171,7 @@
 }
 
 .folder-file {
+  user-select: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -121,6 +208,14 @@
   cursor: grab;
 }
 
+.folder-file.selected {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.folder-file:focus-visible {
+  outline-offset: -2px;
+}
+
 .folder-file.dragging {
   opacity: 0.5;
 }
@@ -128,11 +223,6 @@
 .drop-target {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
-}
-
-.left-section {
-  border-radius: var(--radius-sm);
-  padding-bottom: var(--space-2);
 }
 
 .left-kind {

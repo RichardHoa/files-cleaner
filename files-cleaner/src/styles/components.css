@@ -133,6 +133,14 @@ button.link:hover {
 /* Opens at the pointer on a right-click in the Plan or a Session, so it is placed in the window. */
 .file-menu {
   position: fixed;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.menu-separator {
+  margin: var(--space-1) 0;
+  border: 0;
+  border-top: 1px solid var(--border);
 }
 
 .row-menu[hidden] {

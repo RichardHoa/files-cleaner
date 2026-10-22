@@ -20,13 +20,13 @@ pub struct Content {
     /// What's inside, at most `MAX_CHARS`; empty when read by name only.
     pub body: String,
     /// A PDF with no text layer, such as a scan, that OCR couldn't read
-    /// either: there's no OCR engine, or its pages are pictures.
+    /// either: OCR's languages aren't downloaded, or its pages are pictures.
     pub scanned: bool,
 }
 
 /// Changes when the same file would be read differently, so cards made
 /// from the old reading aren't used.
-pub const READER_VERSION: u32 = 3;
+pub const READER_VERSION: u32 = 4;
 
 /// Most characters of content read from each file.
 const MAX_CHARS: usize = 2000;
@@ -104,15 +104,16 @@ const HTML_BLOCKS: &[&str] = &[
 ];
 
 /// Reads the file at `path` named `name`. `pdfium` is the PDFium library;
-/// without it, PDFs are read by name.
-pub fn read(path: &Path, name: &str, pdfium: Option<&Path>) -> Content {
+/// without it, PDFs are read by name. `tessdata` is the folder of OCR's
+/// language files; without it, PDFs aren't read by OCR.
+pub fn read(path: &Path, name: &str, pdfium: Option<&Path>, tessdata: Option<&Path>) -> Content {
     let ext = name
         .rsplit_once('.')
         .map(|(_, e)| e.to_lowercase())
         .unwrap_or_default();
     let pdf = ext == "pdf";
     let inside = match ext.as_str() {
-        "pdf" => pdfium.and_then(|pdfium| pdf_text(pdfium, path, PdfReading::TextLayer)),
+        "pdf" => pdfium.and_then(|pdfium| pdf_text(pdfium, path, PdfReading::TextLayer, None)),
         "docx" | "pptx" | "xlsx" => office_text(path, &ext),
         "html" | "htm" => html_text(path),
         _ if PLAIN_TEXT.contains(&ext.as_str()) => plain_text(path),
@@ -150,7 +151,8 @@ pub fn read(path: &Path, name: &str, pdfium: Option<&Path>) -> Content {
     // is; one with garbled text still shows it right. Either way the pages
     // are read as pictures.
     match pdfium
-        .and_then(|pdfium| pdf_text(pdfium, path, PdfReading::Ocr))
+        .zip(tessdata)
+        .and_then(|(pdfium, tessdata)| pdf_text(pdfium, path, PdfReading::Ocr, Some(tessdata)))
         .map(clean)
     {
         Some(body) if readable(&body) => Content {
@@ -255,15 +257,22 @@ impl PdfReading {
     }
 }
 
-/// The PDF's text, read the given way. PDFium is C++ and can crash or take
-/// long on odd files, so it runs in a child process of the app itself
+/// The PDF's text, read the given way, with OCR's languages from
+/// `tessdata`. PDFium and Tesseract are C++ and can crash or take long on
+/// odd files, so they run in a child process of the app itself
 /// (`PdfReading::flag`), which is killed after `PdfReading::timeout`; the
 /// OS then frees everything it held.
-fn pdf_text(pdfium: &Path, path: &Path, reading: PdfReading) -> Option<String> {
+fn pdf_text(
+    pdfium: &Path,
+    path: &Path,
+    reading: PdfReading,
+    tessdata: Option<&Path>,
+) -> Option<String> {
     let mut child = Command::new(std::env::current_exe().ok()?)
         .arg(reading.flag())
         .arg(pdfium)
         .arg(path)
+        .args(tessdata)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         // The child's timings, on stderr, are kept only when tracing.
@@ -320,9 +329,11 @@ pub fn pdf_child_main() -> Option<i32> {
     let (Some(pdfium), Some(path)) = (args.get(2), args.get(3)) else {
         return Some(1);
     };
-    // A panic or a crash in PDFium just ends this process; the parent sees a failure.
+    let tessdata = args.get(4).map(Path::new);
+    // A panic or a crash in PDFium or Tesseract just ends this process; the
+    // parent sees a failure.
     Some(
-        match pdf_child(Path::new(pdfium), Path::new(path), reading) {
+        match pdf_child(Path::new(pdfium), Path::new(path), reading, tessdata) {
             Ok(()) => 0,
             Err(_) => 1,
         },
@@ -331,7 +342,12 @@ pub fn pdf_child_main() -> Option<i32> {
 
 /// Each step's time goes to stderr as it ends, so the parent sees how far
 /// a child it killed got.
-fn pdf_child(pdfium: &Path, path: &Path, reading: PdfReading) -> Result<(), String> {
+fn pdf_child(
+    pdfium: &Path,
+    path: &Path,
+    reading: PdfReading,
+    tessdata: Option<&Path>,
+) -> Result<(), String> {
     let step = Instant::now();
     let pdfium = Pdfium::new(Pdfium::bind_to_library(pdfium).map_err(|e| e.to_string())?);
     // Opened through a seekable reader, not read into memory: PDFium reads
@@ -350,9 +366,16 @@ fn pdf_child(pdfium: &Path, path: &Path, reading: PdfReading) -> Result<(), Stri
         .scale_page_by_factor(OCR_SCALE)
         .set_maximum_width(OCR_MAX_PIXELS)
         .set_maximum_height(OCR_MAX_PIXELS);
-    let count = match reading {
-        PdfReading::TextLayer => PDF_PAGES,
-        PdfReading::Ocr => OCR_PAGES,
+    let (count, ocr) = match reading {
+        PdfReading::TextLayer => (PDF_PAGES, None),
+        PdfReading::Ocr => {
+            let step = Instant::now();
+            let ocr = tessdata
+                .and_then(ocr::Reader::new)
+                .ok_or("no OCR languages")?;
+            eprintln!("load Tesseract: {}", trace::secs(step.elapsed()));
+            (OCR_PAGES, Some(ocr))
+        }
     };
     let mut text = String::new();
     for index in 0..pages.len().min(count) {
@@ -384,13 +407,9 @@ fn pdf_child(pdfium: &Path, path: &Path, reading: PdfReading) -> Result<(), Stri
                     height: bitmap.height() as u32,
                     rgba: bitmap.as_rgba_bytes(),
                 };
-                eprintln!(
-                    "page {}: to RGBA {}",
-                    index + 1,
-                    trace::secs(step.elapsed())
-                );
-                // No OCR engine reads one page if it reads none.
-                text.push_str(&ocr::recognize(&image).ok_or("OCR failed")?);
+                let ocr = ocr.as_ref().ok_or("no OCR")?;
+                text.push_str(&ocr.recognize(&image).ok_or("OCR failed")?);
+                eprintln!("page {}: OCR {}", index + 1, trace::secs(step.elapsed()));
             }
         }
         text.push('\n');

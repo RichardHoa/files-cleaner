@@ -2,7 +2,7 @@
 // picks which group's files are listed; the selected file's Reason is shown beside the list.
 // The user ticks or unticks files, then moves the ticked ones, skips the step, or cancels. Nothing
 // changes until then. This is the duplicate step: once it is run or skipped, the steps go on.
-import { pathSeparator, runPlan } from "../api.js";
+import { clearGroupingCards, describeError, pathSeparator, runPlan } from "../api.js";
 import { el } from "../dom.js";
 import { drawMore, revealMenu } from "../file-list.js";
 import { formatSize, plural, splitPath } from "../format.js";
@@ -60,6 +60,25 @@ function reasonWords(group) {
   };
 }
 
+/**
+ * "Read every file again in the next step": forgets what the Grouping Models said about every file, so
+ * Suggested Folders asks them afresh instead of reusing saved answers. Says how it went in `status`.
+ */
+function forgetReadingsNote(status) {
+  const forget = el("button", { type: "button", className: "link" }, "Read every file again in the next step");
+  forget.addEventListener("click", async () => {
+    forget.disabled = true;
+    try {
+      await clearGroupingCards();
+      showStatus(status, "Forgotten: the next step reads every file again.");
+    } catch (error) {
+      showStatus(status, describeError(error), true);
+      forget.disabled = false;
+    }
+  });
+  return el("p", { className: "note" }, "Suggested Folders reuses what was read last time. ", forget);
+}
+
 const SORT_NAMES = { size: "biggest first", name: "by name", folder: "by folder" };
 
 export function render(root, nav, result, plan) {
@@ -84,6 +103,7 @@ export function render(root, nav, result, plan) {
       el("p", { className: "lead" }, "No file here is an exact copy of another. Continue to scan again and suggest folders."),
       el("div", { className: "actions" }, cancel, next),
       status,
+      forgetReadingsNote(status),
     );
     return;
   }
@@ -357,6 +377,7 @@ export function render(root, nav, result, plan) {
       el("div", { className: "actions" }, cancel, skip, run),
     ),
     status,
+    forgetReadingsNote(status),
     el("div", { className: "plan-cards" }, ...cards.map((c) => c.node)),
     el(
       "div",

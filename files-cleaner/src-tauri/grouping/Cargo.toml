@@ -11,6 +11,10 @@ files-cleaner-core = { path = "../core" }
 pdfium-render = { version = "0.9.4", default-features = false, features = ["pdfium_7881"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# OCR of scanned PDFs (`ocr.rs`): Tesseract and Leptonica, built from
+# source with CMake and linked in statically on every OS, so users install
+# nothing. Its language files are downloaded by the app.
+tesseract-rs = "0.4.0"
 zip = { version = "9.0.5", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 # Metal on macOS; Vulkan on Windows and Linux, which llama.cpp leaves for the
@@ -20,26 +24,6 @@ llama-cpp-2 = { version = "0.1.160", default-features = false, features = ["meta
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 llama-cpp-2 = { version = "0.1.160", default-features = false, features = ["vulkan"] }
-
-# OCR of scanned PDFs (`ocr.rs`): Vision on macOS, Windows.Media.Ocr on
-# Windows, the `tesseract` command elsewhere. Pages go to Vision and
-# Tesseract as PNG.
-[target.'cfg(target_os = "macos")'.dependencies.objc2]
-version = "0.6.4"
-[target.'cfg(target_os = "macos")'.dependencies.objc2-foundation]
-version = "0.3.2"
-default-features = false
-features = ["std", "NSArray", "NSData", "NSDictionary", "NSError", "NSString"]
-[target.'cfg(target_os = "macos")'.dependencies.objc2-vision]
-version = "0.3.2"
-default-features = false
-features = ["std", "VNRequest", "VNRequestHandler", "VNRecognizeTextRequest", "VNObservation", "VNTypes"]
-
-[target.'cfg(not(windows))'.dependencies]
-png = "0.18.1"
-
-[target.'cfg(windows)'.dependencies]
-windows = { version = "0.62.2", features = ["Foundation", "Foundation_Collections", "Globalization", "Graphics_Imaging", "Media_Ocr", "Storage_Streams"] }
 
 [dev-dependencies]
 tempfile = "3"

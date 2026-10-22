@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 mod models;
+mod ocr_languages;
 
 use files_cleaner_core::{
     self as core, Config, Plan, RecentScanRoot, RunProgress, ScanProgress, ScanResult,
@@ -29,6 +30,8 @@ const RECENT_FILE_NAME: &str = "recent-scan-roots.json";
 const MODELS_FOLDER_NAME: &str = "grouping-models";
 /// The answer to the first-open offer of the Grouping Models, inside the app data folder.
 const MODELS_OFFER_FILE_NAME: &str = "grouping-models-offer.json";
+/// OCR's language files, inside the app data folder.
+const OCR_LANGUAGES_FOLDER_NAME: &str = "ocr-languages";
 /// The cards the Grouping Models wrote, inside the app data folder.
 const CARDS_FOLDER_NAME: &str = "grouping-cards";
 /// The bundled PDFium library, inside the app's resources.
@@ -356,6 +359,7 @@ async fn analyse_loose_files(
         .ok_or_else(|| CommandError::new("Download the grouping models first"))?;
     let store = CardStore::open(app_data_path(&app, CARDS_FOLDER_NAME)?);
     let pdfium = pdfium_library(&app);
+    let tessdata = ocr_languages::installed(&app_data_path(&app, OCR_LANGUAGES_FOLDER_NAME)?);
     let analysed = Arc::clone(&scan);
     let analysis = blocking(move || {
         // Dropped when the analysis ends, freeing the models' memory.
@@ -365,6 +369,7 @@ async fn analyse_loose_files(
             settings,
             store: &store,
             pdfium: pdfium.as_deref(),
+            tessdata: tessdata.as_deref(),
         };
         // A closed window can't receive progress; the analysis carries on.
         grouping::analyse(&input, &mut models, &cancel, |progress| {
@@ -509,7 +514,9 @@ pub fn run() {
         .manage(Latest::default())
         .manage(Analysing::default())
         .setup(|app| {
-            let folder = app.path().app_data_dir()?.join(MODELS_FOLDER_NAME);
+            let data = app.path().app_data_dir()?;
+            ocr_languages::install(data.join(OCR_LANGUAGES_FOLDER_NAME));
+            let folder = data.join(MODELS_FOLDER_NAME);
             app.manage(Arc::new(GroupingModels::new(app.handle().clone(), folder)));
             Ok(())
         })
