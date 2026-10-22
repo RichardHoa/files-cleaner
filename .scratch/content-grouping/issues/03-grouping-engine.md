@@ -16,16 +16,20 @@ See `../spec.md`: *Modules*, *Grouping engine*, *Core: planning Suggested Folder
 
 **Status:** ready-for-agent
 
-- [ ] New workspace crate; `core` gains no ML or C++ dependency
-- [ ] Models behind a small interface (card for content, embedding for text); the real one runs `llama-cpp-2`, with Metal on macOS and Vulkan on Windows and Linux, falling back to the CPU when no usable Vulkan GPU or driver is found; the analysis status says which one ran
-- [ ] Reading as in the prototype: PDF text from the first 3 pages through bundled PDFium in a killable child process (10 s); Office XML; plain text; otherwise the name. At most 2,000 characters
-- [ ] Prototype behaviour kept: the card prompt and parsing, average-linkage clustering, the same-topic rule, anchoring to existing subfolders (5 sampled files each), fixed kinds, naming by most common topic; thresholds and smallest folder size passed in, with defaults in code (0.86 / 0.86 / 2)
-- [ ] Card store keyed by content hash plus model ID; cards stored as they're made; a regroup entry point that runs no model
-- [ ] Progress `{ finished, total, current }` at most every 100 ms; cancel checked between files
-- [ ] `core`: a Suggested Folder Reason; create here / add to existing / create elsewhere (same-disk rule) / trash all / skip; per file, trash or take out; safe folder names (an empty name is an error, never a Trash); Clash Suffix
+- [x] New workspace crate; `core` gains no ML or C++ dependency
+- [x] Models behind a small interface (card for content, embedding for text); the real one runs `llama-cpp-2`, with Metal on macOS and Vulkan on Windows and Linux, falling back to the CPU when no usable Vulkan GPU or driver is found; the analysis status says which one ran
+- [x] Reading as in the prototype: PDF text from the first 3 pages through bundled PDFium in a killable child process (10 s); Office XML; plain text; otherwise the name. At most 2,000 characters
+- [x] Prototype behaviour kept: the card prompt and parsing, average-linkage clustering, the same-topic rule, anchoring to existing subfolders (5 sampled files each), fixed kinds, naming by most common topic; thresholds and smallest folder size passed in, with defaults in code (0.86 / 0.86 / 2)
+- [x] Card store keyed by content hash plus model ID; cards stored as they're made; a regroup entry point that runs no model
+- [x] Progress `{ finished, total, current }` at most every 100 ms; cancel checked between files
+- [x] `core`: a Suggested Folder Reason; create here / add to existing / create elsewhere (same-disk rule) / trash all / skip; per file, trash or take out; safe folder names (an empty name is an error, never a Trash); Clash Suffix
 - [ ] Builds natively on macOS; Windows and Linux builds (with the Vulkan SDK on the build machine) checked on those OSes
 - [ ] The app still starts and groups on the CPU on a machine with no Vulkan driver: the Vulkan loader is bundled on Windows, and the Linux packages depend on the system's Vulkan loader
-- [ ] Test: through the engine entry point with fake models, three files on one topic plus one unrelated file give one Suggested Folder of three, named after the topic, with the fourth file left where it is
-- [ ] Test: "create here" for one Suggested Folder plans one Create Folder plus a Move per file, with the Suggested Folder Reason
+- [x] Test: through the engine entry point with fake models, three files on one topic plus one unrelated file give one Suggested Folder of three, named after the topic, with the fourth file left where it is
+- [x] Test: "create here" for one Suggested Folder plans one Create Folder plus a Move per file, with the Suggested Folder Reason
 
 ## Comments
+
+Checked on macOS (2026-10-22): the workspace builds with no warnings (llama.cpp with Metal), and `cargo test` passes, including both tests above. Still open:
+- The Windows and Linux builds, and starting with no Vulkan driver, need checking on those OSes. The bundling is set up (`build.rs` copies `vulkan-1.dll` from `VULKAN_SDK`; `tauri.windows.conf.json`; deb `libvulkan1` and rpm `vulkan-loader`), but the AppImage declares no dependency, so it won't start on a system without `libvulkan.so.1`.
+- A small difference from the prototype: subfolders come from the scan, which lists only files, so an empty subfolder (or one holding only Packages) isn't a destination. The prototype anchored those by their name.

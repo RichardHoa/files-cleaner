@@ -1,0 +1,79 @@
+# Builds, tests and packages the app on each OS it ships for, with the
+# grouping engine's llama.cpp on Metal (macOS) or Vulkan (Windows, Linux).
+name: Platforms
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux packages (Tauri, Vulkan headers and shader compiler)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev \
+            libvulkan-dev glslc
+
+      # Sets VULKAN_SDK, which build.rs needs to bundle vulkan-1.dll.
+      - name: Install the Vulkan SDK
+        if: runner.os == 'Windows'
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          vulkan_version: latest
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: files-cleaner/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: files-cleaner/src-tauri -> target
+
+      - name: Install npm packages
+        working-directory: files-cleaner
+        run: npm ci
+
+      - name: Build the Rust workspace
+        working-directory: files-cleaner/src-tauri
+        run: cargo build --workspace --all-targets
+
+      - name: Rust tests
+        working-directory: files-cleaner/src-tauri
+        run: cargo test --workspace
+
+      - name: JavaScript tests
+        working-directory: files-cleaner
+        run: npm test
+
+      - name: Package the app
+        working-directory: files-cleaner
+        run: npm run tauri build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.os }}
+          path: files-cleaner/src-tauri/target/release/bundle/
+          retention-days: 7

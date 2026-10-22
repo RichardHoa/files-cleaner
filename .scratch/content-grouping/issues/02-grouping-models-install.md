@@ -12,14 +12,14 @@ Ticket 03 reads the models from the same folder, and ticket 04 uses the same "in
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] The two official Qwen GGUFs are pinned: a URL at a fixed revision, a size and a SHA-256 each
-- [ ] Downloads go into a models folder in app data, through a partial file resumed with HTTP Range requests; checksum verified before it counts as installed
-- [ ] Status (not installed / downloading with progress / paused / installed) plus start, pause, resume, cancel and remove, as Tauri commands
-- [ ] Free-space check before starting, with a clear message
-- [ ] First-open sheet with **Download** / **Not now**, shown once, its answer remembered in app data
-- [ ] The Suggested Folders step branches on "models installed": the offer or progress when they're missing (the fallback grouper is out of scope); the existing placeholder when they're installed, until ticket 04
-- [ ] Quiet native styling and no "AI" wording; no tests for now
+- [x] The two official Qwen GGUFs are pinned: a URL at a fixed revision, a size and a SHA-256 each
+- [x] Downloads go into a models folder in app data, through a partial file resumed with HTTP Range requests; checksum verified before it counts as installed
+- [x] Status (not installed / downloading with progress / paused / installed) plus start, pause, resume, cancel and remove, as Tauri commands
+- [x] Free-space check before starting, with a clear message
+- [x] First-open sheet with **Download** / **Not now**, shown once, its answer remembered in app data
+- [x] The Suggested Folders step branches on "models installed": the offer or progress when they're missing (the fallback grouper is out of scope); the existing placeholder when they're installed, until ticket 04
+- [x] Quiet native styling and no "AI" wording; no tests for now
 
 ## Comments

@@ -110,15 +110,18 @@ fn a_rule_must_either_trash_or_move() {
 
 #[test]
 fn move_targets_resolve_home_absolute_and_relative_paths() {
-    let config = load_config(
-        r#"{ "rules": [
-          { "name": "a", "match": { "extensions": ["a"] }, "then": { "moveTo": "~/Documents/Study" } },
-          { "name": "b", "match": { "extensions": ["b"] }, "then": { "moveTo": "/Users/Shared/Inbox" } },
-          { "name": "c", "match": { "extensions": ["c"] }, "then": { "moveTo": "Screenshots", "rename": "{modified} {name}" } }
-        ] }"#,
-        Path::new("/Users/me"),
-    )
-    .unwrap();
+    #[cfg(unix)]
+    let absolute = "/Users/Shared/Inbox";
+    #[cfg(windows)]
+    let absolute = "C:/Users/Shared/Inbox";
+    let text = format!(
+        r#"{{ "rules": [
+          {{ "name": "a", "match": {{ "extensions": ["a"] }}, "then": {{ "moveTo": "~/Documents/Study" }} }},
+          {{ "name": "b", "match": {{ "extensions": ["b"] }}, "then": {{ "moveTo": "{absolute}" }} }},
+          {{ "name": "c", "match": {{ "extensions": ["c"] }}, "then": {{ "moveTo": "Screenshots", "rename": "{{modified}} {{name}}" }} }}
+        ] }}"#
+    );
+    let config = load_config(&text, Path::new("/Users/me")).unwrap();
 
     let targets: Vec<(&RuleTarget, Option<&str>)> = config
         .rules
@@ -132,7 +135,7 @@ fn move_targets_resolve_home_absolute_and_relative_paths() {
         targets,
         [
             (&RuleTarget::Absolute("/Users/me/Documents/Study".into()), None),
-            (&RuleTarget::Absolute("/Users/Shared/Inbox".into()), None),
+            (&RuleTarget::Absolute(absolute.into()), None),
             (&RuleTarget::RelativeToScanRoot("Screenshots".into()), Some("{modified} {name}")),
         ]
     );
