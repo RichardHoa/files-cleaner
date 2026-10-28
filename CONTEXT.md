@@ -45,7 +45,7 @@ A set of two or more files with byte-identical contents, regardless of name or l
 _Avoid_: dupes, clones
 
 **Keeper**:
-The one file in a Duplicate Group that stays: by default the newest, judged by modified date, then created date, then shortest path.
+The one file in a Duplicate Group that stays: by default the newest, judged by modified date, then created date, then shortest path. The user can make any other copy in the group the Keeper instead.
 _Avoid_: original, master copy, oldest
 
 ### Planning

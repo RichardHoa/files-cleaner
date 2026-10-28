@@ -66,3 +66,5 @@ cd files-cleaner/src-tauri
 cargo build --release -p files-cleaner-core --bin bench-scan
 /usr/bin/time -l ./target/release/bench-scan ~/Downloads 3   # -v instead of -l on Linux
 ```
+
+## things to improve
