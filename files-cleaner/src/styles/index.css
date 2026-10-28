@@ -12,3 +12,4 @@
 @import url("sessions.css") layer(screens);
 @import url("history.css") layer(screens);
 @import url("suggested-folders.css") layer(screens);
+@import url("settings.css") layer(screens);

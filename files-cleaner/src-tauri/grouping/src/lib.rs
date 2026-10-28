@@ -31,7 +31,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use files_cleaner_core::{ScanEntry, ScanResult};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 pub use card::Card;
 pub use cluster::Vector;
@@ -64,29 +64,14 @@ pub trait Models {
     /// Where the models ran, such as "Metal GPU" or "CPU"; `None` if they
     /// haven't run.
     fn device(&self) -> Option<String>;
+    /// Loads the models ahead of their first use, so the wait can be told
+    /// apart from reading. A model that fails to load fails again where
+    /// it's used.
+    fn load(&mut self) {}
 }
 
-/// How the files are grouped.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Settings {
-    /// How closely files must match to share a folder, 0–1.
-    pub folder_threshold: f32,
-    /// How closely a group must match an existing subfolder to go into it, 0–1.
-    pub existing_folder_threshold: f32,
-    /// The fewest files a Suggested Folder holds.
-    pub smallest_folder: usize,
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Settings {
-            folder_threshold: 0.86,
-            existing_folder_threshold: 0.86,
-            smallest_folder: 2,
-        }
-    }
-}
+/// How the files are grouped: the config's `grouping` section.
+pub use files_cleaner_core::GroupingSettings as Settings;
 
 /// What `analyse` works from.
 pub struct Input<'a> {
@@ -110,10 +95,23 @@ pub struct Progress {
     /// Files read, or placed, so far.
     pub finished: usize,
     pub total: usize,
-    /// The file being read or placed.
+    /// The file being checked, read or placed.
     pub current: PathBuf,
-    /// Whether the files are read, or the files left out are being placed.
-    pub placing: bool,
+    pub phase: Phase,
+}
+
+/// What an analysis is doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Phase {
+    /// Finding which files were read before; `total` counts every file.
+    Checking,
+    /// Loading the models, before the first file is read.
+    Loading,
+    /// Reading the files with no stored card; `total` counts only those.
+    Reading,
+    /// Placing the files left out of every Suggested Folder.
+    Placing,
 }
 
 /// The longest an analysis waits between progress reports.
@@ -216,7 +214,8 @@ const EMBED_CHUNK: usize = 16;
 /// `models` place the files left out (or takes the stored answers). Cards
 /// and answers are stored as they're made, so a cancelled analysis keeps them.
 /// `cancel` is checked between files; `on_progress` is called at most every
-/// `PROGRESS_INTERVAL`, and once at the end of reading.
+/// `PROGRESS_INTERVAL` in each `Phase`, before the models load, and once at
+/// the end of reading.
 pub fn analyse(
     input: &Input,
     models: &mut dyn Models,
@@ -266,88 +265,118 @@ pub fn analyse(
         .copied()
         .chain(samples.iter().flat_map(|(_, s)| s.iter().copied()))
         .collect();
-    let mut stored: Vec<(Option<blake3::Hash>, Stored)> = Vec::with_capacity(all.len());
+    // The stored cards first, so the files that need reading are counted up front.
+    let mut stored: Vec<(Option<blake3::Hash>, Option<Stored>)> = Vec::with_capacity(all.len());
     let mut last_report: Option<Instant> = None;
-    for (finished, entry) in all.iter().enumerate() {
+    for (checked, entry) in all.iter().enumerate() {
         if cancel.load(Ordering::Relaxed) {
             return Err(Stopped::Cancelled);
         }
         if last_report.is_none_or(|t| t.elapsed() >= PROGRESS_INTERVAL) {
             on_progress(Progress {
-                finished,
+                finished: checked,
                 total: all.len(),
                 current: entry.path.clone(),
-                placing: false,
+                phase: Phase::Checking,
+            });
+            last_report = Some(Instant::now());
+        }
+        let hash = content_hash(&entry.path);
+        let found = hash.as_ref().and_then(|h| input.store.get(&ids, h));
+        stored.push((hash, found));
+    }
+    let total = stored.iter().filter(|(_, found)| found.is_none()).count();
+    if let Some((first, _)) = all
+        .iter()
+        .zip(&stored)
+        .find(|(_, (_, found))| found.is_none())
+    {
+        on_progress(Progress {
+            finished: 0,
+            total,
+            current: first.path.clone(),
+            phase: Phase::Loading,
+        });
+        models.load();
+    }
+    let mut finished = 0;
+    let mut last_report: Option<Instant> = None;
+    for (entry, (hash, found)) in all.iter().zip(stored.iter_mut()) {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(Stopped::Cancelled);
+        }
+        let name = &entry.name;
+        if let Some(found) = found {
+            trace::time(&format!("{name}: saved card\n"));
+            if trace::enabled() {
+                trace::write(
+                    trace::CARDS,
+                    &format!("{name}.txt"),
+                    &format!(
+                        "(A card saved by an earlier analysis: the prompt wasn't run again. Forget the saved cards to see it.)\n\n\
+                         === CARD ===\n{:#?}\n",
+                        found.card
+                    ),
+                );
+            }
+            continue;
+        }
+        if last_report.is_none_or(|t| t.elapsed() >= PROGRESS_INTERVAL) {
+            on_progress(Progress {
+                finished,
+                total,
+                current: entry.path.clone(),
+                phase: Phase::Reading,
             });
             last_report = Some(Instant::now());
         }
         let started = Instant::now();
-        let hash = content_hash(&entry.path);
-        let name = &entry.name;
-        let entry = match hash.as_ref().and_then(|h| input.store.get(&ids, h)) {
-            Some(found) => {
-                trace::time(&format!(
-                    "{name}: saved card, {}\n",
-                    trace::secs(started.elapsed())
-                ));
-                if trace::enabled() {
-                    trace::write(
-                        trace::CARDS,
-                        &format!("{name}.txt"),
-                        &format!(
-                            "(A card saved by an earlier analysis: the prompt wasn't run again. Forget the saved cards to see it.)\n\n\
-                             === CARD ===\n{:#?}\n",
-                            found.card
-                        ),
-                    );
-                }
-                found
-            }
-            None => {
-                trace::time(&format!("{name}\n"));
-                let content = read::read(&entry.path, &entry.name, input.pdfium, input.tessdata);
-                let read_time = started.elapsed();
-                let card = if content.scanned {
-                    Card::default()
-                } else {
-                    models.card(&content).unwrap_or_default()
-                };
-                trace::time(&format!(
-                    "  read {} · card {} · total {}{}\n",
-                    trace::secs(read_time),
-                    if content.scanned {
-                        "skipped (scanned)".to_string()
-                    } else {
-                        trace::secs(started.elapsed() - read_time)
-                    },
-                    trace::secs(started.elapsed()),
-                    if content.body.is_empty() {
-                        " · by name only"
-                    } else {
-                        ""
-                    }
-                ));
-                let made = Stored {
-                    card,
-                    scanned: content.scanned,
-                    embedding: None,
-                };
-                if let Some(h) = &hash {
-                    input.store.put(&ids, h, &made);
-                }
-                made
-            }
+        trace::time(&format!("{name}\n"));
+        let content = read::read(&entry.path, &entry.name, input.pdfium, input.tessdata);
+        let read_time = started.elapsed();
+        let card = if content.scanned {
+            Card::default()
+        } else {
+            models.card(&content).unwrap_or_default()
         };
-        stored.push((hash, entry));
+        trace::time(&format!(
+            "  read {} · card {} · total {}{}\n",
+            trace::secs(read_time),
+            if content.scanned {
+                "skipped (scanned)".to_string()
+            } else {
+                trace::secs(started.elapsed() - read_time)
+            },
+            trace::secs(started.elapsed()),
+            if content.body.is_empty() {
+                " · by name only"
+            } else {
+                ""
+            }
+        ));
+        let made = Stored {
+            card,
+            scanned: content.scanned,
+            embedding: None,
+        };
+        if let Some(h) = &hash {
+            input.store.put(&ids, h, &made);
+        }
+        *found = Some(made);
+        finished += 1;
     }
-    if let Some(last) = all.last() {
+    if let Some(last) = all.last().filter(|_| total > 0) {
         on_progress(Progress {
-            finished: all.len(),
-            total: all.len(),
+            finished: total,
+            total,
             current: last.path.clone(),
-            placing: false,
+            phase: Phase::Reading,
         });
     }
+    let mut stored: Vec<(Option<blake3::Hash>, Stored)> = stored
+        .into_iter()
+        .map(|(hash, found)| (hash, found.expect("every file has a card by now")))
+        .collect();
     if cancel.load(Ordering::Relaxed) {
         return Err(Stopped::Cancelled);
     }
@@ -469,7 +498,7 @@ pub fn analyse(
                 finished,
                 total: unanswered.len(),
                 current,
-                placing: true,
+                phase: Phase::Placing,
             });
             last_report = Some(Instant::now());
         }

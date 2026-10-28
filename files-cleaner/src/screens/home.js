@@ -1,9 +1,8 @@
-// Home: rescan a Recent Scan Root or pick a folder, open the config, and see the latest Sessions.
+// Home: rescan a Recent Scan Root or pick a folder, open Settings, and see the latest Sessions.
 import {
   describeError,
   listSessions,
   loadConfig,
-  openConfig,
   pathSeparator,
   pickFolder,
   recentScanRoots,
@@ -68,39 +67,26 @@ export function render(root, nav) {
     if (folder) startScan(folder);
   };
 
-  badge.addEventListener("click", async () => {
-    try {
-      await openConfig();
-    } catch (error) {
-      showStatus(status, describeError(error), true);
-    }
-  });
+  badge.addEventListener("click", () => nav.settings());
 
   showConfig(badge, configError);
   showTiles(tiles, startScan, pick);
   showSessions(sessions, seeAll, nav);
 
-  // The config is re-read on every use, so refresh this when the user comes
-  // back from editing it.
-  const refresh = () => {
-    if (badge.isConnected) showConfig(badge, configError);
-    else window.removeEventListener("focus", refresh);
-  };
-  window.addEventListener("focus", refresh);
 }
 
-/** The config badge: that the config is fine, or that it has an error, which is spelt out below. */
+/** The Settings button, which also says when the config has an error, spelt out below. */
 async function showConfig(badge, errorLine) {
   try {
-    const { path } = await loadConfig();
+    await loadConfig();
     badge.classList.remove("error");
-    badge.title = `Open the config: ${path}`;
-    badge.replaceChildren(icon("settings"), "Config OK");
+    badge.title = "Open Settings";
+    badge.replaceChildren(icon("settings"), "Settings");
     errorLine.textContent = "";
   } catch (error) {
     badge.classList.add("error");
-    badge.title = "Open the config to fix it";
-    badge.replaceChildren(icon("settings"), "Config error");
+    badge.title = "Open Settings";
+    badge.replaceChildren(icon("settings"), "Settings: config error");
     errorLine.textContent = describeError(error);
   }
 }

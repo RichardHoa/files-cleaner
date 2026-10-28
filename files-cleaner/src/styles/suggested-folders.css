@@ -6,6 +6,22 @@
   width: min(100%, 420px);
 }
 
+.reading-estimate {
+  margin: var(--space-1) 0 var(--space-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.notify-ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.notify-ask[hidden] {
+  display: none;
+}
+
 .folder-split {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -79,6 +95,27 @@
   color: var(--error);
 }
 
+.folder-sidebar-rename {
+  flex: 1;
+  min-width: 0;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+
+.folder-sidebar-rename[aria-invalid="true"] {
+  border-color: var(--error);
+}
+
+.folder-sidebar-renaming .folder-name-error {
+  margin: 0 0 var(--space-1);
+  padding: 0 var(--space-2);
+  font-size: var(--font-sm);
+}
+
 .folder-sidebar-divider {
   width: 100%;
   margin: var(--space-1) 0;
@@ -144,9 +181,36 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
+  gap: var(--space-2) var(--space-3);
   margin: var(--space-2) 0;
+}
+
+/* Like a macOS segmented control: one bordered strip, the chosen segment filled. */
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.segment {
+  padding: var(--space-1) var(--space-2-5);
+  border: 0;
+  border-radius: 0;
+  background: var(--surface);
+  white-space: nowrap;
+}
+
+.segment + .segment {
+  border-left: 1px solid var(--border);
+}
+
+.segment[aria-checked="true"] {
+  background: color-mix(in srgb, var(--text) 14%, var(--surface));
+}
+
+.segment:focus-visible {
+  outline-offset: -2px;
 }
 
 .folder-where {
@@ -190,18 +254,12 @@
 .folder-file-actions {
   display: flex;
   flex-shrink: 0;
-  gap: var(--space-3);
-  font-size: var(--font-sm);
+  gap: var(--space-1-5);
 }
 
 .folder-file.out .folder-file-name,
 .folder-files.skipped .folder-file-name {
   color: var(--muted);
-}
-
-.folder-files.skipped button.link {
-  color: var(--muted);
-  text-decoration: none;
 }
 
 .folder-file[draggable="true"] {
@@ -239,37 +297,4 @@
 
 .left-files {
   margin-bottom: var(--space-2);
-}
-
-.grouping-settings {
-  margin: var(--space-2) 0;
-}
-
-.grouping-settings summary {
-  cursor: pointer;
-  color: var(--muted);
-}
-
-.grouping-setting {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  margin: var(--space-2) 0;
-}
-
-.grouping-setting-actions {
-  display: flex;
-  gap: var(--space-3);
-}
-
-.grouping-setting span {
-  min-width: 18em;
-}
-
-.grouping-setting input {
-  width: min(100%, 240px);
-}
-
-.grouping-setting output {
-  font-variant-numeric: tabular-nums;
 }

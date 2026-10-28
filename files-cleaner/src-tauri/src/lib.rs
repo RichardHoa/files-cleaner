@@ -12,10 +12,10 @@ mod ocr_languages;
 
 use files_cleaner_core::{
     self as core, Config, Plan, RecentScanRoot, RunProgress, ScanProgress, ScanResult,
-    SessionDetails, SessionPage, SuggestedFolderChoice, Summary, EXAMPLE_CONFIG,
+    SessionDetails, SessionPage, SettingChange, SuggestedFolderChoice, Summary, EXAMPLE_CONFIG,
 };
-use files_cleaner_grouping::{self as grouping, Analysis, CardStore, Grouping, LlamaModels};
-use serde::Serialize;
+use files_cleaner_grouping::{self as grouping, CardStore, Grouping, LlamaModels};
+use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 
@@ -34,6 +34,8 @@ const MODELS_OFFER_FILE_NAME: &str = "grouping-models-offer.json";
 const OCR_LANGUAGES_FOLDER_NAME: &str = "ocr-languages";
 /// The cards the Grouping Models wrote, inside the app data folder.
 const CARDS_FOLDER_NAME: &str = "grouping-cards";
+/// How long reading a file takes on this computer, inside the app data folder.
+const READING_PACE_FILE_NAME: &str = "reading-pace.json";
 /// The bundled PDFium library, inside the app's resources.
 #[cfg(target_os = "macos")]
 const PDFIUM_LIBRARY: &str = "pdfium/libpdfium.dylib";
@@ -52,11 +54,9 @@ struct Scanned {
     plan: Option<Plan>,
 }
 
-/// The latest analysis of a scan's loose files with that scan, kept for
-/// regrouping, and the cancel flag of the analysis running now, if any.
+/// The cancel flag of the analysis running now, if any.
 #[derive(Default)]
 struct Analysing {
-    latest: Mutex<Option<(Arc<ScanResult>, Analysis)>>,
     cancel: Mutex<Arc<AtomicBool>>,
 }
 
@@ -129,7 +129,7 @@ fn read_or_create(path: &Path) -> Result<String, CommandError> {
     fs::read_to_string(path).map_err(CommandError::new)
 }
 
-/// Reads the config file afresh, so edits apply without a restart.
+/// Reads the config file afresh, so every command sees the latest saved settings.
 fn read_config(app: &AppHandle) -> Result<LoadedConfig, CommandError> {
     let path = config_path(app)?;
     let text = read_or_create(&path)?;
@@ -150,11 +150,31 @@ fn load_config(app: AppHandle) -> Result<LoadedConfig, CommandError> {
     read_config(&app)
 }
 
+/// Makes one change from the Settings screen to the config file and
+/// returns the config as saved. An invalid value is refused, with nothing
+/// saved.
+/// Puts every setting back to its default, even when the config can't be
+/// read, and returns the config as saved.
 #[tauri::command]
-fn open_config(app: AppHandle) -> Result<(), CommandError> {
+fn reset_settings(app: AppHandle) -> Result<LoadedConfig, CommandError> {
     let path = config_path(&app)?;
+    if let Some(folder) = path.parent() {
+        fs::create_dir_all(folder).map_err(CommandError::new)?;
+    }
+    let home = app.path().home_dir().map_err(CommandError::new)?;
+    let config = core::reset_config(&path, &home).map_err(|e| CommandError::new(e.message))?;
+    Ok(LoadedConfig { path, config })
+}
+
+#[tauri::command]
+fn change_setting(app: AppHandle, change: SettingChange) -> Result<LoadedConfig, CommandError> {
+    let path = config_path(&app)?;
+    // Written first if missing, so there is a file to change.
     read_or_create(&path)?;
-    tauri_plugin_opener::open_path(&path, None::<&str>).map_err(CommandError::new)
+    let home = app.path().home_dir().map_err(CommandError::new)?;
+    let config =
+        core::save_config(&path, &change, &home).map_err(|e| CommandError::new(e.message))?;
+    Ok(LoadedConfig { path, config })
 }
 
 /// Why the user should think twice before scanning `scan_root`, if they
@@ -339,20 +359,20 @@ struct AnalysisResult {
 
 /// Reads the loose files of the latest scan with the Grouping Models, off
 /// the UI thread, sending progress to `on_progress`, and suggests folders
-/// for them by `settings`. The models are loaded for this analysis only. The analysis is
-/// kept for `regroup`; `cancel_analysis` stops it.
+/// for them by the config's grouping settings. The models are loaded for
+/// this analysis only. `cancel_analysis` stops it.
 #[tauri::command]
 async fn analyse_loose_files(
     app: AppHandle,
     latest: State<'_, Latest>,
     analysing: State<'_, Analysing>,
     models: State<'_, Arc<GroupingModels>>,
-    settings: grouping::Settings,
     on_progress: Channel<grouping::Progress>,
 ) -> Result<AnalysisResult, CommandError> {
     // Set first, so a Cancel that comes in while starting stops this analysis.
     let cancel = Arc::new(AtomicBool::new(false));
     *analysing.cancel.lock().unwrap() = Arc::clone(&cancel);
+    let settings = read_config(&app)?.config.grouping;
     let scan = latest_scan(&latest)?;
     let (llm, embedding) = models
         .files()
@@ -360,12 +380,11 @@ async fn analyse_loose_files(
     let store = CardStore::open(app_data_path(&app, CARDS_FOLDER_NAME)?);
     let pdfium = pdfium_library(&app);
     let tessdata = ocr_languages::installed(&app_data_path(&app, OCR_LANGUAGES_FOLDER_NAME)?);
-    let analysed = Arc::clone(&scan);
     let analysis = blocking(move || {
         // Dropped when the analysis ends, freeing the models' memory.
         let mut models = LlamaModels::new(&llm, &embedding);
         let input = grouping::Input {
-            scan: &analysed,
+            scan: &scan,
             settings,
             store: &store,
             pdfium: pdfium.as_deref(),
@@ -377,12 +396,10 @@ async fn analyse_loose_files(
         })
     })
     .await?;
-    let result = AnalysisResult {
-        grouping: analysis.grouping.clone(),
-        device: analysis.device.clone(),
-    };
-    *analysing.latest.lock().unwrap() = Some((scan, analysis));
-    Ok(result)
+    Ok(AnalysisResult {
+        grouping: analysis.grouping,
+        device: analysis.device,
+    })
 }
 
 /// Stops the running analysis between files; the cards made so far are kept.
@@ -403,22 +420,6 @@ fn clear_grouping_cards(app: AppHandle) -> Result<(), CommandError> {
     CardStore::open(app_data_path(&app, CARDS_FOLDER_NAME)?)
         .clear()
         .map_err(CommandError::new)
-}
-
-/// The latest scan's analysis grouped again by `settings`, with no model run.
-#[tauri::command]
-fn regroup(
-    latest: State<'_, Latest>,
-    analysing: State<'_, Analysing>,
-    settings: grouping::Settings,
-) -> Result<Grouping, CommandError> {
-    let scan = latest_scan(&latest)?;
-    let analysed = analysing.latest.lock().unwrap();
-    let (_, analysis) = analysed
-        .as_ref()
-        .filter(|(analysed, _)| Arc::ptr_eq(analysed, &scan))
-        .ok_or_else(|| CommandError::new("Read the files first"))?;
-    Ok(analysis.regroup(&settings))
 }
 
 /// Plans the user's choices for each Suggested Folder over the latest scan.
@@ -493,13 +494,52 @@ fn grouping_models_offer_pending(
 /// so it isn't asked again.
 #[tauri::command]
 fn answer_grouping_models_offer(app: AppHandle, answer: String) -> Result<(), CommandError> {
-    let path = app_data_path(&app, MODELS_OFFER_FILE_NAME)?;
+    write_app_json(
+        &app,
+        MODELS_OFFER_FILE_NAME,
+        &serde_json::json!({ "answer": answer }),
+    )
+}
+
+/// Writes `value` as JSON to the file `name` in the app data folder.
+fn write_app_json(app: &AppHandle, name: &str, value: &impl Serialize) -> Result<(), CommandError> {
+    let path = app_data_path(app, name)?;
     if let Some(folder) = path.parent() {
         fs::create_dir_all(folder).map_err(CommandError::new)?;
     }
-    let text = serde_json::to_string(&serde_json::json!({ "answer": answer }))
-        .map_err(CommandError::new)?;
+    let text = serde_json::to_string(value).map_err(CommandError::new)?;
     fs::write(path, text).map_err(CommandError::new)
+}
+
+/// How long reading a file takes on this computer, as stored.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadingPace {
+    /// Averaged over finished analyses, each counting for half (see
+    /// `updatedAverage` in the UI).
+    seconds_per_file: f64,
+}
+
+/// The seconds per file a finished analysis took on this computer, or
+/// `None` before the first one.
+#[tauri::command]
+fn reading_pace(app: AppHandle) -> Result<Option<f64>, CommandError> {
+    let path = app_data_path(&app, READING_PACE_FILE_NAME)?;
+    // Unreadable is the same as no history: the estimate starts over.
+    let saved = fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<ReadingPace>(&bytes).ok());
+    Ok(saved.map(|pace| pace.seconds_per_file))
+}
+
+/// Remembers `seconds_per_file` as this computer's reading pace.
+#[tauri::command]
+fn save_reading_pace(app: AppHandle, seconds_per_file: f64) -> Result<(), CommandError> {
+    write_app_json(
+        &app,
+        READING_PACE_FILE_NAME,
+        &ReadingPace { seconds_per_file },
+    )
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -511,6 +551,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(Latest::default())
         .manage(Analysing::default())
         .setup(|app| {
@@ -522,7 +563,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             load_config,
-            open_config,
+            change_setting,
+            reset_settings,
             scan_root_warning,
             scan,
             build_plan,
@@ -541,8 +583,9 @@ pub fn run() {
             answer_grouping_models_offer,
             analyse_loose_files,
             cancel_analysis,
-            regroup,
             clear_grouping_cards,
+            reading_pace,
+            save_reading_pace,
             build_suggested_folders_plan
         ])
         .run(tauri::generate_context!())

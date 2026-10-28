@@ -118,6 +118,13 @@ button.link:hover {
   text-decoration: underline;
 }
 
+/* A bordered button for actions on a row, like a small macOS push button. */
+button.small {
+  padding: 0 var(--space-2);
+  font-size: var(--font-sm);
+  line-height: 1.6;
+}
+
 /* The menu that opens on a row: on a click in the scan results, on a right-click in the Plan or a Session. */
 .row-menu {
   position: absolute;

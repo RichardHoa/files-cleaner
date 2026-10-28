@@ -18,8 +18,8 @@ mod suggested_folders;
 mod volume;
 
 pub use config::{
-    load_config, Config, ConfigError, Rule, RuleOperation, RuleTarget, TrashDestination,
-    EXAMPLE_CONFIG,
+    load_config, reset_config, save_config, Config, ConfigError, GroupingSettings, Rule,
+    RuleOperation, RuleTarget, SettingChange, TrashDestination, EXAMPLE_CONFIG,
 };
 pub use executor::{
     redo_operations, run, run_with_progress, undo, undo_operations, Outcome, RunProgress, Summary,

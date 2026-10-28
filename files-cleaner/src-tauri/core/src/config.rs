@@ -1,4 +1,5 @@
 use std::fmt;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -24,6 +25,46 @@ pub struct Config {
     /// In file order: the first matching Rule wins. Rules are frozen: they
     /// are still checked, but no Plan the app builds uses them.
     pub rules: Vec<Rule>,
+    pub grouping: GroupingSettings,
+    /// Whether the user wants a notification when the folders are ready:
+    /// `None` until they're asked, which is only once.
+    pub notifications: Option<bool>,
+}
+
+/// How the files are grouped into Suggested Folders: the `grouping` section,
+/// each key defaulting to the value here.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupingSettings {
+    /// How closely files must match to share a folder, 0–1.
+    pub folder_threshold: f32,
+    /// How closely a group must match an existing subfolder to go into it, 0–1.
+    pub existing_folder_threshold: f32,
+    /// The fewest files a Suggested Folder holds, 2–10.
+    pub smallest_folder: usize,
+}
+
+impl Default for GroupingSettings {
+    fn default() -> Self {
+        GroupingSettings {
+            folder_threshold: 0.86,
+            existing_folder_threshold: 0.86,
+            smallest_folder: 2,
+        }
+    }
+}
+
+/// One setting changed from the Settings screen. A grouping value of `None`
+/// resets it to the default, taking its key out of the file.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "key", content = "value")]
+pub enum SettingChange {
+    NeverTouch(Vec<PathBuf>),
+    FolderThreshold(Option<f32>),
+    ExistingFolderThreshold(Option<f32>),
+    SmallestFolder(Option<usize>),
+    /// The user's answer when asked about notifications.
+    Notifications(bool),
 }
 
 /// Where Trash sends files. Only the Holding Folder is supported: the
@@ -103,6 +144,17 @@ struct RawConfig {
     never_touch: Vec<String>,
     #[serde(default)]
     rules: Vec<RawRule>,
+    #[serde(default)]
+    grouping: RawGrouping,
+    notifications: Option<bool>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RawGrouping {
+    folder_threshold: Option<f32>,
+    existing_folder_threshold: Option<f32>,
+    smallest_folder: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -157,11 +209,14 @@ pub fn load_config(text: &str, home: &Path) -> Result<Config, ConfigError> {
         }
     }
 
+    let grouping = validate_grouping(&raw.grouping, text)?;
     let mut config = Config {
         home: home.to_path_buf(),
         trash_destination: raw.trash_destination,
         never_touch,
         rules: Vec::new(),
+        grouping,
+        notifications: raw.notifications,
     };
     let protection = Protection::new(&config);
     // Rules are in file order, so searching onwards from the previous
@@ -175,6 +230,170 @@ pub fn load_config(text: &str, home: &Path) -> Result<Config, ConfigError> {
         cursor = start + 1;
     }
     Ok(config)
+}
+
+/// The grouping settings, with the defaults for keys left out. An
+/// out-of-range value is an error at its key, never clamped.
+fn validate_grouping(raw: &RawGrouping, text: &str) -> Result<GroupingSettings, ConfigError> {
+    let section = text.find("\"grouping\"").unwrap_or(0);
+    let fail = |key: &str, range: &str| {
+        error_at(
+            text,
+            section,
+            key,
+            format!("grouping {key} must be between {range}"),
+        )
+    };
+    let defaults = GroupingSettings::default();
+    let threshold = |value: Option<f32>, key: &str, default: f32| match value {
+        Some(value) if !(0.0..=1.0).contains(&value) => Err(fail(key, "0 and 1")),
+        value => Ok(value.unwrap_or(default)),
+    };
+    let smallest_folder = match raw.smallest_folder {
+        Some(value) if !(2..=10).contains(&value) => {
+            return Err(fail("smallestFolder", "2 and 10"))
+        }
+        value => value.unwrap_or(defaults.smallest_folder),
+    };
+    Ok(GroupingSettings {
+        folder_threshold: threshold(
+            raw.folder_threshold,
+            "folderThreshold",
+            defaults.folder_threshold,
+        )?,
+        existing_folder_threshold: threshold(
+            raw.existing_folder_threshold,
+            "existingFolderThreshold",
+            defaults.existing_folder_threshold,
+        )?,
+        smallest_folder,
+    })
+}
+
+/// Makes `change` to the config file at `path` and returns the config it
+/// now holds. Every key the change doesn't touch, the frozen Rules
+/// included, is kept as written. A change that would make the config
+/// invalid is refused and nothing is written; otherwise the file is
+/// replaced atomically, through a temporary file and a rename.
+pub fn save_config(
+    path: &Path,
+    change: &SettingChange,
+    home: &Path,
+) -> Result<Config, ConfigError> {
+    let plain = |e: &dyn fmt::Display| ConfigError {
+        message: e.to_string(),
+        line: None,
+        column: None,
+    };
+    let text = fs::read_to_string(path).map_err(|e| plain(&e))?;
+    let current = load_config(&text, home)?;
+    let mut json: serde_json::Value = serde_json::from_str(&text).map_err(json_error)?;
+    let object = json
+        .as_object_mut()
+        .ok_or_else(|| plain(&"the config must be a JSON object"))?;
+    match change {
+        SettingChange::NeverTouch(paths) => {
+            // Paths kept from before keep the way they were written, such as `~/Keep`.
+            let written: Vec<_> = object
+                .get("neverTouch")
+                .and_then(|v| v.as_array())
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v.as_str())
+                .zip(&current.never_touch)
+                .collect();
+            let list = paths
+                .iter()
+                .map(|path| {
+                    serde_json::Value::String(
+                        written
+                            .iter()
+                            .find(|(_, expanded)| *expanded == path)
+                            .map_or_else(
+                                || path.to_string_lossy().into_owned(),
+                                |(w, _)| w.to_string(),
+                            ),
+                    )
+                })
+                .collect();
+            object.insert("neverTouch".into(), serde_json::Value::Array(list));
+        }
+        SettingChange::FolderThreshold(value) => {
+            set_grouping(object, "folderThreshold", value.map(threshold_json))
+        }
+        SettingChange::ExistingFolderThreshold(value) => {
+            set_grouping(object, "existingFolderThreshold", value.map(threshold_json))
+        }
+        SettingChange::SmallestFolder(value) => {
+            set_grouping(object, "smallestFolder", value.map(serde_json::Value::from))
+        }
+        SettingChange::Notifications(wanted) => {
+            object.insert("notifications".into(), (*wanted).into());
+        }
+    }
+    let mut saved = serde_json::to_string_pretty(&json).map_err(|e| plain(&e))?;
+    saved.push('\n');
+    // Positions in text that was never written would only mislead.
+    let config = load_config(&saved, home).map_err(|e| plain(&e.message))?;
+    write_atomically(path, &saved)?;
+    Ok(config)
+}
+
+/// Puts the config file at `path` back to the example config, whatever is
+/// in it now, even if it can't be read, and returns that config.
+pub fn reset_config(path: &Path, home: &Path) -> Result<Config, ConfigError> {
+    write_atomically(path, EXAMPLE_CONFIG)?;
+    load_config(EXAMPLE_CONFIG, home)
+}
+
+/// Replaces the file at `path` with `text` through a temporary file and a
+/// rename, so a crash mid-write leaves the old file rather than half a new one.
+fn write_atomically(path: &Path, text: &str) -> Result<(), ConfigError> {
+    let plain = |e: std::io::Error| ConfigError {
+        message: e.to_string(),
+        line: None,
+        column: None,
+    };
+    let temporary = path.with_extension("json.tmp");
+    fs::write(&temporary, text).map_err(plain)?;
+    fs::rename(&temporary, path).map_err(plain)
+}
+
+/// A threshold as JSON, written as it reads (`0.73`), not as the nearest
+/// double to the `f32` (`0.7300000190734863`). Not-a-number becomes `null`,
+/// which the config then rejects.
+fn threshold_json(value: f32) -> serde_json::Value {
+    value
+        .to_string()
+        .parse::<f64>()
+        .ok()
+        .and_then(serde_json::Number::from_f64)
+        .map_or(serde_json::Value::Null, serde_json::Value::Number)
+}
+
+/// Sets `key` of the `grouping` section to `value`, or takes it out when
+/// `value` is `None`; a section left empty goes too.
+fn set_grouping(
+    object: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: Option<serde_json::Value>,
+) {
+    let section = object
+        .entry("grouping")
+        .or_insert_with(|| serde_json::Value::Object(Default::default()));
+    if let Some(section) = section.as_object_mut() {
+        match value {
+            Some(value) => {
+                section.insert(key.into(), value);
+            }
+            None => {
+                section.remove(key);
+            }
+        }
+        if section.is_empty() {
+            object.remove("grouping");
+        }
+    }
 }
 
 /// Checks a Rule's shape and target. Errors point at the Rule's name, or at

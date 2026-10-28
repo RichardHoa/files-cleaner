@@ -4,12 +4,30 @@ const { invoke, Channel } = window.__TAURI__.core;
 const dialog = window.__TAURI__.dialog;
 const opener = window.__TAURI__.opener;
 const events = window.__TAURI__.event;
+// On the desktop the plugin never asks for permission: the app asks the user itself (see `notifications`).
+const notification = window.__TAURI__.notification;
+const appWindow = window.__TAURI__.window;
 
 /** The OS's path separator: "/" on macOS and Linux, "\" on Windows. */
 export const pathSeparator = window.__TAURI__.path.sep();
 
+/**
+ * The config: `{ path, config }`, `config` being `{ home, trashDestination, neverTouch, rules, grouping, notifications }` and
+ * `grouping` `{ folderThreshold, existingFolderThreshold, smallestFolder }`.
+ */
 export const loadConfig = () => invoke("load_config");
-export const openConfig = () => invoke("open_config");
+
+/**
+ * Saves one change to the config file, keeping everything else in it, and resolves to the config as
+ * `loadConfig` does. `key` is "neverTouch" (the whole list of paths), "folderThreshold",
+ * "existingFolderThreshold", "smallestFolder" or "notifications" (whether the user wants them); a grouping
+ * `value` of null resets it to the default.
+ * Rejects, saving nothing, if the value is invalid.
+ */
+export const changeSetting = (key, value) => invoke("change_setting", { change: { key, value } });
+
+/** Puts every setting back to its default, even when the config can't be read; resolves as `loadConfig` does. */
+export const resetSettings = () => invoke("reset_settings");
 
 /** Why the user should think twice before scanning `scanRoot` (it is, or is inside, a Protected Path), or null. */
 export const scanRootWarning = (scanRoot) => invoke("scan_root_warning", { scanRoot });
@@ -65,9 +83,10 @@ export const recentScanRoots = () => invoke("recent_scan_roots");
 /** Takes `scanRoot` off the Recent Scan Roots. */
 export const removeRecentScanRoot = (scanRoot) => invoke("remove_recent_scan_root", { scanRoot });
 
-// The Grouping Models' status is `{ state, downloaded, total, error }`, `state` being "notInstalled",
-// "downloading", "paused" or "installed", `downloaded` and `total` in bytes, and `error` why the last
-// download failed, or null.
+// The Grouping Models' status is `{ state, downloaded, total, error, models }`, `state` being
+// "notInstalled", "downloading", "paused" or "installed", `downloaded` and `total` in bytes, `error` why the
+// last download failed, or null, and `models` each model's `{ name, size, path }`: its bytes on disk and
+// its file (the partial one while downloading), or null when nothing of it is on disk.
 
 export const groupingModelsStatus = () => invoke("grouping_models_status");
 
@@ -94,25 +113,41 @@ export const answerGroupingModelsOffer = (answer) => invoke("answer_grouping_mod
 // files left where they are; `summaries` each read file's one-sentence summary, keyed by path.
 
 /**
- * Reads the loose files of the latest scan with the Grouping Models and groups them by `settings`, as
- * `regroup` takes them, calling `onProgress({ finished, total, current, placing })` as it goes (`placing` once
- * the files left out of every folder are being placed): `{ grouping, device }`,
+ * Reads the loose files of the latest scan with the Grouping Models and groups them by the config's
+ * `grouping` settings, calling `onProgress({ finished, total, current, placing, loading })` as it goes:
+ * `total` counts only the files not read before, `loading` is set until the first of them is read, and
+ * `placing` once the files left out of every folder are being placed. Resolves to `{ grouping, device }`,
  * `device` where the models ran or null. Rejects once `cancelAnalysis` stops it.
  */
-export function analyseLooseFiles(settings, onProgress) {
+export function analyseLooseFiles(onProgress) {
   const channel = new Channel();
   channel.onmessage = onProgress;
-  return invoke("analyse_loose_files", { settings, onProgress: channel });
+  return invoke("analyse_loose_files", { onProgress: channel });
 }
 
 /** Stops the running analysis; the files read so far aren't read again next time. */
 export const cancelAnalysis = () => invoke("cancel_analysis");
 
-/** The latest analysis grouped again by `{ folderThreshold, existingFolderThreshold, smallestFolder }`, with no model run. */
-export const regroup = (settings) => invoke("regroup", { settings });
-
 /** Forgets what the Grouping Models said about every file, so the next analysis reads them all again. */
 export const clearGroupingCards = () => invoke("clear_grouping_cards");
+
+/** The seconds a file took to read on this computer, averaged over finished analyses (see `updatedAverage`), or null before the first. */
+export const readingPace = () => invoke("reading_pace");
+
+/** Remembers `secondsPerFile` as this computer's reading pace. */
+export const saveReadingPace = (secondsPerFile) => invoke("save_reading_pace", { secondsPerFile });
+
+/** Whether the user wants notifications, from the config: true, false, or null until they're asked. */
+export const notifications = async () => (await loadConfig()).config.notifications ?? null;
+
+/** Keeps the user's answer about notifications in the config, so they're never asked again. */
+export const answerNotifications = (wanted) => changeSetting("notifications", wanted);
+
+/** Sends a system notification saying `title`, only while the app window isn't focused and the user wants them. */
+export async function notifyInBackground(title) {
+  if ((await notifications()) !== true || (await appWindow.getCurrentWindow().isFocused())) return;
+  notification.sendNotification({ title });
+}
 
 /**
  * Plans the choices for each Suggested Folder over the latest scan, as `buildPlan` does for the duplicate

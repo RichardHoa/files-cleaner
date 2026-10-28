@@ -7,7 +7,8 @@ description = "Scanning, planning, journaling and Undo for Files Cleaner, with n
 [dependencies]
 blake3 = "1.8.7"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# `preserve_order` keeps the config's keys in the order the user wrote them when Settings saves it.
+serde_json = { version = "1", features = ["preserve_order"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

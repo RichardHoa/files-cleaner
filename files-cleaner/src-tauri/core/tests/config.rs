@@ -1,10 +1,12 @@
 mod common;
 
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use common::scan_root;
 use files_cleaner_core::{
-    load_config, ConfigError, RuleOperation, RuleTarget, TrashDestination, EXAMPLE_CONFIG,
+    load_config, reset_config, save_config, ConfigError, RuleOperation, RuleTarget, SettingChange,
+    TrashDestination, EXAMPLE_CONFIG,
 };
 
 fn error(text: &str) -> ConfigError {
@@ -252,4 +254,62 @@ fn a_rename_must_be_a_plain_name_using_known_placeholders() {
         assert!(err.message.contains(problem), "{rename:?}: {}", err.message);
         assert_eq!(err.line, Some(3), "{rename:?}");
     }
+}
+
+#[test]
+fn a_saved_folder_threshold_loads_again_and_the_rules_stay() {
+    let folder = scan_root();
+    let path = folder.path().join("config.json");
+    let rules = r#"[{ "name": "Installers", "match": { "extensions": ["dmg"] }, "then": { "trash": true } }]"#;
+    fs::write(
+        &path,
+        format!(r#"{{ "neverTouch": ["~/Keep"], "rules": {rules} }}"#),
+    )
+    .unwrap();
+    let home = Path::new("/Users/me");
+
+    save_config(&path, &SettingChange::FolderThreshold(Some(0.73)), home).unwrap();
+
+    let text = fs::read_to_string(&path).unwrap();
+    let config = load_config(&text, home).unwrap();
+    assert_eq!(config.grouping.folder_threshold, 0.73);
+    assert_eq!(config.never_touch, [PathBuf::from("/Users/me/Keep")]);
+    assert_eq!(config.rules.len(), 1);
+    assert!(text.contains("\"~/Keep\""), "{text}");
+}
+
+#[test]
+fn an_out_of_range_grouping_value_is_rejected_with_its_line() {
+    let err = error("{\n  \"grouping\": {\n    \"smallestFolder\": 1\n  }\n}");
+
+    assert_eq!((err.line, err.column), (Some(3), Some(5)));
+    assert!(err.message.contains("2 and 10"), "{}", err.message);
+}
+
+#[test]
+fn refusing_notifications_is_saved_in_the_config() {
+    let root = scan_root();
+    let path = root.path().join("config.json");
+    fs::write(&path, EXAMPLE_CONFIG).unwrap();
+    let home = Path::new("/Users/me");
+    assert_eq!(
+        load_config(EXAMPLE_CONFIG, home).unwrap().notifications,
+        None
+    );
+
+    save_config(&path, &SettingChange::Notifications(false), home).unwrap();
+
+    let config = load_config(&fs::read_to_string(&path).unwrap(), home).unwrap();
+    assert_eq!(config.notifications, Some(false));
+}
+
+#[test]
+fn an_unreadable_config_resets_to_the_example() {
+    let folder = scan_root();
+    let path = folder.path().join("config.json");
+    fs::write(&path, "{ not json").unwrap();
+
+    reset_config(&path, Path::new("/Users/me")).unwrap();
+
+    assert_eq!(fs::read_to_string(&path).unwrap(), EXAMPLE_CONFIG);
 }

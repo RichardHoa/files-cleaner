@@ -14,15 +14,17 @@ See `../one-screen-review.md`: user stories 13–17, 33–35, 37–52.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Sidebar inline rename (double-click / Return, Esc cancels, empty refused), in sync with the pane's name field
-- [ ] Segmented control replaces the folder choice dropdown, same choices and the same "Elsewhere…" picker
-- [ ] Trash / Take out / Put back are small bordered buttons, always visible
-- [ ] Progress reports a model-loading phase and the total up front, counting only files that need reading
-- [ ] Reading estimate (pure module): stored average or 4 s, blended with this run's pace after ~5 files; the average is updated when a run finishes and stored per computer in app data
-- [ ] Wait text, and success / failure notifications through Tauri's notification plugin, only when the app is in the background; nothing on cancel
-- [ ] Quiet native styling; no "AI" wording
-- [ ] Test: with no history, the time left is 4 s × the files left; a finished run updates the stored average
+- [x] Sidebar inline rename (double-click / Return, Esc cancels, empty refused), in sync with the pane's name field
+- [x] Segmented control replaces the folder choice dropdown, same choices and the same "Elsewhere…" picker
+- [x] Trash / Take out / Put back are small bordered buttons, always visible
+- [x] Progress reports a model-loading phase and the total up front, counting only files that need reading
+- [x] Reading estimate (pure module): stored average or 4 s, blended with this run's pace after ~5 files; the average is updated when a run finishes and stored per computer in app data
+- [x] Wait text, and success / failure notifications through Tauri's notification plugin, only when the app is in the background; nothing on cancel
+- [x] Quiet native styling; no "AI" wording
+- [x] Test: with no history, the time left is 4 s × the files left; a finished run updates the stored average
 
 ## Comments
+
+- 2026-10-28: Done. On the desktop, Tauri's notification plugin always reports permission as granted and never asks, so a refusal can't be detected. Instead, the reading screen asks once ("Notify you when the folders are ready?" with Notify me / Don't notify). The answer is kept in the config as `"notifications": true | false`, and the question isn't asked again. After a refusal, nothing is sent and the wait text leaves out the notification. Reading also shows a "Checking which files were read before" step before "0 of N", because counting only unread files means checking each file first.

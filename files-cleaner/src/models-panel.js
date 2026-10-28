@@ -1,5 +1,6 @@
 // The Grouping Models' offer, or their download's progress with Pause, Resume and Cancel. Kept up to
-// date from the status event, so it shows a download started anywhere, even before this screen.
+// date from the status event, so it shows a download started anywhere, even before this screen. Settings
+// watches the status the same way, with these controls until the models are installed.
 import {
   describeError,
   downloadGroupingModels,
@@ -28,9 +29,9 @@ export function groupingModelsPitch(total) {
   );
 }
 
-// The panels on screen, each a function taking the latest status, fed by one listener for the whole
-// app. Screens are swapped without notice, so a panel that has left the page is dropped at the next
-// status or the next new panel, whichever comes first.
+// The panels on screen, each `{ node, show(status) }`, fed by one listener for the whole app. Screens
+// are swapped without notice, so a panel that has left the page is dropped at the next status or the
+// next new panel, whichever comes first.
 const panels = new Set();
 let listening = false;
 
@@ -47,23 +48,17 @@ function listen() {
   });
 }
 
-/** The panel; calls `onInstalled()` once the models are installed, and stops updating then. */
-export function groupingModelsPanel(onInstalled) {
-  const node = el("section", { className: "models-panel" });
-  const error = el("p", { className: "status error" });
+/**
+ * Calls `show(status)` with the Grouping Models' status, now and on every change, while `node` is on the
+ * page or until `show` returns false; says in the status line `error` if the status can't be had.
+ */
+export function watchGroupingModels(node, error, show) {
   const panel = {
     node,
     show(status) {
-      if (status.state === "installed") {
-        panels.delete(panel);
-        onInstalled();
-        return;
-      }
-      node.replaceChildren(...describe(status, error), error);
-      showStatus(error, status.error ?? "", status.error != null);
+      if (show(status) === false) panels.delete(panel);
     },
   };
-
   dropDetached();
   panels.add(panel);
   listen();
@@ -71,26 +66,30 @@ export function groupingModelsPanel(onInstalled) {
     (status) => panels.has(panel) && panel.show(status),
     (e) => showStatus(error, describeError(e), true),
   );
+}
+
+/** The panel; calls `onInstalled()` once the models are installed, and stops updating then. */
+export function groupingModelsPanel(onInstalled) {
+  const node = el("section", { className: "models-panel" });
+  const error = el("p", { className: "status error" });
+  watchGroupingModels(node, error, (status) => {
+    if (status.state === "installed") {
+      onInstalled();
+      return false;
+    }
+    node.replaceChildren(...groupingModelsControls(status, error), error);
+    showStatus(error, status.error ?? "", status.error != null);
+  });
   node.append(error);
   return node;
 }
 
-/** The panel's text, progress and buttons for `status`; a failing button says why in `error`. */
-function describe({ state, downloaded, total }, error) {
-  const button = (label, command, primary = false) => {
-    const node = el("button", { type: "button", className: primary ? "primary" : "" }, label);
-    node.addEventListener("click", async () => {
-      node.disabled = true;
-      showStatus(error, "");
-      try {
-        await command();
-      } catch (e) {
-        showStatus(error, describeError(e), true);
-        node.disabled = false;
-      }
-    });
-    return node;
-  };
+/**
+ * The text, progress and buttons for the models in `status` until they're installed: the offer, or the
+ * download with Pause or Resume and Cancel. A failing button says why in `error`.
+ */
+export function groupingModelsControls({ state, downloaded, total }, error) {
+  const button = (label, command, primary = false) => modelsButton(label, command, error, primary);
   const progress = () => el("progress", { max: total, value: downloaded });
   const soFar = `${formatSize(downloaded)} of ${formatSize(total)}`;
 
@@ -117,4 +116,20 @@ function describe({ state, downloaded, total }, error) {
     el("p", {}, groupingModelsPitch(total)),
     el("div", { className: "actions" }, button("Download", downloadGroupingModels, true)),
   ];
+}
+
+/** A button running the models `command`, disabled meanwhile; the next status redraws it, and a failure says why in `error`. */
+export function modelsButton(label, command, error, primary = false) {
+  const node = el("button", { type: "button", className: primary ? "primary" : "" }, label);
+  node.addEventListener("click", async () => {
+    node.disabled = true;
+    showStatus(error, "");
+    try {
+      await command();
+    } catch (e) {
+      showStatus(error, describeError(e), true);
+      node.disabled = false;
+    }
+  });
+  return node;
 }

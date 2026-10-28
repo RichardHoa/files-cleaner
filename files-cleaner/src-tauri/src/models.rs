@@ -29,7 +29,9 @@ const READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// One model file, pinned at a fixed repository revision, never a branch.
 struct Model {
-    /// What the user is told it is, in error messages.
+    /// What it does, for error messages: "the file-reading model".
+    role: &'static str,
+    /// The model's own name, shown in Settings.
     name: &'static str,
     file_name: &'static str,
     url: &'static str,
@@ -39,14 +41,16 @@ struct Model {
 
 const MODELS: [Model; 2] = [
     Model {
-        name: "file-reading model",
+        role: "file-reading model",
+        name: "Qwen2.5-1.5B-Instruct",
         file_name: "qwen2.5-1.5b-instruct-q4_k_m.gguf",
         url: "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/91cad51170dc346986eccefdc2dd33a9da36ead9/qwen2.5-1.5b-instruct-q4_k_m.gguf",
         size: 1_117_320_736,
         sha256: "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e",
     },
     Model {
-        name: "comparison model",
+        role: "comparison model",
+        name: "Qwen3-Embedding-0.6B",
         file_name: "Qwen3-Embedding-0.6B-Q8_0.gguf",
         url: "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/370f27d7550e0def9b39c1f16d3fbaa13aa67728/Qwen3-Embedding-0.6B-Q8_0.gguf",
         size: 639_150_592,
@@ -78,6 +82,19 @@ pub struct Status {
     pub total: u64,
     /// Why the last download stopped, when it failed rather than finished.
     pub error: Option<String>,
+    /// Each model, the file-reading one first.
+    pub models: Vec<ModelStatus>,
+}
+
+/// One model as Settings shows it.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelStatus {
+    pub name: &'static str,
+    /// Bytes on disk, installed or partly downloaded.
+    pub size: u64,
+    /// Its file, or its partial file while downloading; `None` when neither is on disk.
+    pub path: Option<PathBuf>,
 }
 
 /// Kept by the app: the models folder and the running download, if any.
@@ -144,6 +161,7 @@ impl GroupingModels {
                     downloaded: 0,
                     total,
                     error: None,
+                    models: Vec::new(),
                 }
             }
             None if self.installed() => State::Installed,
@@ -155,6 +173,21 @@ impl GroupingModels {
             downloaded,
             total,
             error: inner.error.clone(),
+            models: MODELS
+                .iter()
+                .map(|model| self.model_status(model))
+                .collect(),
+        }
+    }
+
+    fn model_status(&self, model: &Model) -> ModelStatus {
+        let path = [self.file(model), self.partial(model)]
+            .into_iter()
+            .find(|path| path.is_file());
+        ModelStatus {
+            name: model.name,
+            size: self.on_disk(model),
+            path,
         }
     }
 
@@ -266,7 +299,7 @@ impl GroupingModels {
         progress: &mut impl FnMut(),
     ) -> Result<(), Stopped> {
         let failed = |e: &dyn std::fmt::Display| {
-            Stopped::Failed(format!("Downloading the {} failed: {e}", model.name))
+            Stopped::Failed(format!("Downloading the {} failed: {e}", model.role))
         };
         let file = self.file(model);
         if file.is_file() {
@@ -336,7 +369,7 @@ impl GroupingModels {
             let _ = fs::remove_file(&partial);
             return Err(Stopped::Failed(format!(
                 "The {} downloaded damaged. Try again.",
-                model.name
+                model.role
             )));
         }
         fs::rename(&partial, &file).map_err(|e| failed(&e))

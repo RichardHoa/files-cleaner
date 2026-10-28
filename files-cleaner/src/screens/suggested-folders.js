@@ -4,20 +4,22 @@
 // a Plan, laid out like Mail: a sidebar lists the files left where they are, then each folder, and
 // the pane beside it lists the one picked, with its name, where it goes, what to do with it and its
 // files. Files are selected as in Finder, then moved by dragging them onto a folder in the sidebar,
-// from their right-click menu, or with "Move to…". The Grouping settings group the files again, with
-// no model run, and are remembered; from there the files can also be read again from scratch.
-// Approving runs the Plan as its own Session.
+// from their right-click menu, or with "Move to…". Files are grouped by the grouping settings, which are
+// changed in Settings and apply the next time files are grouped. Approving runs the Plan as its own Session.
 import {
   analyseLooseFiles,
+  answerNotifications,
   buildSuggestedFoldersPlan,
   cancelAnalysis,
-  clearGroupingCards,
   describeError,
   groupingModelsStatus,
+  notifications,
+  notifyInBackground,
   pathSeparator,
   pickFolder,
-  regroup,
+  readingPace,
   runPlan,
+  saveReadingPace,
 } from "../api.js";
 import { el } from "../dom.js";
 import { drawMore, revealMenu } from "../file-list.js";
@@ -25,36 +27,102 @@ import { count, formatDate, formatSize, plural, splitPath } from "../format.js";
 import { icon } from "../icons.js";
 import { groupingModelsPanel } from "../models-panel.js";
 import { describeRunProgress, describeSummary } from "../outcomes.js";
+import { describeEstimate, readingEstimate, updatedAverage } from "../reading-estimate.js";
 import { clickSelection } from "../row-selection.js";
 import { busy, showStatus } from "../status.js";
-import {
-  byKindNewestFirst,
-  DEFAULT_SETTINGS,
-  groupingSettings,
-  initialChoices,
-  moveFile,
-  nameMissing,
-  planChoices,
-  totals,
-} from "../suggested-choices.js";
+import { byKindNewestFirst, initialChoices, moveFile, nameMissing, planChoices, totals } from "../suggested-choices.js";
 
 /** How many of a card's files are listed before "Show more". */
 const FILES_SHOWN = 50;
-const SETTINGS_KEY = "suggested-folders-settings";
-/** Whether the Grouping settings are open, kept while they regroup the screen. */
-let settingsOpen = false;
+/** What the reading screen says about the wait, with notifications on, and off. */
+const WAIT_TEXT = "Reading takes a while. You can switch to other apps; Files Cleaner will notify you when the folders are ready.";
+const WAIT_TEXT_QUIET = "Reading takes a while. You can switch to other apps in the meantime.";
+/** What the reading estimate calls this computer. */
+const COMPUTER = /Mac/.test(navigator.userAgent) ? "Mac" : "computer";
 
 /** The file or folder's own name, from its full `path`. */
 const fileName = (path) => splitPath(path, pathSeparator).name;
 
 /**
- * "Reading 12 of 85 files…" from the analysis's `{ finished, total, placing }` progress, or, while it places
- * the files left out, "Finding folders for files left out: 3 of 9…", then the file it is on.
+ * The analysis's `{ finished, total, current, phase }` progress as "Reading 12 of 85 files…", or what comes
+ * before and after, then the file it is on, or that the models are loading.
  */
-const describeAnalysisProgress = ({ finished, total, current, placing }) =>
-  placing
-    ? `Finding folders for files left out: ${count(finished)} of ${count(total)}…\n${current}`
-    : `Reading ${count(finished)} of ${plural(total, "file")}…\n${current}`;
+const describeAnalysisProgress = ({ finished, total, current, phase }) =>
+  ({
+    checking: () => `Checking which files were read before: ${count(finished)} of ${count(total)}…\n${current}`,
+    loading: () => `Reading 0 of ${plural(total, "file")}…\nLoading the grouping models…`,
+    reading: () => `Reading ${count(finished)} of ${plural(total, "file")}…\n${current}`,
+    placing: () => `Finding folders for files left out: ${count(finished)} of ${count(total)}…\n${current}`,
+  })[phase]();
+
+/**
+ * The line saying how long a file takes to read on this computer and how long until the folders are shown,
+ * from the stored pace and the analysis's progress, kept counting down each second. `save()` stores this
+ * run's pace once it has finished; `stop()` stops the countdown either way.
+ */
+function estimateLine() {
+  const node = el("p", { className: "reading-estimate muted" });
+  const started = performance.now();
+  const elapsed = () => (performance.now() - started) / 1000;
+  let average = null;
+  // The files that need reading, and how many are read; the last pass is counted within the time per file.
+  let reading = null;
+  const draw = () => {
+    node.textContent =
+      reading?.total > 0
+        ? describeEstimate(readingEstimate({ average, total: reading.total, finished: reading.finished, elapsed: elapsed() }), COMPUTER)
+        : "";
+  };
+  readingPace()
+    .then((pace) => {
+      average = pace;
+      draw();
+    })
+    // No history to go by: the estimate starts from the first guess.
+    .catch(() => {});
+  const ticking = setInterval(draw, 1000);
+  return {
+    node,
+    update(progress) {
+      if (progress.phase === "loading" || progress.phase === "reading") reading = progress;
+      draw();
+    },
+    save() {
+      const files = reading?.total ?? 0;
+      // Not saved, the next estimate is only less close.
+      if (files > 0) saveReadingPace(updatedAverage(average, { seconds: elapsed(), files })).catch(() => {});
+    },
+    stop: () => clearInterval(ticking),
+  };
+}
+
+/**
+ * The wait text, and the first time, a question whether to notify the user when the folders are ready. The
+ * answer is kept in the config, so it's asked only once.
+ */
+function waitNote() {
+  const text = el("p", { className: "note" }, WAIT_TEXT);
+  const ask = el("p", { className: "notify-ask", hidden: true });
+  const answer = (wanted) => {
+    ask.hidden = true;
+    text.textContent = wanted ? WAIT_TEXT : WAIT_TEXT_QUIET;
+    // Not saved, the question comes again next time.
+    answerNotifications(wanted).catch(() => {});
+  };
+  const yes = el("button", { type: "button", className: "small" }, "Notify me");
+  const no = el("button", { type: "button", className: "small" }, "Don't notify");
+  yes.addEventListener("click", () => answer(true));
+  no.addEventListener("click", () => answer(false));
+  ask.append(el("span", {}, "Notify you when the folders are ready?"), yes, no);
+  notifications()
+    .then((wanted) => {
+      if (wanted === false) text.textContent = WAIT_TEXT_QUIET;
+      ask.hidden = wanted !== null;
+    })
+    // The config can't be read: no question, and nothing is sent.
+    .catch(() => {});
+  return [text, ask];
+}
 
 export async function render(root, nav, result) {
   const screen = el("div");
@@ -62,7 +130,6 @@ export async function render(root, nav, result) {
   const rootName = splitPath(result.root, pathSeparator).name;
   const sizes = new Map(result.entries.map((entry) => [entry.path, entry.size]));
   const modified = new Map(result.entries.map((entry) => [entry.path, entry.modified]));
-  let settings = loadSettings();
   const titled = (...rest) => titledAs("Suggested Folders", ...rest);
   const titledAs = (title, ...rest) => [el("h1", {}, title), el("p", { className: "path root-path" }, icon("folder"), result.root), ...rest];
   const homeButton = () => {
@@ -85,9 +152,14 @@ export async function render(root, nav, result) {
     );
   }
 
+  /**
+   * Reads the files, with a counter, the time a file takes on this computer and a countdown to the folders.
+   * A finished run updates that time; the user is notified when it ends while the app is in the background.
+   */
   async function analyse() {
     const status = el("p", { className: "status" }, "Reading the files…");
     const bar = el("progress", { className: "analysis-progress" });
+    const estimate = estimateLine();
     const cancel = el("button", { type: "button" }, "Cancel");
     let cancelled = false;
     // Goes back once the analysis has stopped, so it isn't still running when the user moves on.
@@ -97,19 +169,25 @@ export async function render(root, nav, result) {
       showStatus(status, "Stopping…");
       cancelAnalysis().catch((error) => showStatus(status, describeError(error), true));
     });
-    screen.replaceChildren(...titled(status, bar, el("div", { className: "actions" }, cancel)));
+    screen.replaceChildren(...titled(status, bar, estimate.node, ...waitNote(), el("div", { className: "actions" }, cancel)));
     try {
-      const { grouping, device } = await analyseLooseFiles(settings, (progress) => {
+      const { grouping, device } = await analyseLooseFiles((progress) => {
         if (cancelled) return;
         showStatus(status, describeAnalysisProgress(progress));
         bar.max = progress.total;
         bar.value = progress.finished;
+        estimate.update(progress);
       });
-      if (cancelled) nav.home();
-      else review(grouping, device);
+      if (cancelled) return nav.home();
+      estimate.save();
+      notifyInBackground(`Folders are ready for ${rootName}`).catch(() => {});
+      review(grouping, device);
     } catch (error) {
-      if (cancelled) nav.home();
-      else failed(error);
+      if (cancelled) return nav.home();
+      notifyInBackground(`Couldn't finish reading ${rootName}`).catch(() => {});
+      failed(error);
+    } finally {
+      estimate.stop();
     }
   }
 
@@ -119,7 +197,6 @@ export async function render(root, nav, result) {
     const kindOf = (path) => grouping.kinds[path];
     const modifiedOf = (path) => modified.get(path);
     const deviceNote = device ? el("p", { className: "note" }, `Files read on ${device}.`) : "";
-    const settingsPanel = groupingSettingsPanel(device);
 
     if (choices.length === 0) {
       screen.replaceChildren(
@@ -127,7 +204,6 @@ export async function render(root, nav, result) {
           "No folders to suggest",
           el("p", { className: "lead" }, "No files here are alike enough to share a folder, so everything stays where it is."),
           el("div", { className: "actions" }, homeButton()),
-          settingsPanel,
           el("h2", {}, `Left where they are (${count(grouping.ungrouped.length)})`),
           ...leftLists(grouping.ungrouped, (path) => leftRow(path)),
           deviceNote,
@@ -149,6 +225,11 @@ export async function render(root, nav, result) {
     const selectionBar = el("div", { className: "selection-bar", hidden: true });
     const menu = revealMenu();
     const displayName = (choice) => choice.name.trim() || "No name";
+    // The Suggested Folder being renamed in the sidebar, if any: `{ choice, node }`, its name field kept
+    // across redraws of the sidebar, so the name from before and the focus stay.
+    let renaming = null;
+    // Set while the sidebar is redrawn, when moving the name field can blur it.
+    let redrawing = false;
     const move = (paths, to) => {
       for (const path of paths) moveFile(choices, left, path, to);
       selection = new Set();
@@ -208,7 +289,6 @@ export async function render(root, nav, result) {
         el("div", { className: "actions" }, cancel, run),
       ),
       status,
-      settingsPanel,
       el("div", { className: "folder-split" }, sidebar, pane),
       menu.node,
       deviceNote,
@@ -234,27 +314,107 @@ export async function render(root, nav, result) {
       drawHeader();
     }
 
-    /** The folders, files left where they are first; clicking one lists it, and a file dragged onto one goes into it. */
+    /**
+     * The folders, files left where they are first; clicking one lists it, and a file dragged onto one goes
+     * into it. The item that had focus keeps it.
+     */
     function drawSidebar() {
-      const item = (to, label, n, className = "") => {
-        const node = el(
-          "button",
-          { type: "button", className: `folder-sidebar-item ${className}`, ariaCurrent: String(to === current), title: label },
-          icon("folder"),
-          el("span", { className: "folder-sidebar-name" }, label),
-          el("span", { className: "muted folder-sidebar-count" }, count(n)),
-        );
-        node.addEventListener("click", () => show(to));
-        dropTarget(node, to);
-        return node;
-      };
+      const focused = [...sidebar.children].indexOf(document.activeElement);
+      const typing = renaming?.node.contains(document.activeElement);
+      redrawing = true;
       sidebar.replaceChildren(
-        item(null, "Left where they are", left.size),
+        sidebarItem(null, "Left where they are", left.size),
         el("hr", { className: "folder-sidebar-divider" }),
-        ...choices.map((choice) =>
-          item(choice, displayName(choice), choice.files.size, nameMissing(choice) ? "unnamed" : choice.choice === "skip" ? "skipped" : ""),
-        ),
+        ...choices.map(choiceItem),
       );
+      redrawing = false;
+      sidebar.children[focused]?.focus();
+      if (typing) renaming.node.querySelector("input").focus();
+    }
+
+    /** The sidebar item for the Suggested Folder `choice`, or its name field while it's renamed. */
+    function choiceItem(choice) {
+      if (choice === renaming?.choice) return renaming.node;
+      const className = nameMissing(choice) ? "unnamed" : choice.choice === "skip" ? "skipped" : "";
+      return sidebarItem(choice, displayName(choice), choice.files.size, className);
+    }
+
+    /** A sidebar item listing `to` (null for the files left where they are); a Suggested Folder's is renamed by double-clicking it, or Return once it's listed, as in Finder. */
+    function sidebarItem(to, label, n, className = "") {
+      const node = el(
+        "button",
+        { type: "button", className: `folder-sidebar-item ${className}`, ariaCurrent: String(to === current), title: label },
+        icon("folder"),
+        el("span", { className: "folder-sidebar-name" }, label),
+        el("span", { className: "muted folder-sidebar-count" }, count(n)),
+      );
+      // Clicking the listed one again leaves the sidebar as it is, so a double-click lands on the same item.
+      node.addEventListener("click", () => to !== current && show(to));
+      if (to) {
+        node.addEventListener("dblclick", () => rename(to, node));
+        node.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter" || to !== current) return;
+          event.preventDefault();
+          rename(to, node);
+        });
+      }
+      dropTarget(node, to);
+      return node;
+    }
+
+    /** Turns the sidebar item `node` of `choice` into a name field. */
+    function rename(choice, node) {
+      renaming = { choice, node: renameField(choice) };
+      node.replaceWith(renaming.node);
+      const input = renaming.node.querySelector("input");
+      input.focus();
+      input.select();
+    }
+
+    /**
+     * The name field renaming `choice` in the sidebar. The pane shows the name as it's typed; Return or
+     * clicking away saves it and Esc puts back the name from before. An empty name is refused: Return
+     * says so, and clicking away puts back the name from before.
+     */
+    function renameField(choice) {
+      const before = choice.name;
+      const input = el("input", { type: "text", className: "folder-sidebar-rename", value: choice.name, ariaLabel: "Folder name", spellcheck: false });
+      const error = el("p", { className: "status error folder-name-error" });
+      const node = el("div", { className: "folder-sidebar-renaming" }, el("div", { className: "folder-sidebar-item" }, icon("folder"), input), error);
+      const named = () => {
+        panels.get(choice).drawName();
+        drawHeader();
+      };
+      const end = (save) => {
+        // Already ended: replacing the field can blur it.
+        if (renaming?.choice !== choice) return;
+        if (!save) choice.name = before;
+        renaming = null;
+        const hadFocus = node.contains(document.activeElement);
+        const item = choiceItem(choice);
+        node.replaceWith(item);
+        if (hadFocus) item.focus();
+        named();
+      };
+      input.addEventListener("input", () => {
+        choice.name = input.value;
+        showStatus(error, "");
+        input.ariaInvalid = "false";
+        named();
+      });
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          end(false);
+        } else if (event.key === "Enter") {
+          event.preventDefault();
+          if (input.value.trim()) return end(true);
+          showStatus(error, "A folder needs a name.", true);
+          input.ariaInvalid = "true";
+        }
+      });
+      input.addEventListener("blur", () => redrawing || end(input.value.trim() !== ""));
+      return node;
     }
 
     /** Marks the selected rows in the pane, and shows what can be done with them. */
@@ -365,16 +525,27 @@ export async function render(root, nav, result) {
       const size = el("span", { className: "muted" });
       const where = el("p", { className: "folder-where" });
       const existingName = choice.folder.existing ? fileName(choice.folder.existing) : null;
-      const pick = el(
-        "select",
-        { ariaLabel: "What to do with this folder" },
-        existingName ? el("option", { value: "addTo" }, `Add to ${existingName}`) : "",
-        el("option", { value: "createHere" }, existingName ? "New folder here" : "Create here"),
-        el("option", { value: "createIn" }, "Create elsewhere…"),
-        el("option", { value: "trashAll" }, "Trash all"),
-        el("option", { value: "skip" }, "Skip"),
-      );
-      pick.value = choice.choice;
+      const options = [
+        ...(existingName ? [["addTo", `Add to ${existingName}`]] : []),
+        ["createHere", existingName ? "New folder here" : "Create here"],
+        ["createIn", "Elsewhere…"],
+        ["trashAll", "Trash all"],
+        ["skip", "Skip"],
+      ];
+      const segments = options.map(([value, label]) => {
+        const segment = el("button", { type: "button", role: "radio", className: "segment" }, label);
+        segment.addEventListener("click", () => {
+          // "Elsewhere…" always asks where, so it also changes the folder picked before.
+          if (value === "createIn") return pickElsewhere();
+          choice.choice = value;
+          draw();
+        });
+        return [value, segment];
+      });
+      const pick = el("div", { className: "segmented", role: "radiogroup", ariaLabel: "What to do with this folder" }, ...segments.map(([, segment]) => segment));
+      const drawPick = () => {
+        for (const [value, segment] of segments) segment.ariaChecked = String(value === choice.choice);
+      };
       const list = el("ul", { className: "folder-files", ariaLabel: "Files" });
       const empty = el("p", { className: "note" }, "No files. Drag files onto this folder in the list to add them.");
       const more = el("div", { className: "plan-more" });
@@ -390,21 +561,17 @@ export async function render(root, nav, result) {
         } catch (error) {
           showStatus(status, describeError(error), true);
         }
-        pick.value = choice.choice;
         draw();
       };
-      pick.addEventListener("change", () => {
-        if (pick.value === "createIn") return pickElsewhere();
-        choice.choice = pick.value;
-        draw();
-      });
       name.addEventListener("input", () => {
         choice.name = name.value;
         drawName();
         changed();
       });
 
+      /** The name and whether it's missing, also when it was renamed in the sidebar. */
       const drawName = () => {
+        if (name.value !== choice.name) name.value = choice.name;
         const missing = nameMissing(choice);
         showStatus(nameError, missing ? "A folder needs a name." : "", missing);
         name.ariaInvalid = String(missing);
@@ -430,7 +597,7 @@ export async function render(root, nav, result) {
           draw();
         };
         const button = (label, next) => {
-          const node = el("button", { type: "button", className: "link", disabled: choice.choice === "skip" }, label);
+          const node = el("button", { type: "button", className: "small", disabled: choice.choice === "skip" }, label);
           node.addEventListener("click", set(next));
           return node;
         };
@@ -448,6 +615,7 @@ export async function render(root, nav, result) {
 
       function draw() {
         drawName();
+        drawPick();
         drawWhere();
         const paths = [...choice.files.keys()];
         size.textContent = ` · ${plural(paths.length, "file")} · ${formatSize(paths.reduce((sum, path) => sum + (sizes.get(path) ?? 0), 0))}`;
@@ -467,12 +635,12 @@ export async function render(root, nav, result) {
         { className: "folder-panel" },
         el("div", { className: "folder-panel-head" }, icon("folder"), name, size),
         nameError,
-        el("div", { className: "folder-panel-choice" }, where, pick),
+        el("div", { className: "folder-panel-choice" }, pick, where),
         list,
         empty,
         more,
       );
-      return { node, draw };
+      return { node, draw, drawName };
     }
 
     /** A file left where it is: its name, with its summary on hover, and when it was last changed. */
@@ -494,79 +662,11 @@ export async function render(root, nav, result) {
     }
   }
 
-  /**
-   * The Grouping settings: how alike files must be to share a folder, and a folder to go into an existing
-   * one. Changing one groups the files again from what the models said, starting the review over.
-   */
-  function groupingSettingsPanel(device) {
-    const status = el("p", { className: "status" });
-    const apply = async (next) => {
-      settings = next;
-      saveSettings(settings);
-      try {
-        review(await regroup(settings), device);
-      } catch (error) {
-        showStatus(status, describeError(error), true);
-      }
-    };
-    const slider = (label, key) => {
-      const value = el("output", {}, settings[key].toFixed(2));
-      const input = el("input", { type: "range", min: 0.5, max: 0.99, step: 0.01, value: settings[key], ariaLabel: label });
-      input.addEventListener("input", () => (value.textContent = Number(input.value).toFixed(2)));
-      input.addEventListener("change", () => apply({ ...settings, [key]: Number(input.value) }));
-      return el("label", { className: "grouping-setting" }, el("span", {}, label), input, value);
-    };
-    const reset = el("button", { type: "button", className: "link" }, "Reset");
-    reset.addEventListener("click", () => apply({ ...DEFAULT_SETTINGS }));
-    const readAgain = el("button", { type: "button", className: "link" }, "Read every file again");
-    readAgain.addEventListener("click", async () => {
-      readAgain.disabled = true;
-      try {
-        await clearGroupingCards();
-        analyse();
-      } catch (error) {
-        showStatus(status, describeError(error), true);
-        readAgain.disabled = false;
-      }
-    });
-    const panel = el(
-      "details",
-      { className: "grouping-settings", open: settingsOpen },
-      el("summary", {}, "Grouping"),
-      el("p", { className: "note" }, "Lower groups more files together; higher keeps folders tighter. Changing these starts your edits over."),
-      slider("Files share a folder at", "folderThreshold"),
-      slider("A folder goes into an existing one at", "existingFolderThreshold"),
-      el("div", { className: "grouping-setting-actions" }, reset, readAgain),
-      el("p", { className: "note" }, "Reading again forgets what was read before, so it takes as long as the first time."),
-      status,
-    );
-    panel.addEventListener("toggle", () => (settingsOpen = panel.open));
-    return panel;
-  }
-
   try {
     const { state } = await groupingModelsStatus();
     if (state === "installed") analyse();
     else withoutModels();
   } catch (error) {
     failed(error);
-  }
-}
-
-/** The Grouping settings last used, or the defaults. */
-function loadSettings() {
-  try {
-    return groupingSettings(JSON.parse(localStorage.getItem(SETTINGS_KEY)));
-  } catch {
-    // Nothing saved, or storage is unavailable: use the defaults.
-    return { ...DEFAULT_SETTINGS };
-  }
-}
-
-function saveSettings(settings) {
-  try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-  } catch {
-    // Storage is unavailable: the settings last until the screen closes.
   }
 }

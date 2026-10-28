@@ -202,6 +202,12 @@ impl Models for LlamaModels {
         Ok(vectors)
     }
 
+    fn load(&mut self) {
+        // An error comes back again where the model is used.
+        let _ = self.llm();
+        let _ = self.embedding();
+    }
+
     fn device(&self) -> Option<String> {
         self.llm
             .as_ref()

@@ -73,16 +73,3 @@ export function byKindNewestFirst(paths, kindOf, modifiedOf) {
     .sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b))
     .map(([kind, files]) => [kind, files.sort((a, b) => (modifiedOf(b) ?? 0) - (modifiedOf(a) ?? 0))]);
 }
-
-/** How files are grouped, as `regroup` takes them; the defaults are the grouping engine's. */
-export const DEFAULT_SETTINGS = { folderThreshold: 0.86, existingFolderThreshold: 0.86, smallestFolder: 2 };
-
-/** `saved` (parsed from storage, possibly anything) as grouping settings: each value kept only if it's in range, else the default. */
-export function groupingSettings(saved) {
-  const threshold = (value, fallback) => (Number.isFinite(value) && value >= 0 && value <= 1 ? value : fallback);
-  return {
-    folderThreshold: threshold(saved?.folderThreshold, DEFAULT_SETTINGS.folderThreshold),
-    existingFolderThreshold: threshold(saved?.existingFolderThreshold, DEFAULT_SETTINGS.existingFolderThreshold),
-    smallestFolder: Number.isInteger(saved?.smallestFolder) && saved.smallestFolder >= 2 ? saved.smallestFolder : DEFAULT_SETTINGS.smallestFolder,
-  };
-}
