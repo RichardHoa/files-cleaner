@@ -168,6 +168,6 @@ A desktop app for macOS, Windows and Linux where I pick a folder, the app scans 
 
 ## Further Notes
 
-- Domain vocabulary lives in `CONTEXT.md`. Decisions are recorded in `docs/adr/0001` (System Trash via NSFileManager, deferred), `0002` (write-ahead Journal, never delete) and `0003` (plain JS UI, Rust core).
+- Domain vocabulary lives in `GLOSSARY.md`. Decisions are recorded in `docs/adr/0001` (System Trash via NSFileManager, deferred), `0002` (write-ahead Journal, never delete) and `0003` (plain JS UI, Rust core).
 - Implementation is split into six tickets under `issues/` (01 → 02 → 03 → 04, with 05 able to start once 02 is done, and 06 porting ticket 01's macOS-only code to Windows and Linux once 01 is done).
 - Commits are made by the developer, not the agent.

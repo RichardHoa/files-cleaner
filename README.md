@@ -55,7 +55,7 @@ The bundle is written to `files-cleaner/src-tauri/target/release/bundle/`: a `.a
 
 ## Project docs
 
-- `CONTEXT.md`: domain vocabulary
+- `GLOSSARY.md`: domain vocabulary
 - `docs/adr/`: architecture decisions
 - `.scratch/milestone-1/`: the Milestone 1 spec and tickets
 

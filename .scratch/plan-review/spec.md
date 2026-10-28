@@ -107,7 +107,7 @@ The developer rejected the prototype's look as "too AI". Match the rest of the a
 
 ### Domain docs
 
-- In `CONTEXT.md`, change the **Plan** entry's "shown as a before/after tree for the user to approve, untick, or cancel" to describe the new view: grouped by Reason, one line per Operation, with the selected Operation's Reason beside it.
+- In `GLOSSARY.md`, change the **Plan** entry's "shown as a before/after tree for the user to approve, untick, or cancel" to describe the new view: grouped by Reason, one line per Operation, with the selected Operation's Reason beside it.
 
 ## Testing Decisions
 

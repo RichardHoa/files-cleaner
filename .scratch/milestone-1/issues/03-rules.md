@@ -19,7 +19,7 @@
 
 **Implementation (2026-10-16), uncommitted.** Open decision: the `moveTo` + `rename` checkbox is left unticked.
 
-- `moveTo` with `rename` produces **one** Move Operation whose destination has the new name. There is no separate Rename Operation, so a rename can't be ticked apart from its move. That contradicts the "(plus Rename …)" wording above, story 35 and CONTEXT.md. Decide whether to split them, or update the spec and glossary.
+- `moveTo` with `rename` produces **one** Move Operation whose destination has the new name. There is no separate Rename Operation, so a rename can't be ticked apart from its move. That contradicts the "(plus Rename …)" wording above, story 35 and GLOSSARY.md. Decide whether to split them, or update the spec and glossary.
 - A **relative** `moveTo` that lands on a Protected Path or Package below the Scan Root (e.g. `Files Cleaner Trash/x`, `proj/node_modules`) makes that Rule propose nothing, and the user is not told. Absolute and `~` targets are still rejected at config load. This may belong with ticket 04's non-tickable error items.
 - Other readings:
   - A file already in its Rule's folder is left alone, so a rename template isn't applied again on every Plan.
@@ -32,5 +32,5 @@
 
 **Decision (2026-10-16): resolved.**
 
-- `moveTo` + `rename` stays **one** Move Operation whose destination has the new name, as built. Rename is not a separate Operation. The spec (story 35) and `CONTEXT.md` (**Operation**) were updated to match.
+- `moveTo` + `rename` stays **one** Move Operation whose destination has the new name, as built. Rename is not a separate Operation. The spec (story 35) and `GLOSSARY.md` (**Operation**) were updated to match.
 - The relative `moveTo` that lands on a Protected Path or Package and silently proposes nothing moved to ticket 04, as a "blocked target" error item.

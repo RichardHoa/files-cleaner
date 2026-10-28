@@ -129,8 +129,8 @@ Same rules as the Plan review spec: flat surfaces and hairline `--border` divide
 
 ### Domain docs
 
-- In `CONTEXT.md`, add a note under **Reason** that a skipped or failed Operation's explanation is not a Reason. Add a glossary term for it if a name is needed ("Note"), with _Avoid_: reason.
-- Remove any mention of the Summary screen from `CONTEXT.md` and `README.md`.
+- In `GLOSSARY.md`, add a note under **Reason** that a skipped or failed Operation's explanation is not a Reason. Add a glossary term for it if a name is needed ("Note"), with _Avoid_: reason.
+- Remove any mention of the Summary screen from `GLOSSARY.md` and `README.md`.
 
 ## Testing Decisions
 

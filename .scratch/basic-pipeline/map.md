@@ -8,7 +8,7 @@ The basic goal is that a user can do this, end to end, on macOS, Windows and Lin
 
 ## Notes
 
-- Terms are in `CONTEXT.md` (Suggested Folder, Reason, Session, …).
+- Terms are in `GLOSSARY.md` (Suggested Folder, Reason, Session, …).
 - Each step is a separate Plan and Session, so grouping never sees duplicate copies, and each step can be undone without the other.
 
 ## Decisions so far

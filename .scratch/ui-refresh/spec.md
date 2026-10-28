@@ -152,6 +152,6 @@ A visual refresh across the app, plus two navigation improvements.
 
 ## Further Notes
 
-- The new terms **Recent Scan Root** and **Reason** are in `CONTEXT.md`.
+- The new terms **Recent Scan Root** and **Reason** are in `GLOSSARY.md`.
 - The layouts were chosen during grilling: Home as tiles, Session detail as stat cards and a grouped list, Plan grouped by Reason with the tree on a tab.
 - The "moved to Trash" wording is deliberate: with the Holding Folder as Trash Destination, nothing leaves the disk.

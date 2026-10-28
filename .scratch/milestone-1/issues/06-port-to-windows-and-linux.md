@@ -1,6 +1,6 @@
 # 06: Port the built scan code to Windows and Linux
 
-**What to build:** Ticket 01 was built for macOS only: `core/src/protection/` has just a `macos.rs` module, so the core doesn't compile on Windows or Linux, and some names and labels still say "Finder". Make the existing scan path work on all three desktop OSes, using the OS-agnostic vocabulary in `CONTEXT.md` (System Folder, Disk Root, OS Metadata File, Package, Clash Suffix) and the per-OS lists in the spec (stories 5, 6, 10, 12, 13, and Implementation Decisions: Target OS, Letter case, Created date).
+**What to build:** Ticket 01 was built for macOS only: `core/src/protection/` has just a `macos.rs` module, so the core doesn't compile on Windows or Linux, and some names and labels still say "Finder". Make the existing scan path work on all three desktop OSes, using the OS-agnostic vocabulary in `GLOSSARY.md` (System Folder, Disk Root, OS Metadata File, Package, Clash Suffix) and the per-OS lists in the spec (stories 5, 6, 10, 12, 13, and Implementation Decisions: Target OS, Letter case, Created date).
 
 **Blocked by:** None (01 is resolved)
 

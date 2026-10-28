@@ -30,7 +30,7 @@
 ### Clean-up
 - [x] Tree styles removed from `styles/plan.css`
 - [x] `src/prototype-plan.html`, `src/prototype-plan.js` and the `prototype:plan` script in `package.json` deleted
-- [x] `CONTEXT.md` **Plan** entry updated: no longer "a before/after tree"
+- [x] `GLOSSARY.md` **Plan** entry updated: no longer "a before/after tree"
 
 ### Verification
 - [x] `cargo test` for the core and `npm test` pass

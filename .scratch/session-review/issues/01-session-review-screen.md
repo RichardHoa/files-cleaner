@@ -33,7 +33,7 @@
 - [x] Move on the Plan navigates to the Session with the run's result as the opening status line
 
 ### Docs
-- [x] `CONTEXT.md`: a note under **Reason** that a skipped or failed Operation's explanation is not a Reason (term "Note", _Avoid_: reason); remove any Summary screen mentions there and in `README.md`
+- [x] `GLOSSARY.md`: a note under **Reason** that a skipped or failed Operation's explanation is not a Reason (term "Note", _Avoid_: reason); remove any Summary screen mentions there and in `README.md`
 
 ### Verification
 - [x] `cargo test` (core) and `npm test` pass
