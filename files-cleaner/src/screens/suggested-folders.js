@@ -27,6 +27,7 @@ import { count, formatDate, formatSize, plural, splitPath } from "../format.js";
 import { icon } from "../icons.js";
 import { groupingModelsPanel } from "../models-panel.js";
 import { describeRunProgress, describeSummary } from "../outcomes.js";
+import { progressBar } from "../progress-bar.js";
 import { describeEstimate, readingEstimate, updatedAverage } from "../reading-estimate.js";
 import { clickSelection } from "../row-selection.js";
 import { busy, showStatus } from "../status.js";
@@ -158,7 +159,7 @@ export async function render(root, nav, result) {
    */
   async function analyse() {
     const status = el("p", { className: "status" }, "Reading the files…");
-    const bar = el("progress", { className: "analysis-progress" });
+    const bar = progressBar();
     const estimate = estimateLine();
     const cancel = el("button", { type: "button" }, "Cancel");
     let cancelled = false;
@@ -169,13 +170,13 @@ export async function render(root, nav, result) {
       showStatus(status, "Stopping…");
       cancelAnalysis().catch((error) => showStatus(status, describeError(error), true));
     });
-    screen.replaceChildren(...titled(status, bar, estimate.node, ...waitNote(), el("div", { className: "actions" }, cancel)));
+    screen.replaceChildren(...titled(status, bar.node, estimate.node, ...waitNote(), el("div", { className: "actions" }, cancel)));
     try {
       const { grouping, device } = await analyseLooseFiles((progress) => {
         if (cancelled) return;
         showStatus(status, describeAnalysisProgress(progress));
-        bar.max = progress.total;
-        bar.value = progress.finished;
+        // Moves back and forth while the models load, as nothing is read meanwhile.
+        bar.set(progress.finished, progress.phase === "loading" ? 0 : progress.total);
         estimate.update(progress);
       });
       if (cancelled) return nav.home();

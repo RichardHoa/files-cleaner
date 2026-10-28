@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { describeScanProgress, fromDuplicateStep, stepFlow } from "../src/steps.js";
+import { describeDuplicateProgress, describeScanProgress, fromDuplicateStep, stepFlow } from "../src/steps.js";
 
 const ROOT = "/Users/me/Downloads";
 const firstScan = { root: ROOT, entries: [{ name: "a.pdf" }, { name: "a copy.pdf" }] };
@@ -103,5 +103,16 @@ test("scan progress says what was found and read, then the item it is on", () =>
   assert.equal(
     describeScanProgress(ROOT, { found: 1200, folders: 1, skipped: 3, current: `${ROOT}/a.pdf` }),
     `Scanning ${ROOT}…\n1,200 files found · 1 folder read · 3 protected skipped\n${ROOT}/a.pdf`,
+  );
+});
+
+test("duplicate progress counts files while comparing, then bytes while checking, then the file it is on", () => {
+  assert.equal(
+    describeDuplicateProgress({ phase: "comparing", finished: 1200, total: 5000, current: `${ROOT}/a.pdf` }),
+    `Comparing files of the same size: 1,200 of 5,000…\n${ROOT}/a.pdf`,
+  );
+  assert.equal(
+    describeDuplicateProgress({ phase: "checking", finished: 1.5e9, total: 4e9, current: `${ROOT}/a.mov` }),
+    `Checking files that look alike: 1.5 GB of 4.0 GB…\n${ROOT}/a.mov`,
   );
 });

@@ -5,7 +5,7 @@ use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
 
 use common::{config, empty_config, scan_root, write};
-use files_cleaner_core::{build_plan, scan, OperationKind, Plan, Reason};
+use files_cleaner_core::{build_plan, build_plan_with_progress, scan, OperationKind, Plan, Reason};
 
 /// Sets `path`'s modified date to `secs` after the epoch.
 fn set_modified(path: &Path, secs: u64) {
@@ -51,6 +51,27 @@ fn trashes_every_copy_but_the_keeper_even_when_renamed() {
         trashed(&plan_for(dir.path())),
         ["old/report (1).pdf", "renamed.pdf"]
     );
+}
+
+#[test]
+fn finding_duplicates_reports_comparing_files_then_checking_bytes() {
+    let dir = scan_root();
+    write(dir.path(), "a.txt", "same contents");
+    write(dir.path(), "b.txt", "same contents");
+    write(dir.path(), "unique.txt", "a different size");
+    let config = empty_config(dir.path());
+    let mut reports = Vec::new();
+
+    build_plan_with_progress(&scan(dir.path(), &config).unwrap(), &config, |p| {
+        reports.push((p.phase, p.finished, p.total))
+    });
+
+    let phases: Vec<String> = reports
+        .iter()
+        .map(|(phase, finished, total)| format!("{phase:?} {finished}/{total}"))
+        .collect();
+    // Only the two files of the same size are read: two files, then their 26 bytes.
+    assert_eq!(phases, ["Comparing 0/2", "Checking 0/26"]);
 }
 
 #[test]

@@ -12,6 +12,7 @@ import {
 } from "./api.js";
 import { el } from "./dom.js";
 import { formatSize } from "./format.js";
+import { progressBar } from "./progress-bar.js";
 import { showStatus } from "./status.js";
 
 /** "Mac", "PC" or "computer": what the user calls this machine, for "nothing leaves your Mac". */
@@ -72,12 +73,13 @@ export function watchGroupingModels(node, error, show) {
 export function groupingModelsPanel(onInstalled) {
   const node = el("section", { className: "models-panel" });
   const error = el("p", { className: "status error" });
+  const bar = progressBar();
   watchGroupingModels(node, error, (status) => {
     if (status.state === "installed") {
       onInstalled();
       return false;
     }
-    node.replaceChildren(...groupingModelsControls(status, error), error);
+    node.replaceChildren(...groupingModelsControls(status, error, bar), error);
     showStatus(error, status.error ?? "", status.error != null);
   });
   node.append(error);
@@ -86,11 +88,15 @@ export function groupingModelsPanel(onInstalled) {
 
 /**
  * The text, progress and buttons for the models in `status` until they're installed: the offer, or the
- * download with Pause or Resume and Cancel. A failing button says why in `error`.
+ * download with Pause or Resume and Cancel, its progress shown in `bar` (from progress-bar.js), kept by
+ * the caller across statuses so it glides from one to the next. A failing button says why in `error`.
  */
-export function groupingModelsControls({ state, downloaded, total }, error) {
+export function groupingModelsControls({ state, downloaded, total }, error, bar) {
   const button = (label, command, primary = false) => modelsButton(label, command, error, primary);
-  const progress = () => el("progress", { max: total, value: downloaded });
+  const progress = () => {
+    bar.set(downloaded, total);
+    return bar.node;
+  };
   const soFar = `${formatSize(downloaded)} of ${formatSize(total)}`;
 
   if (state === "downloading") {

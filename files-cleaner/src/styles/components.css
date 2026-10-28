@@ -199,7 +199,55 @@ button.small {
   justify-content: flex-end;
 }
 
+/* A thin bar like macOS's. The fill is scaled, not resized, so it glides between updates (see
+   progress-bar.js); with nothing to measure yet, a short piece of it slides across instead. */
+.progress {
+  position: relative;
+  flex: none;
+  width: min(100%, 420px);
+  height: 6px;
+  margin: var(--space-2) 0;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--border);
+}
+
+.progress-fill {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition-property: transform;
+  transition-timing-function: linear;
+}
+
+.progress.indeterminate .progress-fill {
+  width: 30%;
+  transition: none;
+  animation: progress-slide 1.4s ease-in-out infinite;
+}
+
+@keyframes progress-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress.indeterminate .progress-fill {
+    width: 100%;
+    animation: none;
+    transform: none;
+    opacity: 0.4;
+  }
+}
+
 /* The Grouping Models' offer or download progress. */
-.models-panel progress {
+.models-panel .progress {
   width: min(100%, 360px);
 }

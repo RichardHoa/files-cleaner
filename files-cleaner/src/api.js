@@ -41,13 +41,19 @@ export function scan(scanRoot, onProgress) {
 
 /**
  * Plans the duplicate step for the latest scan, with the config as it is now: every non-Keeper copy
- * trashed, and the folders that empties offered unticked. `{ root, trashDestination, operations }`, each
+ * trashed, and the folders that empties offered unticked. Calls `onProgress({ phase, finished, total,
+ * current })` while finding duplicates: `phase` "comparing" counts files whose start and end are compared,
+ * then "checking" counts the bytes of those read in full. `{ root, trashDestination, operations }`, each
  * Operation `{ id, kind, source, relativePath, destination, destinationPath, size, modified, isPackage,
  * isFolder, reason, ticked, error }`, `kind` being "trash", "move" or "createFolder", `reason` one of
  * `{ type: "duplicate", keeper }`, `{ type: "rule", rule }` or `{ type: "emptiedFolder" }`, `ticked` whether
  * it starts ticked, and `error` why it can't happen (it can't be ticked then), or null.
  */
-export const buildPlan = () => invoke("build_plan");
+export function buildPlan(onProgress) {
+  const channel = new Channel();
+  channel.onmessage = onProgress;
+  return invoke("build_plan", { onProgress: channel });
+}
 
 // Running, undoing and redoing resolve to a summary: `{ sessionId, done, skipped, failed, unrecoverable }`,
 // each a list of `{ operationId, kind, source, destination, note }`, the note saying why it wasn't done.

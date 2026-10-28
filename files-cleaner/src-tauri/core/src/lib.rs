@@ -21,14 +21,15 @@ pub use config::{
     load_config, reset_config, save_config, Config, ConfigError, GroupingSettings, Rule,
     RuleOperation, RuleTarget, SettingChange, TrashDestination, EXAMPLE_CONFIG,
 };
+pub use duplicates::{DuplicatePhase, DuplicateProgress};
 pub use executor::{
     redo_operations, run, run_with_progress, undo, undo_operations, Outcome, RunProgress, Summary,
 };
 pub use folder_name::safe_folder_name;
 pub use journal::{lock_sessions, SessionError, SessionLock};
 pub use planner::{
-    build_plan, build_rule_plan, Operation, OperationKind, Plan, Reason, SourceState,
-    THIS_SESSION_FOLDER,
+    build_plan, build_plan_with_progress, build_rule_plan, Operation, OperationKind, Plan, Reason,
+    SourceState, THIS_SESSION_FOLDER,
 };
 pub use protection::HOLDING_FOLDER_NAME;
 pub use recent::{

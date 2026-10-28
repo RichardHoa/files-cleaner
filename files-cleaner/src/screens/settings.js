@@ -1,4 +1,5 @@
-// Settings: the Trash Destination, the Never-Touch Paths, how files are grouped, and the Grouping Models.
+// Settings: the Trash Destination, the Never-Touch Paths, how files are grouped, notifications, and the
+// Grouping Models.
 // This is the only way settings change: the config file behind them is never edited by hand. Each change
 // is saved as soon as it's made; an invalid value says why beside it and isn't saved. Grouping changes
 // apply the next time files are grouped.
@@ -16,6 +17,7 @@ import {
 import { el } from "../dom.js";
 import { formatSize, splitPath } from "../format.js";
 import { groupingModelsControls, modelsButton, watchGroupingModels } from "../models-panel.js";
+import { progressBar } from "../progress-bar.js";
 import { showStatus } from "../status.js";
 
 /** What this OS calls its file manager, for "Show in Finder". */
@@ -80,7 +82,12 @@ async function showConfigSections(node) {
     );
     return;
   }
-  node.replaceChildren(trashSection(), neverTouchSection(config.neverTouch), groupingSection(config.grouping));
+  node.replaceChildren(
+    trashSection(),
+    neverTouchSection(config.neverTouch),
+    groupingSection(config.grouping),
+    notificationsSection(config.notifications),
+  );
 }
 
 /** `title`'s section, holding `children`. */
@@ -248,6 +255,27 @@ function smallestFolderSetting(initial) {
   );
 }
 
+/** Whether to notify the user when the folders are ready, or reading failed, while the app is in the background. */
+function notificationsSection(initial) {
+  const box = el("input", { type: "checkbox", checked: initial === true });
+  const status = el("p", { className: "status" });
+  box.addEventListener("change", async () => {
+    try {
+      box.checked = (await changeSetting("notifications", box.checked)).config.notifications === true;
+      showStatus(status, "");
+    } catch (error) {
+      box.checked = !box.checked;
+      showStatus(status, describeError(error), true);
+    }
+  });
+  return section(
+    "Notifications",
+    el("label", { className: "settings-choice" }, box, el("span", {}, "Notify me when the Suggested Folders are ready")),
+    el("p", { className: "note" }, "Only while Files Cleaner is in the background, so you can switch to other apps while files are read."),
+    status,
+  );
+}
+
 /** "Read every file again": forgets what the Grouping Models read, so the next grouping reads every file afresh. */
 function readAgainSection() {
   const button = el("button", { type: "button" }, "Read every file again");
@@ -276,12 +304,13 @@ function modelsSection() {
   const body = el("div");
   const error = el("p", { className: "status error" });
   const node = section("Grouping Models", body, error);
+  const bar = progressBar();
   watchGroupingModels(node, error, (status) => {
     const onDisk = status.models.filter((model) => model.path);
     const total = onDisk.reduce((sum, model) => sum + model.size, 0);
     const installed = status.state === "installed";
     body.replaceChildren(
-      ...(installed ? [el("p", {}, "Installed. Files are grouped by what's inside them.")] : groupingModelsControls(status, error)),
+      ...(installed ? [el("p", {}, "Installed. Files are grouped by what's inside them.")] : groupingModelsControls(status, error, bar)),
       ...(onDisk.length ? [modelList(onDisk, error), el("p", { className: "muted" }, `Total: ${formatSize(total)}`)] : []),
       installed ? removeModels(status.total, error) : "",
     );

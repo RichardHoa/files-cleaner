@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::clash;
 use crate::config::{Config, Rule, RuleOperation, RuleTarget, TrashDestination};
+use crate::duplicates::DuplicateProgress;
 use crate::protection::{
     is_os_metadata_file, is_package, is_within, same_path, Protection, HOLDING_FOLDER_NAME,
 };
@@ -117,9 +118,19 @@ pub enum Reason {
 /// for Trash, unticked. An Operation that would cross from one disk to
 /// another is kept, as an error that can't be ticked.
 pub fn build_plan(scan: &ScanResult, config: &Config) -> Plan {
+    build_plan_with_progress(scan, config, |_| {})
+}
+
+/// Like `build_plan`, calling `on_progress` while finding duplicates (see
+/// `duplicates::find`).
+pub fn build_plan_with_progress(
+    scan: &ScanResult,
+    config: &Config,
+    on_progress: impl FnMut(DuplicateProgress),
+) -> Plan {
     let root = &scan.root;
     let mut operations = Vec::new();
-    for group in duplicates::find(&scan.entries) {
+    for group in duplicates::find(&scan.entries, on_progress) {
         for copy in group.copies {
             operations.push(trash(
                 root,

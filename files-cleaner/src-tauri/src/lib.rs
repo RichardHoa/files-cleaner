@@ -11,8 +11,9 @@ mod models;
 mod ocr_languages;
 
 use files_cleaner_core::{
-    self as core, Config, Plan, RecentScanRoot, RunProgress, ScanProgress, ScanResult,
-    SessionDetails, SessionPage, SettingChange, SuggestedFolderChoice, Summary, EXAMPLE_CONFIG,
+    self as core, Config, DuplicateProgress, Plan, RecentScanRoot, RunProgress, ScanProgress,
+    ScanResult, SessionDetails, SessionPage, SettingChange, SuggestedFolderChoice, Summary,
+    EXAMPLE_CONFIG,
 };
 use files_cleaner_grouping::{self as grouping, CardStore, Grouping, LlamaModels};
 use serde::{Deserialize, Serialize};
@@ -219,15 +220,28 @@ async fn scan(
 }
 
 /// Plans the duplicate step for the latest scan with the config as it is
-/// now, off the UI thread (finding duplicates reads files). The Plan is
-/// kept for `run`.
+/// now, off the UI thread (finding duplicates reads files), sending progress
+/// to `on_progress` as it goes. The Plan is kept for `run`.
 #[tauri::command]
-async fn build_plan(app: AppHandle, latest: State<'_, Latest>) -> Result<Plan, CommandError> {
+async fn build_plan(
+    app: AppHandle,
+    latest: State<'_, Latest>,
+    on_progress: Channel<DuplicateProgress>,
+) -> Result<Plan, CommandError> {
     let loaded = read_config(&app)?;
     let scan = latest_scan(&latest)?;
     let planned = Arc::clone(&scan);
-    let plan =
-        blocking(move || Ok::<_, Infallible>(core::build_plan(&planned, &loaded.config))).await?;
+    let plan = blocking(move || {
+        // A closed window can't receive progress; planning carries on.
+        Ok::<_, Infallible>(core::build_plan_with_progress(
+            &planned,
+            &loaded.config,
+            |progress| {
+                let _ = on_progress.send(progress);
+            },
+        ))
+    })
+    .await?;
     // Kept only if no newer scan came in while planning.
     if let Some(scanned) = latest
         .0

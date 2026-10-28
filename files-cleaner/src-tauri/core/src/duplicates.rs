@@ -7,12 +7,42 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::hash::Hash;
 use std::io::{self, Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
+use serde::Serialize;
 
 use crate::scanner::ScanEntry;
 
 /// Bytes read from each end of a file for its partial hash.
 const PARTIAL_BYTES: u64 = 64 * 1024;
+/// Bytes read at a time for a full hash, so progress moves within a large file.
+const FULL_HASH_CHUNK: usize = 1024 * 1024;
+/// The longest finding duplicates waits between progress reports.
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
+
+/// What finding duplicates is doing.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DuplicatePhase {
+    /// Comparing the start and end of files of the same size; counted in files.
+    Comparing,
+    /// Reading in full the files whose start and end match; counted in bytes.
+    Checking,
+}
+
+/// How far finding duplicates has got, reported while it runs.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuplicateProgress {
+    pub phase: DuplicatePhase,
+    /// Files compared, or bytes checked, so far in this phase.
+    pub finished: u64,
+    /// Files to compare, or bytes to check, in this phase.
+    pub total: u64,
+    /// The file being read.
+    pub current: PathBuf,
+}
 
 /// Two or more files with the same contents, the Keeper first.
 pub struct DuplicateGroup<'a> {
@@ -21,37 +51,110 @@ pub struct DuplicateGroup<'a> {
 }
 
 /// Every Duplicate Group among `entries`, leaving out 0-byte files and
-/// Packages. Files that can't be read are left out too.
-pub fn find(entries: &[ScanEntry]) -> Vec<DuplicateGroup<'_>> {
+/// Packages. Files that can't be read are left out too. Calls `on_progress`
+/// at most every `PROGRESS_INTERVAL` in each `DuplicatePhase`: first while
+/// comparing the start and end of every file that shares its size, then
+/// while reading in full those that still match.
+pub fn find(
+    entries: &[ScanEntry],
+    on_progress: impl FnMut(DuplicateProgress),
+) -> Vec<DuplicateGroup<'_>> {
     let candidates: Vec<&ScanEntry> = entries
         .iter()
         .filter(|e| !e.is_package && e.size > 0)
         .collect();
+    let mut progress = Progress::new(on_progress);
+
+    let same_size = split(candidates, |e| Some(e.size));
+    progress.start(
+        DuplicatePhase::Comparing,
+        same_size.iter().map(|group| group.len() as u64).sum(),
+    );
+    let same_start_and_end: Vec<Vec<&ScanEntry>> = same_size
+        .into_iter()
+        .flat_map(|group| {
+            split(group, |e| {
+                progress.advance(&e.path, 1);
+                partial_hash(&e.path, e.size).ok()
+            })
+        })
+        .collect();
+
+    progress.start(
+        DuplicatePhase::Checking,
+        same_start_and_end.iter().flatten().map(|e| e.size).sum(),
+    );
     let mut groups = Vec::new();
-    for same_size in split(candidates, |e| Some(e.size)) {
-        for same_start_and_end in split(same_size, |e| partial_hash(&e.path, e.size).ok()) {
-            for mut same in split(same_start_and_end, |e| full_hash(&e.path).ok()) {
-                // Created dates are compared only if every copy has one, so the
-                // order stays consistent whichever copies are compared.
-                let by_created = same.iter().all(|e| e.created.is_some());
-                same.sort_by(|a, b| keeper_order(a, b, by_created));
-                let keeper = same.remove(0);
-                groups.push(DuplicateGroup {
-                    keeper,
-                    copies: same,
-                });
-            }
+    for group in same_start_and_end {
+        for mut same in split(group, |e| {
+            full_hash(&e.path, |read| progress.advance(&e.path, read)).ok()
+        }) {
+            // Created dates are compared only if every copy has one, so the
+            // order stays consistent whichever copies are compared.
+            let by_created = same.iter().all(|e| e.created.is_some());
+            same.sort_by(|a, b| keeper_order(a, b, by_created));
+            let keeper = same.remove(0);
+            groups.push(DuplicateGroup {
+                keeper,
+                copies: same,
+            });
         }
     }
     groups.sort_by(|a, b| a.keeper.path.cmp(&b.keeper.path));
     groups
 }
 
+/// Reports progress through one phase at a time, at most every `PROGRESS_INTERVAL`.
+struct Progress<F: FnMut(DuplicateProgress)> {
+    phase: DuplicatePhase,
+    finished: u64,
+    total: u64,
+    last_report: Option<Instant>,
+    report: F,
+}
+
+impl<F: FnMut(DuplicateProgress)> Progress<F> {
+    fn new(report: F) -> Self {
+        Progress {
+            phase: DuplicatePhase::Comparing,
+            finished: 0,
+            total: 0,
+            last_report: None,
+            report,
+        }
+    }
+
+    /// Starts `phase`, with `total` files or bytes to go through.
+    fn start(&mut self, phase: DuplicatePhase, total: u64) {
+        self.phase = phase;
+        self.finished = 0;
+        self.total = total;
+        self.last_report = None;
+    }
+
+    /// Called as `amount` more files or bytes of `current` are read.
+    fn advance(&mut self, current: &Path, amount: u64) {
+        if self
+            .last_report
+            .is_none_or(|last| last.elapsed() >= PROGRESS_INTERVAL)
+        {
+            (self.report)(DuplicateProgress {
+                phase: self.phase,
+                finished: self.finished,
+                total: self.total,
+                current: current.to_path_buf(),
+            });
+            self.last_report = Some(Instant::now());
+        }
+        self.finished += amount;
+    }
+}
+
 /// Splits `entries` by `key`, keeping only groups of two or more. Entries
 /// whose key is `None` are dropped.
 fn split<K: Hash + Eq>(
     entries: Vec<&ScanEntry>,
-    key: impl Fn(&ScanEntry) -> Option<K>,
+    mut key: impl FnMut(&ScanEntry) -> Option<K>,
 ) -> Vec<Vec<&ScanEntry>> {
     if entries.len() < 2 {
         return Vec::new();
@@ -102,8 +205,20 @@ fn partial_hash(path: &Path, size: u64) -> io::Result<[u8; 32]> {
     Ok(*hasher.finalize().as_bytes())
 }
 
-fn full_hash(path: &Path) -> io::Result<[u8; 32]> {
+/// A hash of the whole file, calling `on_read` with the bytes of each chunk read.
+fn full_hash(path: &Path, mut on_read: impl FnMut(u64)) -> io::Result<[u8; 32]> {
+    let mut file = File::open(path)?;
     let mut hasher = blake3::Hasher::new();
-    hasher.update_reader(File::open(path)?)?;
+    let mut buffer = vec![0; FULL_HASH_CHUNK];
+    loop {
+        let read = match file.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
+        hasher.update(&buffer[..read]);
+        on_read(read as u64);
+    }
     Ok(*hasher.finalize().as_bytes())
 }

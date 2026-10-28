@@ -2,10 +2,6 @@
    The sidebar stays in view while the pane scrolls, so a file is never dragged further than across
    it. Flat surfaces and hairline dividers; the name field looks like text until it's edited. The
    sidebar row a file would drop into gets an accent outline. */
-.analysis-progress {
-  width: min(100%, 420px);
-}
-
 .reading-estimate {
   margin: var(--space-1) 0 var(--space-3);
   font-variant-numeric: tabular-nums;
