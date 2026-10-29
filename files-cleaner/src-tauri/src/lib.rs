@@ -1,6 +1,7 @@
 //! Thin Tauri commands over the core library (ADR-0003): they find the
 //! config file and home folder, call the core, and serialise the result.
 
+use std::collections::HashSet;
 use std::convert::Infallible;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,9 +12,9 @@ mod models;
 mod ocr_languages;
 
 use files_cleaner_core::{
-    self as core, Config, DuplicateProgress, Plan, RecentScanRoot, RunProgress, ScanProgress,
-    ScanResult, SessionDetails, SessionPage, SettingChange, SuggestedFolderChoice, Summary,
-    EXAMPLE_CONFIG,
+    self as core, Config, DuplicateChoice, DuplicateGroup, DuplicateProgress, Plan, RecentScanRoot,
+    RunProgress, ScanProgress, ScanResult, SessionDetails, SessionPage, SettingChange,
+    SuggestedFolderChoice, Summary, EXAMPLE_CONFIG,
 };
 use files_cleaner_grouping::{self as grouping, CardStore, Grouping, LlamaModels};
 use serde::{Deserialize, Serialize};
@@ -45,13 +46,15 @@ const PDFIUM_LIBRARY: &str = "pdfium/pdfium.dll";
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 const PDFIUM_LIBRARY: &str = "pdfium/libpdfium.so";
 
-/// The latest scan and, once built, its Plan, kept here so the UI doesn't
-/// send them back. One lock holds both, so a Plan never outlives its scan.
+/// The latest scan and, once found and built, its Duplicate Groups and its
+/// Plan, kept here so the UI doesn't send them back. One lock holds them
+/// all, so neither outlives its scan.
 #[derive(Default)]
 struct Latest(Mutex<Option<Scanned>>);
 
 struct Scanned {
     scan: Arc<ScanResult>,
+    duplicates: Option<Arc<Vec<DuplicateGroup>>>,
     plan: Option<Plan>,
 }
 
@@ -187,7 +190,8 @@ fn scan_root_warning(app: AppHandle, scan_root: PathBuf) -> Result<Option<String
 }
 
 /// Scans off the UI thread, sending progress to `on_progress` as it goes.
-/// The result is kept for `build_plan`. The UI calls this only once any
+/// The result is kept for `find_duplicates`, `analyse_loose_files` and
+/// `build_review_plan`. The UI calls this only once any
 /// protected-path warning is accepted, so `scan_root` becomes a Recent
 /// Scan Root here.
 #[tauri::command]
@@ -214,35 +218,30 @@ async fn scan(
     .await?;
     *latest.0.lock().unwrap() = Some(Scanned {
         scan: Arc::new(result.clone()),
+        duplicates: None,
         plan: None,
     });
     Ok(result)
 }
 
-/// Plans the duplicate step for the latest scan with the config as it is
-/// now, off the UI thread (finding duplicates reads files), sending progress
-/// to `on_progress` as it goes. The Plan is kept for `run`.
+/// Finds the Duplicate Groups of the latest scan, off the UI thread (it
+/// reads files), sending progress to `on_progress` as it goes. They are
+/// kept, so reading leaves out the copies to trash.
 #[tauri::command]
-async fn build_plan(
-    app: AppHandle,
+async fn find_duplicates(
     latest: State<'_, Latest>,
     on_progress: Channel<DuplicateProgress>,
-) -> Result<Plan, CommandError> {
-    let loaded = read_config(&app)?;
+) -> Result<Vec<DuplicateGroup>, CommandError> {
     let scan = latest_scan(&latest)?;
-    let planned = Arc::clone(&scan);
-    let plan = blocking(move || {
-        // A closed window can't receive progress; planning carries on.
-        Ok::<_, Infallible>(core::build_plan_with_progress(
-            &planned,
-            &loaded.config,
-            |progress| {
-                let _ = on_progress.send(progress);
-            },
-        ))
+    let searched = Arc::clone(&scan);
+    let groups = blocking(move || {
+        // A closed window can't receive progress; the search carries on.
+        Ok::<_, Infallible>(core::duplicate_groups(&searched, |progress| {
+            let _ = on_progress.send(progress);
+        }))
     })
     .await?;
-    // Kept only if no newer scan came in while planning.
+    // Kept only if no newer scan came in while searching.
     if let Some(scanned) = latest
         .0
         .lock()
@@ -250,9 +249,9 @@ async fn build_plan(
         .as_mut()
         .filter(|s| Arc::ptr_eq(&s.scan, &scan))
     {
-        scanned.plan = Some(plan.clone());
+        scanned.duplicates = Some(Arc::new(groups.clone()));
     }
-    Ok(plan)
+    Ok(groups)
 }
 
 /// Where the Journals live: a folder in the app data folder.
@@ -355,6 +354,33 @@ fn latest_scan(latest: &Latest) -> Result<Arc<ScanResult>, CommandError> {
     scan.ok_or_else(|| CommandError::new("Scan a folder first"))
 }
 
+/// The latest scan without the copies its Duplicate Groups trash by
+/// default: every one but the Keeper.
+fn without_copies(latest: &Latest) -> Result<ScanResult, CommandError> {
+    let (scan, duplicates) = {
+        let guard = latest.0.lock().unwrap();
+        let scanned = guard
+            .as_ref()
+            .ok_or_else(|| CommandError::new("Scan a folder first"))?;
+        (Arc::clone(&scanned.scan), scanned.duplicates.clone())
+    };
+    let copies: HashSet<&Path> = duplicates
+        .iter()
+        .flat_map(|groups| groups.iter())
+        .flat_map(|group| group.copies.iter().skip(1))
+        .map(|copy| copy.path.as_path())
+        .collect();
+    Ok(ScanResult {
+        entries: scan
+            .entries
+            .iter()
+            .filter(|entry| !copies.contains(entry.path.as_path()))
+            .cloned()
+            .collect(),
+        ..(*scan).clone()
+    })
+}
+
 /// PDFium as bundled with the app, if it's there; without it, PDFs are
 /// read by name.
 fn pdfium_library(app: &AppHandle) -> Option<PathBuf> {
@@ -362,7 +388,7 @@ fn pdfium_library(app: &AppHandle) -> Option<PathBuf> {
     path.is_file().then_some(path)
 }
 
-/// What an analysis found, for the Suggested Folders step.
+/// What an analysis found, for the review screen.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AnalysisResult {
@@ -373,8 +399,10 @@ struct AnalysisResult {
 
 /// Reads the loose files of the latest scan with the Grouping Models, off
 /// the UI thread, sending progress to `on_progress`, and suggests folders
-/// for them by the config's grouping settings. The models are loaded for
-/// this analysis only. `cancel_analysis` stops it.
+/// for them by the config's grouping settings. Every copy of a Duplicate
+/// Group but its Keeper is left out, as it is trashed by default (ADR
+/// 0005). The models are loaded for this analysis only. `cancel_analysis`
+/// stops it.
 #[tauri::command]
 async fn analyse_loose_files(
     app: AppHandle,
@@ -387,7 +415,7 @@ async fn analyse_loose_files(
     let cancel = Arc::new(AtomicBool::new(false));
     *analysing.cancel.lock().unwrap() = Arc::clone(&cancel);
     let settings = read_config(&app)?.config.grouping;
-    let scan = latest_scan(&latest)?;
+    let scan = without_copies(&latest)?;
     let (llm, embedding) = models
         .files()
         .ok_or_else(|| CommandError::new("Download the grouping models first"))?;
@@ -436,21 +464,29 @@ fn clear_grouping_cards(app: AppHandle) -> Result<(), CommandError> {
         .map_err(CommandError::new)
 }
 
-/// Plans the user's choices for each Suggested Folder over the latest scan.
-/// The Plan is kept for `run_plan`, which runs it as its own Session.
+/// Plans the user's choices on the review screen over the latest scan, as
+/// one Plan: each Duplicate Group's and each Suggested Folder's. If `keep`,
+/// the Plan is kept for `run_plan`, which runs it as one Session; a Plan
+/// built only to look at isn't, so it never takes the place of the one
+/// about to run.
 #[tauri::command]
-async fn build_suggested_folders_plan(
+async fn build_review_plan(
     app: AppHandle,
     latest: State<'_, Latest>,
+    duplicates: Vec<DuplicateChoice>,
     folders: Vec<SuggestedFolderChoice>,
+    keep: bool,
 ) -> Result<Plan, CommandError> {
     let loaded = read_config(&app)?;
     let scan = latest_scan(&latest)?;
     let planned = Arc::clone(&scan);
-    // Finding names already taken reads the destination folders.
+    // Finding names already taken, and emptied folders, reads the disk.
     let plan =
-        blocking(move || core::build_suggested_folders_plan(&planned, &loaded.config, &folders))
+        blocking(move || core::build_review_plan(&planned, &loaded.config, &duplicates, &folders))
             .await?;
+    if !keep {
+        return Ok(plan);
+    }
     // Kept only if no newer scan came in while planning.
     if let Some(scanned) = latest
         .0
@@ -581,7 +617,7 @@ pub fn run() {
             reset_settings,
             scan_root_warning,
             scan,
-            build_plan,
+            find_duplicates,
             run_plan,
             undo,
             redo_operations,
@@ -600,7 +636,7 @@ pub fn run() {
             clear_grouping_cards,
             reading_pace,
             save_reading_pace,
-            build_suggested_folders_plan
+            build_review_plan
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

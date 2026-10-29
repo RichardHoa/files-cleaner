@@ -10,9 +10,9 @@ use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-use crate::scanner::ScanEntry;
+use crate::scanner::{ScanEntry, ScanResult};
 
 /// Bytes read from each end of a file for its partial hash.
 const PARTIAL_BYTES: u64 = 64 * 1024;
@@ -45,9 +45,54 @@ pub struct DuplicateProgress {
 }
 
 /// Two or more files with the same contents, the Keeper first.
-pub struct DuplicateGroup<'a> {
+pub struct Found<'a> {
     pub keeper: &'a ScanEntry,
     pub copies: Vec<&'a ScanEntry>,
+}
+
+/// A Duplicate Group as the review screen shows it: every copy, the default
+/// Keeper first.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuplicateGroup {
+    /// Bytes of one copy.
+    pub size: u64,
+    pub copies: Vec<DuplicateCopy>,
+}
+
+/// One copy in a Duplicate Group.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuplicateCopy {
+    pub path: PathBuf,
+    /// The names from the Scan Root down to the copy, its own name last.
+    pub relative_path: Vec<String>,
+    /// Milliseconds since the Unix epoch.
+    pub modified: i64,
+    pub created: Option<i64>,
+}
+
+/// Every Duplicate Group in `scan`, as `find` finds them.
+pub fn duplicate_groups(
+    scan: &ScanResult,
+    on_progress: impl FnMut(DuplicateProgress),
+) -> Vec<DuplicateGroup> {
+    let copy = |entry: &ScanEntry| DuplicateCopy {
+        path: entry.path.clone(),
+        relative_path: entry.relative_path.clone(),
+        modified: entry.modified,
+        created: entry.created,
+    };
+    find(&scan.entries, on_progress)
+        .into_iter()
+        .map(|found| DuplicateGroup {
+            size: found.keeper.size,
+            copies: std::iter::once(found.keeper)
+                .chain(found.copies)
+                .map(copy)
+                .collect(),
+        })
+        .collect()
 }
 
 /// Every Duplicate Group among `entries`, leaving out 0-byte files and
@@ -55,10 +100,7 @@ pub struct DuplicateGroup<'a> {
 /// at most every `PROGRESS_INTERVAL` in each `DuplicatePhase`: first while
 /// comparing the start and end of every file that shares its size, then
 /// while reading in full those that still match.
-pub fn find(
-    entries: &[ScanEntry],
-    on_progress: impl FnMut(DuplicateProgress),
-) -> Vec<DuplicateGroup<'_>> {
+pub fn find(entries: &[ScanEntry], on_progress: impl FnMut(DuplicateProgress)) -> Vec<Found<'_>> {
     let candidates: Vec<&ScanEntry> = entries
         .iter()
         .filter(|e| !e.is_package && e.size > 0)
@@ -94,7 +136,7 @@ pub fn find(
             let by_created = same.iter().all(|e| e.created.is_some());
             same.sort_by(|a, b| keeper_order(a, b, by_created));
             let keeper = same.remove(0);
-            groups.push(DuplicateGroup {
+            groups.push(Found {
                 keeper,
                 copies: same,
             });

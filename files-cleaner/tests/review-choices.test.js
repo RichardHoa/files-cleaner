@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { byKindNewestFirst, initialChoices, moveFile, planChoices } from "../src/suggested-choices.js";
+import { byKindNewestFirst, initialChoices, moveFile, planChoices } from "../src/review-choices.js";
 
 test("a file dragged to another folder leaves the first, and an emptied folder isn't planned", () => {
   const choices = initialChoices([

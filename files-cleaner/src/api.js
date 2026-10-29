@@ -40,19 +40,15 @@ export function scan(scanRoot, onProgress) {
 }
 
 /**
- * Plans the duplicate step for the latest scan, with the config as it is now: every non-Keeper copy
- * trashed, and the folders that empties offered unticked. Calls `onProgress({ phase, finished, total,
- * current })` while finding duplicates: `phase` "comparing" counts files whose start and end are compared,
- * then "checking" counts the bytes of those read in full. `{ root, trashDestination, operations }`, each
- * Operation `{ id, kind, source, relativePath, destination, destinationPath, size, modified, isPackage,
- * isFolder, reason, ticked, error }`, `kind` being "trash", "move" or "createFolder", `reason` one of
- * `{ type: "duplicate", keeper }`, `{ type: "rule", rule }` or `{ type: "emptiedFolder" }`, `ticked` whether
- * it starts ticked, and `error` why it can't happen (it can't be ticked then), or null.
+ * The Duplicate Groups of the latest scan: `[{ size, copies }]`, each copy `{ path, relativePath, modified,
+ * created }`, the default Keeper first. Calls `onProgress({ phase, finished, total, current })` while finding
+ * them: `phase` "comparing" counts files whose start and end are compared, then "checking" counts the bytes
+ * of those read in full. Reading for Suggested Folders then leaves out every copy but the Keeper.
  */
-export function buildPlan(onProgress) {
+export function findDuplicates(onProgress) {
   const channel = new Channel();
   channel.onmessage = onProgress;
-  return invoke("build_plan", { onProgress: channel });
+  return invoke("find_duplicates", { onProgress: channel });
 }
 
 // Running, undoing and redoing resolve to a summary: `{ sessionId, done, skipped, failed, unrecoverable }`,
@@ -156,13 +152,21 @@ export async function notifyInBackground(title) {
 }
 
 /**
- * Plans the choices for each Suggested Folder over the latest scan, as `buildPlan` does for the duplicate
- * step, with `reason` `{ type: "suggestedFolder", folder }`. `folders` is `[{ name, choice, files }]`, `choice`
+ * Plans the whole review over the latest scan as one Plan. `duplicates` is `[{ keeper, trash }]`, the path
+ * of the copy that stays and the paths of those trashed. `folders` is `[{ name, choice, files }]`, `choice`
  * one of `{ type: "createHere" }`, `{ type: "addTo", folder }`, `{ type: "createIn", folder }`,
  * `{ type: "trashAll" }` or `{ type: "skip" }`, and `files` `[[path, "inFolder" | "trash" | "takeOut"]]`.
+ * Resolves to `{ root, trashDestination, operations }`, each Operation `{ id, kind, source, relativePath,
+ * destination, destinationPath, size, modified, isPackage, isFolder, reason, ticked, error }`, `kind` being
+ * "trash", "move" or "createFolder", `reason` one of `{ type: "duplicate", keeper }`,
+ * `{ type: "suggestedFolder", folder }` or `{ type: "emptiedFolder" }`, `ticked` whether it starts ticked
+ * (an emptied folder doesn't), and `error` why it can't happen (it can't be ticked then), or null.
  * Rejects if a name can't be a folder name.
  */
-export const buildSuggestedFoldersPlan = (folders) => invoke("build_suggested_folders_plan", { folders });
+export const buildReviewPlan = (duplicates, folders) => invoke("build_review_plan", { duplicates, folders, keep: true });
+
+/** Plans as `buildReviewPlan` does, only to look at: `runPlan` still runs the Plan built before. */
+export const previewReviewPlan = (duplicates, folders) => invoke("build_review_plan", { duplicates, folders, keep: false });
 
 /** The folder the user picked, or null if they cancelled. */
 export const pickFolder = (title = "Pick a folder to clean") => dialog.open({ directory: true, multiple: false, title });

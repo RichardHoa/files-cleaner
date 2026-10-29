@@ -9,6 +9,7 @@ const PATHS = {
   rename: "M4 20h4L19 9l-4-4L4 16z M13.5 6.5l4 4",
   createFolder: `${FOLDER} M12 10v6 M9 13h6`,
   folder: FOLDER,
+  copies: "M8 8h11v12H8z M5 16V4h11",
   plus: "M12 5v14 M5 12h14",
   close: "M6 6l12 12 M18 6L6 18",
   settings:

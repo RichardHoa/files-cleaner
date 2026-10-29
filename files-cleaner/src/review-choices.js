@@ -1,7 +1,34 @@
-// What the user chose for each Suggested Folder, and what that does to its files. A folder's choice
-// is "addTo" (into the existing subfolder it matched), "createHere" (a new folder in the Scan Root),
-// "createIn" (a new folder inside `elsewhere`, a folder the user picked), "trashAll" or "skip"; each
-// of its files is "inFolder" (goes wherever the folder's choice sends it), "trash" or "takeOut".
+// What the user chose on the review screen, and what that does to the files: for each Duplicate Group,
+// which copy stays and which are trashed; for each Suggested Folder, where it goes and what happens to
+// each of its files. A folder's choice is "addTo" (into the existing subfolder it matched), "createHere"
+// (a new folder in the Scan Root), "createIn" (a new folder inside `elsewhere`, a folder the user
+// picked), "trashAll" or "skip"; each of its files is "inFolder" (goes wherever the folder's choice
+// sends it), "trash" or "takeOut".
+
+/**
+ * The starting choice for each Duplicate Group of `groups` (`{ size, copies }`, as `findDuplicates` gives
+ * them): its first copy, the default Keeper, stays, and every other copy is trashed. Each copy is
+ * "keeper" or "trash", by path.
+ */
+export function initialDuplicates(groups) {
+  return groups.map((group) => ({
+    group,
+    copies: new Map(group.copies.map((copy, i) => [copy.path, i === 0 ? "keeper" : "trash"])),
+  }));
+}
+
+/** How many copies of the Duplicate Group `duplicate` are trashed. */
+export const trashedCopies = (duplicate) => [...duplicate.copies.values()].filter((fate) => fate === "trash").length;
+
+/** `duplicates` as `buildReviewPlan` takes them: each group's Keeper and the copies it trashes. */
+export function planDuplicates(duplicates) {
+  return duplicates
+    .map(({ copies }) => {
+      const paths = (fate) => [...copies].filter(([, f]) => f === fate).map(([path]) => path);
+      return { keeper: paths("keeper")[0], trash: paths("trash") };
+    })
+    .filter(({ trash }) => trash.length > 0);
+}
 
 /** The starting choice for each Suggested Folder of `folders`: into its matched subfolder if it has one, else a new folder in the Scan Root, with every file. */
 export function initialChoices(folders) {
@@ -22,9 +49,12 @@ function fileFate(choice, path) {
   return "move";
 }
 
-/** `{ moved, trashed }`: how many files of all `choices` go into a folder, and how many are trashed. */
-export function totals(choices) {
-  const sum = { moved: 0, trashed: 0 };
+/**
+ * `{ moved, trashed }`: how many files of all `choices` go into a folder, and how many are trashed, the
+ * copies `duplicates` trash included.
+ */
+export function totals(choices, duplicates = []) {
+  const sum = { moved: 0, trashed: duplicates.reduce((n, duplicate) => n + trashedCopies(duplicate), 0) };
   for (const choice of choices) {
     for (const path of choice.files.keys()) {
       const fate = fileFate(choice, path);
@@ -46,7 +76,7 @@ export function moveFile(choices, left, path, to) {
   else left.add(path);
 }
 
-/** `choices` as `buildSuggestedFoldersPlan` takes them, leaving out those with no files, so no empty folder is made. */
+/** `choices` as `buildReviewPlan` takes them, leaving out those with no files, so no empty folder is made. */
 export function planChoices(choices) {
   return choices.filter((choice) => choice.files.size > 0).map((choice) => ({
     name: choice.name,

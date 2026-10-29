@@ -75,8 +75,9 @@ pub use files_cleaner_core::GroupingSettings as Settings;
 
 /// What `analyse` works from.
 pub struct Input<'a> {
-    /// A fresh scan of the Scan Root: its loose files are grouped, and its
-    /// subfolders are where groups may go.
+    /// The scan of the Scan Root, without the copies trashed as duplicates:
+    /// its loose files are grouped, and its subfolders are where groups may
+    /// go.
     pub scan: &'a ScanResult,
     pub settings: Settings,
     pub store: &'a CardStore,

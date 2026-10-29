@@ -1,4 +1,5 @@
-//! Turns the user's choices for each Suggested Folder into a Plan.
+//! Turns the user's choices on the review screen, for each Duplicate
+//! Group and each Suggested Folder, into one Plan.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -9,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::clash;
 use crate::config::Config;
 use crate::folder_name::safe_folder_name;
-use crate::planner::{finish, move_to, trash, Plan, Reason};
+use crate::planner::{finish, move_to, names_below, trash, Plan, Reason};
 use crate::scanner::{ScanEntry, ScanResult};
 
 /// What the user chose for one Suggested Folder.
@@ -69,21 +70,56 @@ impl fmt::Display for SuggestedFolderError {
 
 impl std::error::Error for SuggestedFolderError {}
 
-/// Proposes each Suggested Folder's choice: a new folder (with a Clash
-/// Suffix if its name is taken) and a Move per file into it, a Move per file
-/// into an existing folder, a Trash per file, or nothing. A file the user
-/// trashes on its own is trashed whatever the folder's choice, unless the
-/// folder is skipped; a file taken out stays put. Files the scan didn't find
-/// are left out. Emptied folders and moves to another disk are handled as in
-/// `build_plan`.
+/// What the user chose for one Duplicate Group: the copy that stays, and
+/// the copies to trash. A copy in neither stays where it is.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuplicateChoice {
+    pub keeper: PathBuf,
+    pub trash: Vec<PathBuf>,
+}
+
+/// Proposes each Suggested Folder's choice, as `build_review_plan` does
+/// with no duplicates.
 pub fn build_suggested_folders_plan(
     scan: &ScanResult,
     config: &Config,
     folders: &[SuggestedFolderChoice],
 ) -> Result<Plan, SuggestedFolderError> {
+    build_review_plan(scan, config, &[], folders)
+}
+
+/// Proposes the whole review as one Plan. Each Duplicate Group's copies to
+/// trash are trashed, naming its Keeper. Each Suggested Folder's choice is
+/// a new folder (with a Clash Suffix if its name is taken) and a Move per
+/// file into it, a Move per file into an existing folder, a Trash per file,
+/// or nothing. A file the user trashes on its own is trashed whatever the
+/// folder's choice, unless the folder is skipped; a file taken out stays
+/// put. A copy already trashed as a duplicate is left out of its folder,
+/// as are files the scan didn't find. Emptied folders, worked out from all
+/// of it, and moves to another disk are handled as in `build_plan`.
+pub fn build_review_plan(
+    scan: &ScanResult,
+    config: &Config,
+    duplicates: &[DuplicateChoice],
+    folders: &[SuggestedFolderChoice],
+) -> Result<Plan, SuggestedFolderError> {
     let root = &scan.root;
     let entries: HashMap<&Path, &ScanEntry> =
         scan.entries.iter().map(|e| (e.path.as_path(), e)).collect();
+    let mut operations = Vec::new();
+    let mut trashed: HashSet<&Path> = HashSet::new();
+    for group in duplicates {
+        let reason = Reason::Duplicate {
+            keeper: names_below(root, &group.keeper),
+        };
+        for path in &group.trash {
+            if let Some(entry) = entries.get(path.as_path()) {
+                trashed.insert(path);
+                operations.push(trash(root, entry, reason.clone()));
+            }
+        }
+    }
     // The names taken in each destination folder, lowercased.
     let mut taken: HashMap<PathBuf, HashSet<String>> = HashMap::new();
     let mut claim = |folder: &Path, name: &str, free: fn(&str, &HashSet<String>) -> String| {
@@ -94,7 +130,6 @@ pub fn build_suggested_folders_plan(
         names.insert(name.to_lowercase());
         name
     };
-    let mut operations = Vec::new();
     let mut created = Vec::new();
     for folder in folders {
         if folder.choice == FolderChoice::Skip {
@@ -127,6 +162,9 @@ pub fn build_suggested_folders_plan(
             let Some(entry) = entries.get(path.as_path()) else {
                 continue;
             };
+            if trashed.contains(path.as_path()) {
+                continue;
+            }
             match (choice, &destination) {
                 (FileChoice::TakeOut, _) => {}
                 (FileChoice::Trash, _) | (FileChoice::InFolder, None) => {

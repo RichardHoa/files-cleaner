@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { initiallyTicked, tickState, tickableIds, toggleAll, totals } from "../src/plan-selection.js";
+import { tickState, toggleAll } from "../src/plan-selection.js";
 
 const operations = [
   { id: "trash:a.txt", kind: "trash", size: 100 },
@@ -8,15 +8,6 @@ const operations = [
   { id: "trash:sub/c.txt", kind: "trash", size: 3 },
 ];
 const sub = ["trash:sub/b.txt", "trash:sub/c.txt"];
-
-test("totals count only ticked Operations, by kind, with bytes to trash", () => {
-  assert.deepEqual(totals(operations, new Set(["trash:a.txt", "trash:sub/c.txt"])), {
-    count: 2,
-    byKind: { trash: 2 },
-    trashBytes: 103,
-  });
-  assert.deepEqual(totals(operations, new Set()), { count: 0, byKind: {}, trashBytes: 0 });
-});
 
 test("a list is all, none or some ticked", () => {
   assert.equal(tickState(sub, new Set(["trash:sub/b.txt", "trash:sub/c.txt"])), "all");
@@ -31,14 +22,4 @@ test("toggling a list ticks all of it unless all of it is ticked", () => {
   const all = new Set(["trash:a.txt", "trash:sub/b.txt", "trash:sub/c.txt"]);
   assert.deepEqual([...toggleAll(sub, all)], ["trash:a.txt"]);
   assert.equal(all.size, 3, "the given set is left unchanged");
-});
-
-test("a Plan starts with the Operations it ticks, never one that can't happen", () => {
-  const ops = [
-    { id: "trash:a.txt", ticked: true, error: null },
-    { id: "trashFolder:old", ticked: false, error: null },
-    { id: "move:usb/b.txt", ticked: true, error: "b.txt is on a different disk" },
-  ];
-  assert.deepEqual([...initiallyTicked(ops)], ["trash:a.txt"]);
-  assert.deepEqual(tickableIds(ops), ["trash:a.txt", "trashFolder:old"]);
 });

@@ -1,7 +1,6 @@
 // Session: what one past Session did and where its files are now. One card per group (Moved,
 // Put back, Needs attention) picks which files are listed; the selected file is shown beside the
-// list. Files can be put back, or moved again, all at once, ticked, or one at a time. Right after the
-// duplicate Session it also offers Continue, to the next step.
+// list. Files can be put back, or moved again, all at once, ticked, or one at a time.
 import { describeError, pathSeparator, redoOperations, revealInFileManager, sessionDetails, undo } from "../api.js";
 import { el } from "../dom.js";
 import { drawMore, revealMenu } from "../file-list.js";
@@ -10,8 +9,7 @@ import { describeSummary } from "../outcomes.js";
 import { tickState, toggleAll } from "../plan-selection.js";
 import { PAGE_SIZE, fileName, folderLabel, paging, selectedFile, visibleFiles } from "../plan-view.js";
 import { groupByState, holdingName, paneSentence, sessionHeading } from "../session-view.js";
-import { busy, showStatus } from "../status.js";
-import { describeScanProgress } from "../steps.js";
+import { showStatus } from "../status.js";
 
 /** "3 moved": how many files a group has, as its card and list heading say it. */
 const GROUP_COUNTS = {
@@ -54,18 +52,7 @@ export function render(root, nav, sessionId, from, message) {
   back.addEventListener("click", () => (fromHistory ? nav.history(from.page) : nav.home()));
   const status = el("p", { className: "status" });
   const content = el("div");
-  const actions = el("div", { className: "actions" }, back);
-  if (from?.step === "duplicates") {
-    // The next step groups what is left, so it scans the Scan Root again first.
-    const next = el("button", { type: "button", className: "primary" }, "Continue");
-    next.addEventListener("click", () =>
-      busy(status, [next, back], `Scanning ${from.scanRoot}…`, () =>
-        nav.steps.continueAfterDuplicates(from.scanRoot, (progress) => showStatus(status, describeScanProgress(from.scanRoot, progress))),
-      ),
-    );
-    actions.append(next);
-  }
-  root.append(actions, content);
+  root.append(el("div", { className: "actions" }, back), content);
 
   // Kept when the Session is drawn again after an action.
   const view = { group: null, query: "", sort: "size", limit: PAGE_SIZE, selectedId: null };

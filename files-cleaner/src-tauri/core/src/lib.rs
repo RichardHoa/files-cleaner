@@ -21,7 +21,9 @@ pub use config::{
     load_config, reset_config, save_config, Config, ConfigError, GroupingSettings, Rule,
     RuleOperation, RuleTarget, SettingChange, TrashDestination, EXAMPLE_CONFIG,
 };
-pub use duplicates::{DuplicatePhase, DuplicateProgress};
+pub use duplicates::{
+    duplicate_groups, DuplicateCopy, DuplicateGroup, DuplicatePhase, DuplicateProgress,
+};
 pub use executor::{
     redo_operations, run, run_with_progress, undo, undo_operations, Outcome, RunProgress, Summary,
 };
@@ -43,6 +45,6 @@ pub use sessions::{
     SessionPage, SessionStatus,
 };
 pub use suggested_folders::{
-    build_suggested_folders_plan, FileChoice, FolderChoice, SuggestedFolderChoice,
-    SuggestedFolderError,
+    build_review_plan, build_suggested_folders_plan, DuplicateChoice, FileChoice, FolderChoice,
+    SuggestedFolderChoice, SuggestedFolderError,
 };

@@ -1,4 +1,4 @@
-/* Suggested Folders: laid out like Mail, a sidebar of folders beside a pane listing the one picked.
+/* Review: laid out like Mail, a sidebar of the Plan's sections beside a pane listing the one picked.
    The sidebar stays in view while the pane scrolls, so a file is never dragged further than across
    it. Flat surfaces and hairline dividers; the name field looks like text until it's edited. The
    sidebar row a file would drop into gets an accent outline. */
@@ -293,4 +293,73 @@
 
 .left-files {
   margin-bottom: var(--space-2);
+}
+
+/* A Duplicate Group: its name and totals, then each copy under it with Keep or Trash before its folder. */
+.duplicate-groups {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+}
+
+.duplicate-group {
+  padding: var(--space-2) var(--space-1);
+  border-bottom: 1px solid var(--border);
+}
+
+.duplicate-group-head {
+  display: flex;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.duplicate-group-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+.duplicate-copies {
+  list-style: none;
+  margin: var(--space-1) 0 0;
+  padding: 0;
+}
+
+.duplicate-copy {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-0-5) 0;
+}
+
+.duplicate-copy:focus-visible {
+  outline-offset: -2px;
+}
+
+.copy-mark {
+  flex-shrink: 0;
+  width: 3.5em;
+  font-size: var(--font-sm);
+}
+
+.copy-mark.keeper {
+  font-weight: 600;
+}
+
+.copy-mark.trash {
+  color: var(--muted);
+}
+
+.duplicate-copy-folder {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.emptied-folder {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
 }

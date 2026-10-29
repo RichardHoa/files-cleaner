@@ -1,6 +1,6 @@
-/* Plan: a header, one card per Reason, then the chosen group's files beside the selected one.
-   Flat surfaces and hairline dividers; colour only for the primary button, the selected row
-   and each card's one kind icon. */
+/* Shared by the review and Session screens: a header with the actions, then cards picking a group
+   and its files beside the selected one. Flat surfaces and hairline dividers; colour only for the
+   primary button, the selected row and each card's one kind icon. */
 .plan-head {
   display: flex;
   flex-wrap: wrap;
@@ -134,23 +134,6 @@
   color: var(--muted);
 }
 
-.plan-left-out {
-  display: none;
-}
-
-.plan-file.unticked .plan-file-name {
-  color: var(--muted);
-}
-
-.plan-file.unticked .plan-left-out {
-  display: inline;
-}
-
-/* An Operation that can't happen, such as a move to another disk: never ticked, and says so. */
-.plan-file.blocked .plan-left-out {
-  color: var(--error);
-}
-
 .plan-none {
   padding: var(--space-4) var(--space-2);
   color: var(--muted);
@@ -190,11 +173,30 @@
   margin-top: var(--space-0-5);
 }
 
-.plan-original {
-  font-size: var(--font-sm);
-  color: var(--muted);
-}
-
 .plan-pane .plan-include {
   margin-top: var(--space-2);
+}
+
+/* Search, sort and Show above a list of files. */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 var(--space-3);
+}
+
+.filters input,
+.filters select {
+  font: inherit;
+  padding: var(--space-1-5) var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-control);
+  background: var(--surface);
+  color: inherit;
+}
+
+.filters .search {
+  flex: 1 1 240px;
+  min-width: 0;
 }

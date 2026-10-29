@@ -7,7 +7,6 @@ import {
   pickFolder,
   recentScanRoots,
   removeRecentScanRoot,
-  scan,
   scanRootWarning,
 } from "../api.js";
 import { el } from "../dom.js";
@@ -16,7 +15,6 @@ import { icon } from "../icons.js";
 import { noSessions, sessionList } from "../session-row.js";
 import { undoSections } from "../outcomes.js";
 import { showStatus } from "../status.js";
-import { describeScanProgress } from "../steps.js";
 
 const LATEST_SESSIONS = 3;
 
@@ -40,7 +38,7 @@ export function render(root, nav) {
   );
 
   let scanning = false;
-  /** Scans `folder`, after the protected-path warning if it has one, then shows the results. */
+  /** Scans `folder`, after the protected-path warning if it has one, then shows the review. */
   const startScan = async (folder) => {
     if (scanning) return;
     scanning = true;
@@ -52,7 +50,7 @@ export function render(root, nav) {
         status.replaceChildren();
       } else {
         showStatus(status, `Scanning ${folder}…`);
-        nav.scanResults(await scan(folder, (progress) => showStatus(status, describeScanProgress(folder, progress))));
+        await nav.steps.scanFolder(folder, (line) => showStatus(status, line));
         return;
       }
     } catch (error) {
