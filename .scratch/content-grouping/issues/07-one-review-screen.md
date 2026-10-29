@@ -14,15 +14,17 @@ See `../one-screen-review.md`: user stories 1–12, 18–21, 27–32, 36, 53, 56
 
 **Blocked by:** None (can start immediately). Doing 06 first avoids conflicts on the Suggested Folders screen.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] The step flow is pick folder → scan → review; Scan results, the duplicate screen and the rescan are removed
-- [ ] The backend reports Duplicate Groups (every copy, sizes, dates, the default Keeper) and builds one Plan from the duplicate choices, Rule Operations, Suggested Folder choices and the resulting Emptied Folders
-- [ ] Reading uses the first scan and skips copies marked Trash and files matched by a Rule
-- [ ] Merged screen with the sidebar order above; the Duplicates pane lists Duplicate Groups with Keep / Trash
-- [ ] Approve waits for reading, then runs one Session; Cancel stops reading and goes Home with nothing changed
-- [ ] Without the models: Duplicates, Rules and the models offer
-- [ ] Quiet native styling; no "AI" wording
-- [ ] Test: picking a folder scans once and shows the review, with no Scan results screen and no second scan (replaces the old step flow tests)
+- [x] The step flow is pick folder → scan → review; Scan results, the duplicate screen and the rescan are removed
+- [x] The backend reports Duplicate Groups (every copy, sizes, dates, the default Keeper) and builds one Plan from the duplicate choices, Rule Operations, Suggested Folder choices and the resulting Emptied Folders
+- [x] Reading uses the first scan and skips copies marked Trash and files matched by a Rule
+- [x] Merged screen with the sidebar order above; the Duplicates pane lists Duplicate Groups with Keep / Trash
+- [x] Approve waits for reading, then runs one Session; Cancel stops reading and goes Home with nothing changed
+- [x] Without the models: Duplicates, Rules and the models offer
+- [x] Quiet native styling; no "AI" wording
+- [x] Test: picking a folder scans once and shows the review, with no Scan results screen and no second scan (replaces the old step flow tests)
 
 ## Comments
+
+- 2026-10-29: Done, without Rules: they stay frozen (decided with the developer), so the Plan holds Duplicate, Suggested Folder and Emptied Folder Reasons only, the sidebar has no Rule entries, and reading skips only the copies marked Trash. `find_duplicates` reports the Duplicate Groups (default Keeper first) and keeps them, so reading leaves out every other copy; `build_review_plan` takes `{ keeper, trash }` per group plus the Suggested Folder choices and builds the one Plan. The Emptied Folders are worked out by the backend again a moment after each change, so their sidebar count stays right; the ticked ones are carried into Approve. If reading fails, the error shows in the Suggested Folders' place and Approve runs the duplicates alone. `suggested-choices.js` is now `review-choices.js`; Scan results, the duplicate Plan screen, Continue and the rescan are gone.
