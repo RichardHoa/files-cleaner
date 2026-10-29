@@ -264,6 +264,8 @@ fn sync_folder(folder: &Path) -> io::Result<()> {
     if cfg!(windows) {
         return Ok(());
     }
+    // The app's own Journal folder; no path comes from a web request.
+    // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
     File::open(folder)?.sync_all()
 }
 

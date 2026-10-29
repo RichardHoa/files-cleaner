@@ -548,6 +548,8 @@ fn ready_to_go(op: &JournaledOperation, since: &str) -> Result<(), String> {
 /// The first item in `folder` that stops it counting as empty: anything
 /// but an OS Metadata File or a folder that is empty too.
 fn first_kept(folder: &Path) -> io::Result<Option<PathBuf>> {
+    // A folder in the Scan Root the user chose; no path comes from a web request.
+    // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
     for child in fs::read_dir(folder)? {
         let child = child?;
         let kind = child.file_type()?;

@@ -4,8 +4,9 @@
 // files are read in the background meanwhile, which needs the Grouping Models (without them, they're
 // offered in the Suggested Folders' place), and the Suggested Folders are filled in once that's done.
 // Files are selected as in Finder, then moved by dragging them onto a folder in the sidebar, from their
-// right-click menu, or with "Move to…". Approve waits for the reading, then runs the whole Plan as one
-// Session; Cancel stops the reading and goes Home with nothing changed.
+// right-click menu, or with "Move to…". Approve waits for the reading, which can be stopped early to group
+// only what was read, then runs the whole Plan as one Session; Cancel stops the reading and goes Home with
+// nothing changed.
 import {
   analyseLooseFiles,
   answerNotifications,
@@ -21,6 +22,7 @@ import {
   readingPace,
   runPlan,
   saveReadingPace,
+  stopReading,
 } from "../api.js";
 import { el } from "../dom.js";
 import { drawMore, revealMenu } from "../file-list.js";
@@ -35,10 +37,13 @@ import {
   byKindNewestFirst,
   initialChoices,
   initialDuplicates,
+  leftCopies,
   moveFile,
   nameMissing,
+  placeKeepers,
   planChoices,
   planDuplicates,
+  setCopy,
   totals,
   trashedCopies,
 } from "../review-choices.js";
@@ -145,6 +150,8 @@ export async function render(root, nav, result, duplicateGroups) {
   const modified = new Map(result.entries.map((entry) => [entry.path, entry.modified]));
   const totalSize = result.entries.reduce((sum, entry) => sum + entry.size, 0);
   const duplicates = initialDuplicates(duplicateGroups);
+  // The copy read for each copy in a Duplicate Group, its first, so a Keeper the user picks shows what was read.
+  const readAs = new Map(duplicateGroups.flatMap((group) => group.copies.map((copy) => [copy.path, group.copies[0].path])));
 
   // The Suggested Folders: "reading", "offer" (without the Grouping Models), "failed" or "ready". Until
   // they're ready, the pane for them shows `waiting`: the reading, the offer or the error.
@@ -154,8 +161,8 @@ export async function render(root, nav, result, duplicateGroups) {
   let choices = [];
   const left = new Set();
   let panels = new Map();
-  const summaryOf = (path) => grouping?.summaries[path] ?? fileName(path);
-  const kindOf = (path) => grouping?.kinds[path];
+  const summaryOf = (path) => grouping?.summaries[readAs.get(path) ?? path] ?? fileName(path);
+  const kindOf = (path) => grouping?.kinds[readAs.get(path) ?? path];
   const modifiedOf = (path) => modified.get(path);
   // The Plan's Emptied Folder Operations as last worked out, and the ones ticked, by ID.
   let emptied = [];
@@ -182,9 +189,10 @@ export async function render(root, nav, result, duplicateGroups) {
   // Set while the sidebar is redrawn, when moving the name field can blur it.
   let redrawing = false;
   // Set while the files are being read, and once Cancel was clicked then: the screen goes Home once
-  // the reading has stopped.
+  // the reading has stopped. Once Stop reading was clicked, the files read so far are grouped instead.
   let analysing = false;
   let cancelled = false;
+  let stopped = false;
   const move = (paths, to) => {
     for (const path of paths) moveFile(choices, left, path, to);
     selection = new Set();
@@ -529,6 +537,7 @@ export async function render(root, nav, result, duplicateGroups) {
   function duplicatesPanel() {
     if (duplicates.length === 0) return [el("h2", {}, "Duplicates"), el("p", { className: "note" }, "No file here is an exact copy of another.")];
     const trashed = duplicates.reduce((n, duplicate) => n + trashedCopies(duplicate), 0);
+    const leaving = duplicates.reduce((n, duplicate) => n + leftCopies(duplicate), 0);
     const freed = duplicates.reduce((sum, duplicate) => sum + duplicate.group.size * trashedCopies(duplicate), 0);
     const shown = Math.min(duplicates.length, duplicatesShown);
     const more = el("div", { className: "plan-more" });
@@ -538,7 +547,13 @@ export async function render(root, nav, result, duplicateGroups) {
     });
     return [
       el("h2", {}, "Duplicates"),
-      el("p", { className: "muted" }, `${count(trashed)} ${trashed === 1 ? "copy" : "copies"} to trash, of ${plural(duplicates.length, "file")} · ${formatSize(freed)} freed`),
+      el(
+        "p",
+        { className: "muted" },
+        `${count(trashed)} ${trashed === 1 ? "copy" : "copies"} to trash`,
+        leaving ? `, ${count(leaving)} left where ${leaving === 1 ? "it is" : "they are"}` : "",
+        `, of ${plural(duplicates.length, "file")} · ${formatSize(freed)} freed`,
+      ),
       el("ul", { className: "duplicate-groups", ariaLabel: "Duplicate Groups" }, ...duplicates.slice(0, shown).map(duplicateGroup)),
       more,
     ];
@@ -558,19 +573,44 @@ export async function render(root, nav, result, duplicateGroups) {
         el("span", { className: "duplicate-group-name", title: name }, name),
         el("span", { className: "muted" }, ` · ${count(group.copies.length)} copies · ${formatSize(group.size * trashedCopies(duplicate))} freed`),
       ),
-      el("ul", { className: "duplicate-copies" }, ...keeperFirst.map((copy) => duplicateCopy(copy, copies.get(copy.path), name))),
+      el("ul", { className: "duplicate-copies" }, ...keeperFirst.map((copy) => duplicateCopy(duplicate, copy, name))),
     );
   }
 
-  /** One copy of a Duplicate Group whose Keeper is named `name`: Keep or Trash, its folder, and its own name if it differs. */
-  function duplicateCopy(copy, fate, name) {
+  /**
+   * One copy of the Duplicate Group `duplicate`, whose Keeper is named `name`: Keep, Trash or Leave, its
+   * folder, and its own name if it differs. Keep makes it the Keeper, trashing the one before; the Keeper
+   * can't be trashed or left itself.
+   */
+  function duplicateCopy(duplicate, copy, name) {
+    const fate = duplicate.copies.get(copy.path);
     const { name: own, parent } = splitPath(copy.path, pathSeparator);
+    const segments = [
+      ["keeper", "Keep"],
+      ["trash", "Trash"],
+      ["leave", "Leave"],
+    ].map(([value, label]) => {
+      const segment = el(
+        "button",
+        { type: "button", role: "radio", className: "segment", ariaChecked: String(value === fate), disabled: fate === "keeper" && value !== "keeper" },
+        label,
+      );
+      segment.addEventListener("click", () => {
+        if (value === fate) return;
+        setCopy(duplicate, copy.path, value, choices, left);
+        drawPane();
+        // The copy's row is drawn again, maybe elsewhere in its group: the focus goes with it.
+        pane.querySelector(`[data-copy="${CSS.escape(copy.path)}"] .segment[aria-checked="true"]`)?.focus();
+      });
+      return segment;
+    });
     const row = el(
       "li",
-      { className: "duplicate-copy", tabIndex: 0 },
-      el("span", { className: `copy-mark ${fate}` }, fate === "keeper" ? "Keep" : "Trash"),
+      { className: `duplicate-copy ${fate}`, tabIndex: 0 },
+      el("div", { className: "segmented", role: "radiogroup", ariaLabel: `What to do with ${own}` }, ...segments),
       el("span", { className: "duplicate-copy-folder path", title: copy.path }, parent, own !== name ? el("span", { className: "muted" }, ` · ${own}`) : ""),
     );
+    row.dataset.copy = copy.path;
     row.addEventListener("contextmenu", (event) => {
       event.preventDefault();
       menu.open([copy.path], row, event);
@@ -796,23 +836,35 @@ export async function render(root, nav, result, duplicateGroups) {
     const progress = el("p", { className: "status" }, "Reading the files…");
     const bar = progressBar();
     const estimate = estimateLine();
-    waitFor("reading", [progress, bar.node, estimate.node, ...waitNote()]);
+    const stop = el("button", { type: "button", className: "small" }, "Stop reading");
+    stop.addEventListener("click", () => {
+      stopped = true;
+      stop.disabled = true;
+      showStatus(progress, "Stopping after this file…");
+      stopReading().catch((error) => showStatus(progress, describeError(error), true));
+    });
+    waitFor("reading", [progress, bar.node, estimate.node, el("p", {}, stop), ...waitNote()]);
     analysing = true;
     try {
       const analysis = await analyseLooseFiles((update) => {
-        if (cancelled) return;
+        if (cancelled || stopped) return;
+        // Every file is read by the last pass: stopping then would only skip it.
+        if (update.phase === "placing") stop.hidden = true;
         showStatus(progress, describeAnalysisProgress(update));
         // Moves back and forth while the models load, as nothing is read meanwhile.
         bar.set(update.finished, update.phase === "loading" ? 0 : update.total);
         estimate.update(update);
       });
       if (cancelled) return nav.home();
-      estimate.save();
-      notifyInBackground(`Folders are ready for ${rootName}`).catch(() => {});
+      // A stopped run says nothing of this computer's pace, and the user is there to see it end.
+      if (!stopped) {
+        estimate.save();
+        notifyInBackground(`Folders are ready for ${rootName}`).catch(() => {});
+      }
       ready(analysis);
     } catch (error) {
       if (cancelled) return nav.home();
-      notifyInBackground(`Couldn't finish reading ${rootName}`).catch(() => {});
+      if (!stopped) notifyInBackground(`Couldn't finish reading ${rootName}`).catch(() => {});
       waitFor("failed", [el("p", { className: "status error" }, describeError(error))]);
     } finally {
       analysing = false;
@@ -820,11 +872,12 @@ export async function render(root, nav, result, duplicateGroups) {
     }
   }
 
-  /** Fills in the Suggested Folders and the files left where they are, from the analysis. */
+  /** Fills in the Suggested Folders and the files left where they are, from the analysis, each Keeper picked meanwhile in the place of the copy read. */
   function ready(analysis) {
     grouping = analysis.grouping;
     choices = initialChoices(grouping.folders);
     for (const path of grouping.ungrouped) left.add(path);
+    placeKeepers(choices, left, duplicates);
     panels = new Map(choices.map((choice) => [choice, folderPanel(choice)]));
     folders = "ready";
     if (analysis.device) footer.replaceChildren(el("p", { className: "note" }, `Files read on ${analysis.device}.`));

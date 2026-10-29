@@ -58,10 +58,11 @@ struct Scanned {
     plan: Option<Plan>,
 }
 
-/// The cancel flag of the analysis running now, if any.
+/// The cancel and stop flags of the analysis running now, if any.
 #[derive(Default)]
 struct Analysing {
     cancel: Mutex<Arc<AtomicBool>>,
+    stop: Mutex<Arc<AtomicBool>>,
 }
 
 /// An error the UI can show: what went wrong and, for a config error,
@@ -402,7 +403,7 @@ struct AnalysisResult {
 /// for them by the config's grouping settings. Every copy of a Duplicate
 /// Group but its Keeper is left out, as it is trashed by default (ADR
 /// 0005). The models are loaded for this analysis only. `cancel_analysis`
-/// stops it.
+/// stops it; `stop_reading` ends its reading early and groups what was read.
 #[tauri::command]
 async fn analyse_loose_files(
     app: AppHandle,
@@ -411,9 +412,11 @@ async fn analyse_loose_files(
     models: State<'_, Arc<GroupingModels>>,
     on_progress: Channel<grouping::Progress>,
 ) -> Result<AnalysisResult, CommandError> {
-    // Set first, so a Cancel that comes in while starting stops this analysis.
+    // Set first, so a Cancel or Stop that comes in while starting stops this analysis.
     let cancel = Arc::new(AtomicBool::new(false));
     *analysing.cancel.lock().unwrap() = Arc::clone(&cancel);
+    let stop = Arc::new(AtomicBool::new(false));
+    *analysing.stop.lock().unwrap() = Arc::clone(&stop);
     let settings = read_config(&app)?.config.grouping;
     let scan = without_copies(&latest)?;
     let (llm, embedding) = models
@@ -433,7 +436,7 @@ async fn analyse_loose_files(
             tessdata: tessdata.as_deref(),
         };
         // A closed window can't receive progress; the analysis carries on.
-        grouping::analyse(&input, &mut models, &cancel, |progress| {
+        grouping::analyse(&input, &mut models, &cancel, &stop, |progress| {
             let _ = on_progress.send(progress);
         })
     })
@@ -449,6 +452,17 @@ async fn analyse_loose_files(
 fn cancel_analysis(analysing: State<'_, Analysing>) {
     analysing
         .cancel
+        .lock()
+        .unwrap()
+        .store(true, Ordering::Relaxed);
+}
+
+/// Ends the running analysis's reading between files: the files read so far
+/// are grouped and the rest are left where they are.
+#[tauri::command]
+fn stop_reading(analysing: State<'_, Analysing>) {
+    analysing
+        .stop
         .lock()
         .unwrap()
         .store(true, Ordering::Relaxed);
@@ -633,6 +647,7 @@ pub fn run() {
             answer_grouping_models_offer,
             analyse_loose_files,
             cancel_analysis,
+            stop_reading,
             clear_grouping_cards,
             reading_pace,
             save_reading_pace,

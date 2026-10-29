@@ -415,6 +415,8 @@ impl GroupingModels {
 /// The file's SHA-256 in lower-case hex, or None if pause or cancel was
 /// asked for while reading it.
 fn sha256(path: &Path, asked: &AtomicU8) -> io::Result<Option<String>> {
+    // A model file in the app's own data folder; no path comes from a web request.
+    // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
     let mut file = File::open(path)?;
     let mut hasher = Sha256::new();
     let mut buffer = vec![0; 1024 * 1024];

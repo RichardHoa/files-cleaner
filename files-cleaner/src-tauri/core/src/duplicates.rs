@@ -231,6 +231,8 @@ fn keeper_order(a: &ScanEntry, b: &ScanEntry, by_created: bool) -> Ordering {
 
 /// A hash of the file's first and last `PARTIAL_BYTES`.
 fn partial_hash(path: &Path, size: u64) -> io::Result<[u8; 32]> {
+    // A file in the Scan Root the user chose; no path comes from a web request.
+    // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
     let mut file = File::open(path)?;
     let mut hasher = blake3::Hasher::new();
     let mut buffer = vec![0; PARTIAL_BYTES.min(size) as usize];
@@ -249,6 +251,8 @@ fn partial_hash(path: &Path, size: u64) -> io::Result<[u8; 32]> {
 
 /// A hash of the whole file, calling `on_read` with the bytes of each chunk read.
 fn full_hash(path: &Path, mut on_read: impl FnMut(u64)) -> io::Result<[u8; 32]> {
+    // A file in the Scan Root the user chose; no path comes from a web request.
+    // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
     let mut file = File::open(path)?;
     let mut hasher = blake3::Hasher::new();
     let mut buffer = vec![0; FULL_HASH_CHUNK];

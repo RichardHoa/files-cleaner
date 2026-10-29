@@ -175,6 +175,8 @@ pub struct Analysis {
     vectors: Vec<Vector>,
     /// The loose files of each kind that is never read, scanned PDFs among them.
     fixed: BTreeMap<&'static str, Vec<PathBuf>>,
+    /// The loose files left unread because reading was stopped.
+    unread: Vec<PathBuf>,
     subfolders: Vec<Subfolder>,
     /// What the LLM answered for each placing question, by its prompt: the
     /// folder's label, or none.
@@ -214,13 +216,16 @@ const EMBED_CHUNK: usize = 16;
 /// (or takes their stored cards), groups them by `input.settings`, and has
 /// `models` place the files left out (or takes the stored answers). Cards
 /// and answers are stored as they're made, so a cancelled analysis keeps them.
-/// `cancel` is checked between files; `on_progress` is called at most every
-/// `PROGRESS_INTERVAL` in each `Phase`, before the models load, and once at
-/// the end of reading.
+/// `cancel` is checked between files. Once `stop` is set, reading ends
+/// between files and the files read so far are grouped: the files not read
+/// are left where they are, and only stored answers place files left out.
+/// `on_progress` is called at most every `PROGRESS_INTERVAL` in each
+/// `Phase`, before the models load, and once at the end of reading.
 pub fn analyse(
     input: &Input,
     models: &mut dyn Models,
     cancel: &AtomicBool,
+    stop: &AtomicBool,
     mut on_progress: impl FnMut(Progress),
 ) -> Result<Analysis, Stopped> {
     let scan = input.scan;
@@ -244,7 +249,7 @@ pub fn analyse(
         }
     }
     // The files nearest each subfolder's top, so a deep tree doesn't crowd it out.
-    let samples: Vec<(&str, Vec<&ScanEntry>)> = inside
+    let mut samples: Vec<(&str, Vec<&ScanEntry>)> = inside
         .into_iter()
         .map(|(folder, mut entries)| {
             entries.sort_by(|a, b| {
@@ -291,6 +296,7 @@ pub fn analyse(
         .iter()
         .zip(&stored)
         .find(|(_, (_, found))| found.is_none())
+        .filter(|_| !stop.load(Ordering::Relaxed))
     {
         on_progress(Progress {
             finished: 0,
@@ -305,6 +311,9 @@ pub fn analyse(
     for (entry, (hash, found)) in all.iter().zip(stored.iter_mut()) {
         if cancel.load(Ordering::Relaxed) {
             return Err(Stopped::Cancelled);
+        }
+        if stop.load(Ordering::Relaxed) {
+            break;
         }
         let name = &entry.name;
         if let Some(found) = found {
@@ -368,15 +377,33 @@ pub fn analyse(
     }
     if let Some(last) = all.last().filter(|_| total > 0) {
         on_progress(Progress {
-            finished: total,
+            finished,
             total,
             current: last.path.clone(),
             phase: Phase::Reading,
         });
     }
+    // Stopped early: the loose files not read stay where they are, and a
+    // subfolder is described by those of its files that were read.
+    // One flag per file of `all`: `to_read`'s files first, then each subfolder's sample.
+    let read: Vec<bool> = stored.iter().map(|(_, found)| found.is_some()).collect();
+    let mut unread = Vec::new();
+    let mut flags = read.iter();
+    to_read.retain(|entry| {
+        let was_read = *flags.next().unwrap();
+        if !was_read {
+            unread.push(entry.path.clone());
+        }
+        was_read
+    });
+    for (_, sample) in &mut samples {
+        sample.retain(|_| *flags.next().unwrap());
+    }
+    let mut flags = read.iter();
+    all.retain(|_| *flags.next().unwrap());
     let mut stored: Vec<(Option<blake3::Hash>, Stored)> = stored
         .into_iter()
-        .map(|(hash, found)| (hash, found.expect("every file has a card by now")))
+        .filter_map(|(hash, found)| Some((hash, found?)))
         .collect();
     if cancel.load(Ordering::Relaxed) {
         return Err(Stopped::Cancelled);
@@ -482,6 +509,7 @@ pub fn analyse(
         cards,
         vectors,
         fixed,
+        unread,
         subfolders,
         answers: HashMap::new(),
     };
@@ -506,6 +534,8 @@ pub fn analyse(
         let started = Instant::now();
         let name = &question.file_name;
         let answer = match input.store.get_answer(&card_id, prompt) {
+            // Once stopped, the model isn't asked: the file stays where it is.
+            None if stop.load(Ordering::Relaxed) => continue,
             Some(saved) => {
                 trace::time(&format!(
                     "placing {name}: saved answer, {}\n",
@@ -726,6 +756,7 @@ impl Analysis {
                 .filter(|i| !placed.contains_key(i))
                 .map(|&i| self.files[i].clone()),
         );
+        ungrouped.extend(self.unread.iter().cloned());
         if trace::enabled() {
             let similarity = |i: usize, j: usize| {
                 cluster::similarity(&self.vectors[i], &self.vectors[j], same_topic(i, j))

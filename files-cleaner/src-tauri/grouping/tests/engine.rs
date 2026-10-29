@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::Path;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use files_cleaner_core::{load_config, scan};
 use files_cleaner_grouping::{
@@ -85,7 +85,14 @@ fn three_files_on_one_topic_make_one_suggested_folder() {
         pdfium: None,
         tessdata: None,
     };
-    let analysis = analyse(&input, &mut FakeModels, &AtomicBool::new(false), |_| {}).unwrap();
+    let analysis = analyse(
+        &input,
+        &mut FakeModels,
+        &AtomicBool::new(false),
+        &AtomicBool::new(false),
+        |_| {},
+    )
+    .unwrap();
 
     let grouping = &analysis.grouping;
     assert_eq!(grouping.folders.len(), 1);
@@ -199,6 +206,7 @@ fn topics_sharing_a_mark_group_and_a_named_archive_joins_them() {
         &input,
         &mut TopicModels { embedded: 0 },
         &AtomicBool::new(false),
+        &AtomicBool::new(false),
         |_| {},
     )
     .unwrap();
@@ -252,7 +260,14 @@ fn a_cleared_store_reads_every_file_again() {
         tessdata: None,
     };
     let embedded = |models: &mut TopicModels| {
-        analyse(&input, models, &AtomicBool::new(false), |_| {}).unwrap();
+        analyse(
+            &input,
+            models,
+            &AtomicBool::new(false),
+            &AtomicBool::new(false),
+            |_| {},
+        )
+        .unwrap();
         std::mem::take(&mut models.embedded)
     };
     let mut models = TopicModels { embedded: 0 };
@@ -300,6 +315,7 @@ fn a_file_left_out_goes_where_the_model_places_it_and_stays_there_on_regroup() {
         &input,
         &mut TopicModels { embedded: 0 },
         &AtomicBool::new(false),
+        &AtomicBool::new(false),
         |_| {},
     )
     .unwrap();
@@ -320,4 +336,100 @@ fn a_file_left_out_goes_where_the_model_places_it_and_stays_there_on_regroup() {
         assert_eq!(names, ["collocations.txt", "speaking.txt", "writing.txt"]);
         assert_eq!(grouping.ungrouped, [scan.root.join("recipe.txt")]);
     }
+}
+
+/// Cards as `FakeModels` writes them, setting `stop` once `left` more are written.
+struct StopAfter<'a> {
+    stop: &'a AtomicBool,
+    left: usize,
+}
+
+impl Models for StopAfter<'_> {
+    fn card_model_id(&self) -> String {
+        FakeModels.card_model_id()
+    }
+
+    fn embedding_model_id(&self) -> String {
+        FakeModels.embedding_model_id()
+    }
+
+    fn card(&mut self, content: &Content) -> Result<Card, String> {
+        self.left -= 1;
+        if self.left == 0 {
+            self.stop.store(true, Ordering::Relaxed);
+        }
+        FakeModels.card(content)
+    }
+
+    fn embed(&mut self, texts: &[String]) -> Result<Vec<Vector>, String> {
+        FakeModels.embed(texts)
+    }
+
+    fn place(&mut self, question: &Question) -> Result<Option<usize>, String> {
+        FakeModels.place(question)
+    }
+
+    fn device(&self) -> Option<String> {
+        FakeModels.device()
+    }
+}
+
+#[test]
+fn stopping_groups_the_files_read_so_far_and_leaves_the_rest_where_they_are() {
+    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("test-tmp");
+    fs::create_dir_all(&base).unwrap();
+    let dir = tempfile::Builder::new()
+        .prefix("scan-")
+        .tempdir_in(&base)
+        .unwrap();
+    let root = dir.path();
+    for name in ["a.txt", "b.txt", "c.txt", "d.txt"] {
+        fs::write(root.join(name), format!("{name}: a lecture on sorting")).unwrap();
+    }
+    let store_dir = tempfile::tempdir().unwrap();
+    let config = load_config(r#"{ "rules": [] }"#, root).unwrap();
+    let scan = scan(root, &config).unwrap();
+    let store = CardStore::open(store_dir.path());
+    let input = Input {
+        scan: &scan,
+        settings: Settings::default(),
+        store: &store,
+        pdfium: None,
+        tessdata: None,
+    };
+    let stop = AtomicBool::new(false);
+
+    let analysis = analyse(
+        &input,
+        &mut StopAfter {
+            stop: &stop,
+            left: 2,
+        },
+        &AtomicBool::new(false),
+        &stop,
+        |_| {},
+    )
+    .unwrap();
+
+    let grouping = &analysis.grouping;
+    let read: Vec<_> = grouping.summaries.keys().collect();
+    assert_eq!(read.len(), 2);
+    let mut unread: Vec<_> = scan
+        .entries
+        .iter()
+        .map(|e| &e.path)
+        .filter(|p| !read.contains(p))
+        .collect();
+    unread.sort();
+    let left: Vec<_> = grouping
+        .ungrouped
+        .iter()
+        .filter(|p| !read.contains(p))
+        .collect();
+    assert_eq!(left, unread);
+    assert!(grouping
+        .folders
+        .iter()
+        .flat_map(|f| &f.files)
+        .all(|p| read.contains(&p)));
 }

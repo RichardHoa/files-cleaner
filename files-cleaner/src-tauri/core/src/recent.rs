@@ -74,6 +74,8 @@ pub fn remove_recent_scan_root(store: &Path, scan_root: &Path) -> io::Result<()>
 }
 
 fn read(store: &Path) -> Vec<Stored> {
+    // The app's own store file; no path comes from a web request.
+    // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
     fs::read(store)
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())

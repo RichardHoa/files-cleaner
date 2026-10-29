@@ -130,6 +130,9 @@ export function analyseLooseFiles(onProgress) {
 /** Stops the running analysis; the files read so far aren't read again next time. */
 export const cancelAnalysis = () => invoke("cancel_analysis");
 
+/** Ends the running analysis's reading between files: `analyseLooseFiles` then resolves with the files read so far grouped and the rest left where they are. */
+export const stopReading = () => invoke("stop_reading");
+
 /** Forgets what the Grouping Models said about every file, so the next analysis reads them all again. */
 export const clearGroupingCards = () => invoke("clear_grouping_cards");
 

@@ -1,14 +1,14 @@
 // What the user chose on the review screen, and what that does to the files: for each Duplicate Group,
-// which copy stays and which are trashed; for each Suggested Folder, where it goes and what happens to
-// each of its files. A folder's choice is "addTo" (into the existing subfolder it matched), "createHere"
-// (a new folder in the Scan Root), "createIn" (a new folder inside `elsewhere`, a folder the user
-// picked), "trashAll" or "skip"; each of its files is "inFolder" (goes wherever the folder's choice
-// sends it), "trash" or "takeOut".
+// which copy stays, which are trashed and which are left where they are; for each Suggested Folder,
+// where it goes and what happens to each of its files. A folder's choice is "addTo" (into the existing
+// subfolder it matched), "createHere" (a new folder in the Scan Root), "createIn" (a new folder inside
+// `elsewhere`, a folder the user picked), "trashAll" or "skip"; each of its files is "inFolder" (goes
+// wherever the folder's choice sends it), "trash" or "takeOut".
 
 /**
  * The starting choice for each Duplicate Group of `groups` (`{ size, copies }`, as `findDuplicates` gives
  * them): its first copy, the default Keeper, stays, and every other copy is trashed. Each copy is
- * "keeper" or "trash", by path.
+ * "keeper", "trash" or "leave" (it stays where it is, in no folder), by path.
  */
 export function initialDuplicates(groups) {
   return groups.map((group) => ({
@@ -19,6 +19,41 @@ export function initialDuplicates(groups) {
 
 /** How many copies of the Duplicate Group `duplicate` are trashed. */
 export const trashedCopies = (duplicate) => [...duplicate.copies.values()].filter((fate) => fate === "trash").length;
+
+/** How many copies of the Duplicate Group `duplicate` are left where they are. */
+export const leftCopies = (duplicate) => [...duplicate.copies.values()].filter((fate) => fate === "leave").length;
+
+/** The path of the Keeper of the Duplicate Group `duplicate`. */
+const keeperOf = (duplicate) => [...duplicate.copies].find(([, fate]) => fate === "keeper")[0];
+
+/** Puts the file `to` wherever `from` is among `choices` and the Set `left`, with the same choice and in the same place in its folder. */
+function replaceFile(choices, left, from, to) {
+  for (const choice of choices) {
+    if (!choice.files.has(from)) continue;
+    choice.files = new Map([...choice.files].map(([path, file]) => [path === from ? to : path, file]));
+  }
+  if (left.delete(from)) left.add(to);
+}
+
+/**
+ * Sets the copy at `path` of the Duplicate Group `duplicate` to `fate`. A new Keeper takes the old one's
+ * place among `choices` and the files `left` where they are, needing no reading as it's the same, and the
+ * old Keeper is trashed. The Keeper itself can only change by making another copy the Keeper.
+ */
+export function setCopy(duplicate, path, fate, choices, left) {
+  const keeper = keeperOf(duplicate);
+  if (path === keeper) return;
+  if (fate === "keeper") {
+    duplicate.copies.set(keeper, "trash");
+    replaceFile(choices, left, keeper, path);
+  }
+  duplicate.copies.set(path, fate);
+}
+
+/** Puts each Keeper of `duplicates` the user picked while the files were read where the copy read for it was placed: its first copy. */
+export function placeKeepers(choices, left, duplicates) {
+  for (const duplicate of duplicates) replaceFile(choices, left, duplicate.group.copies[0].path, keeperOf(duplicate));
+}
 
 /** `duplicates` as `buildReviewPlan` takes them: each group's Keeper and the copies it trashes. */
 export function planDuplicates(duplicates) {

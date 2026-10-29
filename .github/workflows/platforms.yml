@@ -24,7 +24,7 @@ jobs:
         os: [windows-latest, ubuntu-24.04, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Linux packages (Tauri, Vulkan and SPIR-V headers, shader compiler)
         if: runner.os == 'Linux'
@@ -38,7 +38,7 @@ jobs:
       # Sets VULKAN_SDK. The runtime brings vulkan-1.dll, which build.rs bundles.
       - name: Install the Vulkan SDK and runtime
         if: runner.os == 'Windows'
-        uses: jakoch/install-vulkan-sdk-action@v1
+        uses: jakoch/install-vulkan-sdk-action@d17de7e2f5e50efb5d2123efed18497d3c58c533 # v1
         with:
           vulkan_version: latest
           install_runtime: true
@@ -55,7 +55,7 @@ jobs:
       # Visual Studio generator its shader tool fails with C1041 (a PDB clash).
       - name: Set up the MSVC command line for Ninja
         if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
 
       - name: Build with Ninja
         if: runner.os == 'Windows'
@@ -74,15 +74,15 @@ jobs:
           New-Item -ItemType Junction -Path D:\t -Target $target.FullName
           "CARGO_TARGET_DIR=D:\t" >> $env:GITHUB_ENV
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: lts/*
           cache: npm
           cache-dependency-path: files-cleaner/package-lock.json
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: files-cleaner/src-tauri -> target
 
@@ -106,7 +106,7 @@ jobs:
         working-directory: files-cleaner
         run: npm run tauri build
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: bundle-${{ matrix.os }}
           path: files-cleaner/src-tauri/target/release/bundle/
@@ -119,13 +119,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: bundle-*
 
       # The installers only: the .app inside the macOS bundle is a folder,
       # which the .dmg already carries.
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           generate_release_notes: true
           fail_on_unmatched_files: true
