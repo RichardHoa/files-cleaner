@@ -3,10 +3,11 @@
 // Folders, and the pane beside it lists the one picked. The Duplicate Groups show at once. The loose
 // files are read in the background meanwhile, which needs the Grouping Models (without them, they're
 // offered in the Suggested Folders' place), and the Suggested Folders are filled in once that's done.
-// Files are selected as in Finder, then moved by dragging them onto a folder in the sidebar, from their
-// right-click menu, or with "Move to…". Approve waits for the reading, which can be stopped early to group
-// only what was read, then runs the whole Plan as one Session; Cancel stops the reading and goes Home with
-// nothing changed.
+// The copies are trashed from the Duplicates pane, as a Session of their own, without waiting for the
+// reading. Files are selected as in Finder, then moved by dragging them onto a folder in the sidebar, from
+// their right-click menu, or with "Move to…". The header's button waits for the reading, which can be
+// stopped early to group only what was read, then runs the rest of the Plan as one Session; Cancel stops
+// the reading and goes Home, leaving whatever was already run.
 import {
   analyseLooseFiles,
   answerNotifications,
@@ -177,6 +178,11 @@ export async function render(root, nav, result, duplicateGroups) {
   let selection = new Set();
   let anchor = null;
   let duplicatesShown = FILES_SHOWN;
+  // What trashing the copies did, once it's done, and whether a Session is running.
+  let duplicatesDone = null;
+  let running = false;
+  /** The Duplicate Groups as the rest of the Plan is built with: once their copies are trashed, so the folders they leave empty are offered. */
+  const doneDuplicates = () => (duplicatesDone ? planDuplicates(duplicates) : []);
   const sidebar = el("nav", { className: "folder-sidebar", ariaLabel: "Plan" });
   const pane = el("section", { className: "folder-pane" });
   const selectionBar = el("div", { className: "selection-bar", hidden: true });
@@ -221,22 +227,24 @@ export async function render(root, nav, result, duplicateGroups) {
   });
   const status = el("p", { className: "status" });
   const drawHeader = () => {
-    const { moved, trashed } = totals(choices, duplicates);
+    const { moved, trashed } = totals(choices);
     const n = moved + trashed;
-    heading.textContent = n ? `${plural(n, "file")} will move` : "Nothing will change";
     if (folders === "reading") {
+      heading.textContent = rootName;
       run.textContent = "Waiting for folders…";
       run.disabled = true;
       return;
     }
+    heading.textContent = n ? `${plural(n, "file")} will move` : "Nothing will change";
     run.textContent = n ? `Move ${plural(n, "file")}` : "Nothing to move";
-    run.disabled = n === 0 || choices.some(nameMissing);
+    run.disabled = running || n === 0 || choices.some(nameMissing);
   };
 
   run.addEventListener("click", async () => {
     clearTimeout(emptiedTimer);
+    running = true;
     const session = await busy(status, [run, cancel], "Planning…", async () => {
-      const plan = await buildReviewPlan(planDuplicates(duplicates), planChoices(choices));
+      const plan = await buildReviewPlan(doneDuplicates(), planChoices(choices));
       const blocked = plan.operations.filter((op) => op.error && op.reason.type === "suggestedFolder");
       if (blocked.length > 0) {
         const { reason, error } = blocked[0];
@@ -244,14 +252,33 @@ export async function render(root, nav, result, duplicateGroups) {
           `${plural(blocked.length, "file")} can't be moved into “${reason.folder}”: ${error}. Choose another place for that folder, or skip it.`,
         );
       }
+      // The trashed copies are only there to work out the Emptied Folders: they were run already.
       const approved = plan.operations
-        .filter((op) => (op.reason.type === "emptiedFolder" ? emptiedTicked.has(op.id) && !op.error : op.ticked))
+        .filter((op) => (op.reason.type === "emptiedFolder" ? emptiedTicked.has(op.id) && !op.error : op.ticked && op.reason.type !== "duplicate"))
         .map((op) => op.id);
       return runPlan(approved, (progress) => showStatus(status, describeRunProgress(progress)));
     });
+    running = false;
     if (session) nav.session(session.sessionId, null, describeSummary(session, "moved"));
     else drawHeader();
   });
+
+  /** Trashes the copies marked Trash as a Session of their own, leaving the rest of the Plan to review. */
+  async function trashDuplicates(button) {
+    running = true;
+    const summary = await busy(status, [button, run, cancel], "Trashing the copies…", async () => {
+      const plan = await buildReviewPlan(planDuplicates(duplicates), []);
+      const approved = plan.operations.filter((op) => op.reason.type === "duplicate" && op.ticked).map((op) => op.id);
+      return runPlan(approved, (progress) => showStatus(status, describeRunProgress(progress)));
+    });
+    running = false;
+    if (summary) {
+      duplicatesDone = summary;
+      showStatus(status, "");
+    }
+    if (current === "duplicates") drawPane();
+    else changed();
+  }
 
   // The Emptied Folders depend on everything the Plan moves, so they are worked out by the backend again
   // a moment after each change. Only the latest answer counts.
@@ -263,7 +290,7 @@ export async function render(root, nav, result, duplicateGroups) {
       if (!pane.isConnected) return;
       const asked = ++emptiedAsked;
       try {
-        const plan = await previewReviewPlan(planDuplicates(duplicates), planChoices(choices));
+        const plan = await previewReviewPlan(doneDuplicates(), planChoices(choices));
         if (asked !== emptiedAsked || !pane.isConnected) return;
         emptied = plan.operations.filter((op) => op.reason.type === "emptiedFolder");
         const ids = new Set(emptied.map((op) => op.id));
@@ -336,7 +363,13 @@ export async function render(root, nav, result, duplicateGroups) {
     const typing = renaming?.node.contains(document.activeElement);
     redrawing = true;
     sidebar.replaceChildren(
-      sidebarItem("duplicates", "Duplicates", duplicates.reduce((n, duplicate) => n + trashedCopies(duplicate), 0), "", "copies"),
+      sidebarItem(
+        "duplicates",
+        "Duplicates",
+        duplicatesDone ? null : duplicates.reduce((n, duplicate) => n + trashedCopies(duplicate), 0),
+        "",
+        "copies",
+      ),
       el("hr", { className: "folder-sidebar-divider" }),
       ...(folders === "ready"
         ? [sidebarItem("left", "Left where they are", left.size), ...choices.map(choiceItem)]
@@ -531,11 +564,19 @@ export async function render(root, nav, result, duplicateGroups) {
   }
 
   /**
-   * The Duplicate Groups, each with its name, how many copies and the space freed, then every copy in its
-   * folder, the Keeper first. A copy's right-click menu shows it in the file manager.
+   * The Duplicate Groups, each with its name, how many copies and the space freed, then every copy, the
+   * Keeper first, with a button trashing the copies marked Trash; once that's done, what it did. A copy's
+   * right-click menu shows it in the file manager.
    */
   function duplicatesPanel() {
     if (duplicates.length === 0) return [el("h2", {}, "Duplicates"), el("p", { className: "note" }, "No file here is an exact copy of another.")];
+    if (duplicatesDone) {
+      return [
+        el("h2", {}, "Duplicates"),
+        el("p", {}, describeSummary(duplicatesDone, "trashed")),
+        el("p", { className: "note" }, "You can undo it from History."),
+      ];
+    }
     const trashed = duplicates.reduce((n, duplicate) => n + trashedCopies(duplicate), 0);
     const leaving = duplicates.reduce((n, duplicate) => n + leftCopies(duplicate), 0);
     const freed = duplicates.reduce((sum, duplicate) => sum + duplicate.group.size * trashedCopies(duplicate), 0);
@@ -545,8 +586,10 @@ export async function render(root, nav, result, duplicateGroups) {
       duplicatesShown = limit;
       drawPane();
     });
+    const trash = el("button", { type: "button", disabled: running || trashed === 0 }, trashed ? `Trash ${count(trashed)} ${trashed === 1 ? "copy" : "copies"}` : "Nothing to trash");
+    trash.addEventListener("click", () => trashDuplicates(trash));
     return [
-      el("h2", {}, "Duplicates"),
+      el("div", { className: "duplicates-head" }, el("h2", {}, "Duplicates"), trash),
       el(
         "p",
         { className: "muted" },
@@ -573,18 +616,17 @@ export async function render(root, nav, result, duplicateGroups) {
         el("span", { className: "duplicate-group-name", title: name }, name),
         el("span", { className: "muted" }, ` · ${count(group.copies.length)} copies · ${formatSize(group.size * trashedCopies(duplicate))} freed`),
       ),
-      el("ul", { className: "duplicate-copies" }, ...keeperFirst.map((copy) => duplicateCopy(duplicate, copy, name))),
+      el("ul", { className: "duplicate-copies" }, ...keeperFirst.map((copy) => duplicateCopy(duplicate, copy))),
     );
   }
 
   /**
-   * One copy of the Duplicate Group `duplicate`, whose Keeper is named `name`: Keep, Trash or Leave, its
-   * folder, and its own name if it differs. Keep makes it the Keeper, trashing the one before; the Keeper
-   * can't be trashed or left itself.
+   * One copy of the Duplicate Group `duplicate`: Keep, Trash or Leave, then its name, with its full path
+   * on hover. Keep makes it the Keeper, trashing the one before; the Keeper can't be trashed or left itself.
    */
-  function duplicateCopy(duplicate, copy, name) {
+  function duplicateCopy(duplicate, copy) {
     const fate = duplicate.copies.get(copy.path);
-    const { name: own, parent } = splitPath(copy.path, pathSeparator);
+    const own = fileName(copy.path);
     const segments = [
       ["keeper", "Keep"],
       ["trash", "Trash"],
@@ -608,7 +650,7 @@ export async function render(root, nav, result, duplicateGroups) {
       "li",
       { className: `duplicate-copy ${fate}`, tabIndex: 0 },
       el("div", { className: "segmented", role: "radiogroup", ariaLabel: `What to do with ${own}` }, ...segments),
-      el("span", { className: "duplicate-copy-folder path", title: copy.path }, parent, own !== name ? el("span", { className: "muted" }, ` · ${own}`) : ""),
+      el("span", { className: "duplicate-copy-name", title: copy.path }, own),
     );
     row.dataset.copy = copy.path;
     row.addEventListener("contextmenu", (event) => {

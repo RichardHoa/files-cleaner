@@ -295,7 +295,15 @@
   margin-bottom: var(--space-2);
 }
 
-/* A Duplicate Group: its name and totals, then each copy under it with Keep or Trash before its folder. */
+/* The Duplicates pane's heading, with the button trashing the copies beside it. */
+.duplicates-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+/* A Duplicate Group: its name and totals, then each copy under it with Keep, Trash or Leave before its name. */
 .duplicate-groups {
   list-style: none;
   margin: var(--space-2) 0 0;
@@ -347,11 +355,11 @@
   padding: 0 var(--space-2);
 }
 
-.duplicate-copy.trash .duplicate-copy-folder {
+.duplicate-copy.trash .duplicate-copy-name {
   color: var(--muted);
 }
 
-.duplicate-copy-folder {
+.duplicate-copy-name {
   min-width: 0;
   overflow-wrap: anywhere;
 }
