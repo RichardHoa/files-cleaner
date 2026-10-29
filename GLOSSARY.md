@@ -44,9 +44,17 @@ _Avoid_: bundle
 A set of two or more files with byte-identical contents, regardless of name or location.
 _Avoid_: dupes, clones
 
-**Keeper**:
-The one file in a Duplicate Group that stays: by default the newest, judged by modified date, then created date, then shortest path. The user can make any other copy in the group the Keeper instead.
-_Avoid_: original, master copy, oldest
+**Kept Copy**:
+A copy in a Duplicate Group that stays. Every copy is either kept or trashed, and any number of copies may be kept, none included.
+_Avoid_: Keeper, original, master copy
+
+**Filed Copy**:
+The one Kept Copy of a Duplicate Group that is sorted into Suggested Folders like any other file; the group's other Kept Copies stay where they are.
+_Avoid_: Keeper, primary copy
+
+**Default Copy Rule**:
+The setting that picks which copy of a Duplicate Group starts out kept: the newest, the oldest, or the one with the shortest path. Every other copy starts out trashed.
+_Avoid_: keeper rule, preference
 
 ### Planning
 
@@ -63,7 +71,7 @@ One atomic file-system change: Move (possibly under a new name, when a Rule rena
 _Avoid_: action, step, task
 
 **Reason**:
-Why the Plan proposes an Operation: a **Duplicate** (naming the Keeper it leaves in place), a **Suggested Folder** (naming that folder), a **Rule** (naming that Rule) or an **Emptied Folder** (every item in it leaves, so the folder itself is offered for Trash, unticked). The Plan is grouped by Reason. Why an Operation was skipped or failed is not a Reason: that is its Note.
+Why the Plan proposes an Operation: a **Duplicate** (naming a Kept Copy it leaves in place, if any), a **Suggested Folder** (naming that folder), a **Rule** (naming that Rule) or an **Emptied Folder** (every item in it leaves, so the folder itself is offered for Trash, unticked). The Plan is grouped by Reason. Why an Operation was skipped or failed is not a Reason: that is its Note.
 _Avoid_: cause, source, explanation
 
 **Note**:
@@ -85,7 +93,7 @@ _Avoid_: Finder-style suffix, copy suffix
 ### Grouping
 
 **Suggested Folder**:
-A set of similar files the tool proposes to gather into one folder, under a name it suggests. The user creates it in the Scan Root (the default) or somewhere else they pick, trashes all its files, or skips it. They can also trash single files in it, or take single files out of it so they stay where they are. A Suggested Folder always has a name: leaving the name empty never means "trash".
+A folder the Plan gathers files into: proposed by the tool from similar files, or added by the user. It goes into the existing folder it matched, a new folder in the Scan Root (the default) or somewhere else the user picks, or all its files are trashed. The user can merge one into another, or remove it, which leaves its files where they are. A Suggested Folder always has a name: leaving the name empty never means "trash".
 _Avoid_: cluster, group, category, proposed folder
 
 **Grouping Models**:

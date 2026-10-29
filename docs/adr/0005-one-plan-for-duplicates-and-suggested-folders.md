@@ -11,3 +11,4 @@ The duplicate step and the Suggested Folders step are reviewed on one screen, ap
 - Replaces `pipeline/02`'s rule that grouping never uses the scan from before the duplicate Session.
 - Undoing only the duplicates, or only the folder moves, now goes through per-Operation Undo; History shows one Session.
 - Changing the Keeper after reading needs no new reading, as the copies are byte-identical: the new Keeper takes the old one's place.
+- The single Keeper and the "leave" choice for copies are replaced by Kept Copies and the Filed Copy: see ADR 0007.
