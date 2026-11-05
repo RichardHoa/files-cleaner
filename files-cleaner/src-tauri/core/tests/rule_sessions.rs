@@ -4,11 +4,11 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-use common::{config, scan_root, write};
-use files_cleaner_core::{
-    build_rule_plan, list_sessions, redo_operations, run, scan, undo, undo_operations,
-    OperationKind, Plan, SessionStatus,
+use common::{
+    build_rule_plan, config, journal_dir, redo_operations, run, scan_root, undo, undo_operations,
+    write,
 };
+use files_cleaner_core::{list_sessions, scan, OperationKind, Plan, SessionStatus};
 use tempfile::TempDir;
 
 /// Every file and folder under `root` (relative, `/`-separated), with each
@@ -81,7 +81,7 @@ fn read(root: &Path, relative: &str) -> String {
 #[test]
 fn run_creates_folders_moves_and_renames_and_undo_restores_the_original_tree() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let before = snapshot(dir.path());
     let plan = plan_for(dir.path());
 
@@ -95,8 +95,11 @@ fn run_creates_folders_moves_and_renames_and_undo_restores_the_original_tree() {
     assert_eq!(read(dir.path(), "Study/Slides/old talk.pptx"), "talk");
     assert_eq!(read(dir.path(), "Study/Slides/old lecture.pptx"), "lecture");
     assert!(!dir.path().join("talk.pptx").exists() && !dir.path().join("setup.dmg").exists());
-    let held = format!("Files Cleaner Trash/{}/setup.dmg", summary.session_id);
-    assert_eq!(read(dir.path(), &held), "installer");
+    let trashed = summary.done.iter().find(|o| o.kind == OperationKind::Trash);
+    assert_eq!(
+        fs::read_to_string(trashed.unwrap().destination.as_ref().unwrap()).unwrap(),
+        "installer"
+    );
 
     let undone = undo(&summary.session_id, journal.path()).unwrap();
 
@@ -115,7 +118,7 @@ fn run_creates_folders_moves_and_renames_and_undo_restores_the_original_tree() {
 #[test]
 fn undo_leaves_a_created_folder_that_is_no_longer_empty() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let plan = plan_for(dir.path());
     let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
     write(dir.path(), "Study/Slides/mine.txt", "added since");
@@ -131,7 +134,7 @@ fn undo_leaves_a_created_folder_that_is_no_longer_empty() {
     let skipped: Vec<_> = undone
         .skipped
         .iter()
-        .map(|o| o.destination.clone())
+        .map(|o| o.destination.clone().unwrap())
         .collect();
     let root = &plan.root;
     assert_eq!(skipped, [root.join("Study/Slides"), root.join("Study")]);
@@ -147,7 +150,7 @@ fn undo_leaves_a_created_folder_that_is_no_longer_empty() {
 #[test]
 fn a_destination_taken_after_planning_gets_a_new_clash_suffix_at_run_time() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let plan = plan_for(dir.path());
     write(dir.path(), "Study/Slides/OLD TALK.pptx", "got there first");
 
@@ -177,7 +180,7 @@ fn a_destination_taken_after_planning_gets_a_new_clash_suffix_at_run_time() {
 #[test]
 fn a_move_into_a_folder_whose_creation_was_unticked_is_skipped() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let plan = plan_for(dir.path());
 
     let summary = run(
@@ -210,7 +213,7 @@ fn a_move_into_a_folder_whose_creation_was_unticked_is_skipped() {
 #[test]
 fn undo_never_overwrites_a_file_now_at_a_moved_files_original_location() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let plan = plan_for(dir.path());
     let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
     write(dir.path(), "talk.pptx", "a new talk");
@@ -235,7 +238,7 @@ fn undo_never_overwrites_a_file_now_at_a_moved_files_original_location() {
 #[test]
 fn undo_reports_a_moved_file_that_is_gone_as_unrecoverable() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let plan = plan_for(dir.path());
     let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
     fs::remove_file(dir.path().join("Study/Slides/old talk.pptx")).unwrap();
@@ -254,7 +257,7 @@ fn undo_reports_a_moved_file_that_is_gone_as_unrecoverable() {
 #[test]
 fn redo_moves_and_renames_again_after_undo() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let plan = plan_for(dir.path());
     let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
     undo(&summary.session_id, journal.path()).unwrap();

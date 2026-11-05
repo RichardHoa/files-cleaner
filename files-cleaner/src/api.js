@@ -12,7 +12,7 @@ const appWindow = window.__TAURI__.window;
 export const pathSeparator = window.__TAURI__.path.sep();
 
 /**
- * The config: `{ path, config }`, `config` being `{ home, trashDestination, neverTouch, defaultCopyRule, rules, grouping,
+ * The config: `{ path, config }`, `config` being `{ home, neverTouch, defaultCopyRule, rules, grouping,
  * notifications }`, `defaultCopyRule` "newest", "oldest" or "shortestPath", and `grouping` `{ folderThreshold,
  * existingFolderThreshold, smallestFolder }`.
  */
@@ -53,7 +53,8 @@ export function findDuplicates(onProgress) {
 }
 
 // Running, undoing and redoing resolve to a summary: `{ sessionId, done, skipped, failed, unrecoverable }`,
-// each a list of `{ operationId, kind, source, destination, note }`, the note saying why it wasn't done.
+// each a list of `{ operationId, kind, source, destination, note }`, the note saying why it wasn't done,
+// `destination` null for a Trash that didn't land.
 
 /** Runs the ticked Operations of the latest Plan as a new Session, calling `onProgress({ finished, total, current })` as it goes. */
 export function runPlan(approved, onProgress) {
@@ -70,7 +71,8 @@ export const redoOperations = (sessionId, operationIds) => invoke("redo_operatio
 
 /**
  * Session `sessionId` and its Operations: `{ info, operations }`, each Operation
- * `{ id, kind, source, destination, relativePath, relativeDestination, size, state, note }`.
+ * `{ id, kind, source, destination, inSystemTrash, relativePath, size, state, note }`, `destination` null for a Trash
+ * that never landed, and `inSystemTrash` whether it is in the System Trash.
  */
 export const sessionDetails = (sessionId) => invoke("session_details", { sessionId });
 
@@ -160,11 +162,12 @@ export async function notifyInBackground(title) {
  * of the Filed Copy, or null if no copy is kept, and the paths of those trashed. `folders` is `[{ name, choice, files }]`, `choice`
  * one of `{ type: "createHere" }`, `{ type: "addTo", folder }`, `{ type: "createIn", folder }` or
  * `{ type: "trashAll" }`, and `files` `[[path, "inFolder" | "trash" | "takeOut"]]`.
- * Resolves to `{ root, trashDestination, operations }`, each Operation `{ id, kind, source, relativePath,
+ * Resolves to `{ root, operations }`, each Operation `{ id, kind, source, relativePath,
  * destination, destinationPath, size, modified, isPackage, isFolder, reason, ticked, error }`, `kind` being
  * "trash", "move" or "createFolder", `reason` one of `{ type: "duplicate", kept }` (`kept` null if no copy is),
  * `{ type: "suggestedFolder", folder }` or `{ type: "emptiedFolder" }`, `ticked` whether it starts ticked
  * (an emptied folder doesn't), and `error` why it can't happen (it can't be ticked then), or null.
+ * `destination` is empty and `destinationPath` null for a Trash: only the OS knows where it lands.
  * Rejects if a name can't be a folder name.
  */
 export const buildReviewPlan = (duplicates, folders) => invoke("build_review_plan", { duplicates, folders, keep: true });
@@ -174,6 +177,9 @@ export const previewReviewPlan = (duplicates, folders) => invoke("build_review_p
 
 /** The folder the user picked, or null if they cancelled. */
 export const pickFolder = (title = "Pick a folder to clean") => dialog.open({ directory: true, multiple: false, title });
+
+/** Whether any of the files at `paths` is on a different disk from `folder`, so it can't be moved there. */
+export const onAnotherDisk = (paths, folder) => invoke("on_another_disk", { paths, folder });
 
 /**
  * Opens the file manager (Finder, Explorer or the Linux one) on the folder holding `path`, with it selected. A Package is selected, not opened.

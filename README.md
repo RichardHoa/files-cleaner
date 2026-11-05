@@ -7,7 +7,7 @@ A desktop app for macOS, Windows and Linux that walks you through cleaning a fol
 - **Tauri 2**: desktop shell (`files-cleaner/src-tauri`), with the dialog and opener plugins
 - **Rust**: all the logic lives in the core library `files-cleaner/src-tauri/core`, which has no Tauri dependency (see `docs/adr/0003`)
 - **Plain HTML/CSS/JS (ES modules)**: the UI in `files-cleaner/src`. No framework and no build step
-- **macOS, Windows and Linux.** The OS-specific parts (System Folders, Disk Roots, hidden files, Package detection) live in one module per OS under `core/src/protection/`. Trash goes to a Holding Folder inside the Scan Root on every OS; the System Trash is deferred (see `docs/adr/0001`)
+- **macOS, Windows and Linux.** The OS-specific parts (System Folders, Disk Roots, hidden files, Package detection) live in one module per OS under `core/src/protection/`. Trash goes to the System Trash on every OS, through one backend per OS under `core/src/os_trash/` (see `docs/adr/0001`). The app never empties it, so the space comes back when you do
 
 ## Prerequisites
 

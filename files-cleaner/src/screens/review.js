@@ -5,8 +5,9 @@
 // offered in the Suggested Folders' place), and the Suggested Folders are filled in once that's done.
 // The copies are trashed from the Duplicates pane, as a Session of their own, without waiting for the
 // reading. Files are selected as in Finder, then moved by dragging them onto a folder in the sidebar, from
-// their right-click menu, or with "Move to…". The sidebar also adds a folder, and merges one into another
-// by dragging it there, or removes one, from its right-click menu. The header's button waits for the
+// their right-click menu, or with "Move to…", which also offers any other folder on disk. A file left where
+// it is can be trashed from its row. The sidebar also adds a folder, and merges one into another by
+// dragging it there, or removes one, from its right-click menu. The header's button waits for the
 // reading, which can be stopped early to group only what was read, then runs the rest of the Plan as one
 // Session; Cancel stops the reading and goes Home, leaving whatever was already run.
 import {
@@ -18,6 +19,7 @@ import {
   groupingModelsStatus,
   notifications,
   notifyInBackground,
+  onAnotherDisk,
   openFile,
   pathSeparator,
   pickFolder,
@@ -29,7 +31,7 @@ import {
 } from "../api.js";
 import { el } from "../dom.js";
 import { drawMore, revealMenu } from "../file-list.js";
-import { count, formatDate, formatSize, plural, splitPath } from "../format.js";
+import { count, formatDate, formatSize, plural, splitPath, trashPlace } from "../format.js";
 import { icon } from "../icons.js";
 import { groupingModelsPanel } from "../models-panel.js";
 import { describeRunProgress, describeSummary } from "../outcomes.js";
@@ -40,12 +42,15 @@ import {
   addFolder,
   byKindNewestFirst,
   copyFolder,
+  describeChange,
   filedCopy,
   foldersHoldingCopies,
   initialChoices,
   initialDuplicates,
+  LeftFiles,
   mergeFolder,
   moveFile,
+  moveToOtherFolder,
   nameMissing,
   otherKeptCopies,
   placeDuplicates,
@@ -72,6 +77,9 @@ const COMPUTER = /Mac/.test(navigator.userAgent) ? "Mac" : "computer";
 
 /** The file or folder's own name, from its full `path`. */
 const fileName = (path) => splitPath(path, pathSeparator).name;
+
+/** Whether a Run is given `op`: it's ticked, or it's a Trash blocked up front, which stays in place and is listed under Needs attention. */
+const runsOrIsListed = (op) => op.ticked || (op.kind === "trash" && Boolean(op.error));
 
 /**
  * The analysis's `{ finished, total, current, phase }` progress as "Reading 12 of 85 files…", or what comes
@@ -169,7 +177,7 @@ export async function render(root, nav, result, duplicateGroups) {
   let waiting = [el("h2", {}, "Suggested Folders"), el("p", { className: "status" }, "Reading the files…")];
   let grouping = null;
   let choices = [];
-  const left = new Set();
+  const left = new LeftFiles();
   let panels = new Map();
   const summaryOf = (path) => grouping?.summaries[readAs.get(path) ?? path] ?? fileName(path);
   const kindOf = (path) => grouping?.kinds[readAs.get(path) ?? path];
@@ -227,6 +235,23 @@ export async function render(root, nav, result, duplicateGroups) {
     selection = new Set();
     drawPane();
   };
+  /** Asks for any folder on the files' disk and moves `paths` there, through a Suggested Folder going into it; a folder on another disk is refused. */
+  const moveToOther = async (paths) => {
+    showStatus(status, "");
+    try {
+      const folder = await pickFolder("Pick a folder to move the files to");
+      if (folder && (await onAnotherDisk(paths, folder))) {
+        showStatus(status, `“${fileName(folder)}” is on a different disk, and the app only moves items within one disk. Pick a folder on the same disk.`, true);
+      } else if (folder) {
+        const to = moveToOtherFolder(choices, left, paths, folder, pathSeparator);
+        if (to && !panels.has(to)) panels.set(to, folderPanel(to));
+        selection = new Set();
+      }
+    } catch (error) {
+      showStatus(status, describeError(error), true);
+    }
+    drawPane();
+  };
   const show = (to) => {
     current = to;
     selection = new Set();
@@ -265,25 +290,25 @@ export async function render(root, nav, result, duplicateGroups) {
   });
   const status = el("p", { className: "status" });
   const drawHeader = () => {
-    const { moved, trashed } = totals(choices);
-    const n = moved + trashed;
+    const change = totals(choices, left, pathSeparator);
     if (folders === "reading") {
       heading.textContent = rootName;
       run.textContent = "Waiting for folders…";
       run.disabled = true;
       return;
     }
-    heading.textContent = n ? `${plural(n, "file")} will move` : "Nothing will change";
-    run.textContent = n ? `Move ${plural(n, "file")}` : "Nothing to move";
-    run.disabled = running || n === 0 || choices.some(nameMissing);
+    const words = describeChange(change);
+    heading.textContent = words.heading;
+    run.textContent = words.button;
+    run.disabled = running || change.moved + change.trashed === 0 || choices.some(nameMissing);
   };
 
   run.addEventListener("click", async () => {
     clearTimeout(emptiedTimer);
     running = true;
     const session = await busy(status, [run, cancel], "Planning…", async () => {
-      const plan = await buildReviewPlan(doneDuplicates(), planChoices(choices));
-      const blocked = plan.operations.filter((op) => op.error && op.reason.type === "suggestedFolder");
+      const plan = await buildReviewPlan(doneDuplicates(), planChoices(choices, left));
+      const blocked = plan.operations.filter((op) => op.error && op.kind !== "trash" && op.reason.type === "suggestedFolder");
       if (blocked.length > 0) {
         const { reason, error } = blocked[0];
         throw new Error(
@@ -292,7 +317,7 @@ export async function render(root, nav, result, duplicateGroups) {
       }
       // The trashed copies are only there to work out the Emptied Folders: they were run already.
       const approved = plan.operations
-        .filter((op) => (op.reason.type === "emptiedFolder" ? emptiedTicked.has(op.id) && !op.error : op.ticked && op.reason.type !== "duplicate"))
+        .filter((op) => (op.reason.type === "emptiedFolder" ? emptiedTicked.has(op.id) && !op.error : runsOrIsListed(op) && op.reason.type !== "duplicate"))
         .map((op) => op.id);
       return runPlan(approved, (progress) => showStatus(status, describeRunProgress(progress)));
     });
@@ -306,7 +331,7 @@ export async function render(root, nav, result, duplicateGroups) {
     running = true;
     const summary = await busy(status, [button, run, cancel], "Trashing the copies…", async () => {
       const plan = await buildReviewPlan(planDuplicates(duplicates), []);
-      const approved = plan.operations.filter((op) => op.reason.type === "duplicate" && op.ticked).map((op) => op.id);
+      const approved = plan.operations.filter((op) => op.reason.type === "duplicate" && runsOrIsListed(op)).map((op) => op.id);
       return runPlan(approved, (progress) => showStatus(status, describeRunProgress(progress)));
     });
     running = false;
@@ -328,7 +353,7 @@ export async function render(root, nav, result, duplicateGroups) {
       if (!pane.isConnected) return;
       const asked = ++emptiedAsked;
       try {
-        const plan = await previewReviewPlan(doneDuplicates(), planChoices(choices));
+        const plan = await previewReviewPlan(doneDuplicates(), planChoices(choices, left));
         if (asked !== emptiedAsked || !pane.isConnected) return;
         emptied = plan.operations.filter((op) => op.reason.type === "emptiedFolder");
         const ids = new Set(emptied.map((op) => op.id));
@@ -549,9 +574,13 @@ export async function render(root, nav, result, duplicateGroups) {
       { ariaLabel: "Move the selected files" },
       el("option", { value: "", disabled: true, selected: true }, "Move to…"),
       ...targets.map((target, i) => el("option", { value: i }, target ? displayName(target) : "Leave where they are")),
+      el("option", { value: "other" }, "Other folder…"),
     );
     to.value = "";
-    to.addEventListener("change", () => move([...selection], targets[Number(to.value)]));
+    to.addEventListener("change", () => {
+      if (to.value === "other") moveToOther([...selection]);
+      else move([...selection], targets[Number(to.value)]);
+    });
     const clear = el("button", { type: "button", className: "link" }, "Deselect");
     clear.addEventListener("click", () => {
       selection = new Set();
@@ -588,7 +617,7 @@ export async function render(root, nav, result, duplicateGroups) {
       if (!selection.has(path)) select({ toggle: false, range: false });
       const paths = [...selection];
       const items = destinations().map((to) => ({ label: destinationLabel(to), action: () => move(paths, to) }));
-      menu.open(paths, row, event, items);
+      menu.open(paths, row, event, [...items, { label: "Move to other folder…", action: () => moveToOther(paths) }]);
     });
     row.addEventListener("dragstart", (event) => {
       dragged = selection.has(path) ? [...selection] : [path];
@@ -632,7 +661,7 @@ export async function render(root, nav, result, duplicateGroups) {
   }
 
   /**
-   * The Duplicate Groups, each with its name, how many copies and the space going to Files Cleaner Trash,
+   * The Duplicate Groups, each with its name, how many copies and the space going to the System Trash,
    * then every copy, with a button trashing the copies marked Trash and menus setting every copy in a
    * folder; once that's done, what it did.
    */
@@ -661,7 +690,7 @@ export async function render(root, nav, result, duplicateGroups) {
         "p",
         { className: "muted" },
         `${count(trashed)} ${trashed === 1 ? "copy" : "copies"} to trash`,
-        `, of ${plural(duplicates.length, "file")} · ${formatSize(trashedSize)} to Files Cleaner Trash`,
+        `, of ${plural(duplicates.length, "file")} · ${formatSize(trashedSize)} to ${trashPlace(pathSeparator)}`,
       ),
       el("div", { className: "duplicates-bulk" }, copiesInMenu("Keep every copy in…", "keep"), copiesInMenu("Trash every copy in…", "trash")),
       el("ul", { className: "duplicate-groups", ariaLabel: "Duplicate Groups" }, ...duplicates.slice(0, shown).map(duplicateGroup)),
@@ -688,7 +717,7 @@ export async function render(root, nav, result, duplicateGroups) {
     return pick;
   }
 
-  /** A Duplicate Group: its name, how many copies, the space going to Files Cleaner Trash, a warning if no copy is kept, then each copy. */
+  /** A Duplicate Group: its name, how many copies, the space going to the System Trash, a warning if no copy is kept, then each copy. */
   function duplicateGroup(duplicate) {
     const { group, copies } = duplicate;
     const filed = filedCopy(duplicate);
@@ -703,7 +732,7 @@ export async function render(root, nav, result, duplicateGroups) {
         el(
           "span",
           { className: "muted" },
-          ` · ${count(group.copies.length)} copies · ${formatSize(group.size * trashedCopies(duplicate))} to Files Cleaner Trash`,
+          ` · ${count(group.copies.length)} copies · ${formatSize(group.size * trashedCopies(duplicate))} to ${trashPlace(pathSeparator)}`,
           filed ? "" : el("span", { className: "warning" }, " · No copy kept"),
         ),
       ),
@@ -755,12 +784,12 @@ export async function render(root, nav, result, duplicateGroups) {
   function leftPanel() {
     const others = otherKeptCopies(duplicates);
     const row = (path) => {
-      const node = leftRow(path);
       if (others.has(path)) {
+        const node = leftRow(path);
         node.tabIndex = 0;
         return copyMenu(node, path);
       }
-      return choices.length > 0 ? selectable(node, path) : node;
+      return selectable(leftRow(path, [trashToggle(path)]), path);
     };
     if (choices.length === 0) {
       return [
@@ -768,9 +797,7 @@ export async function render(root, nav, result, duplicateGroups) {
         el(
           "p",
           { className: "note" },
-          grouping.folders.length > 0
-            ? "No folders are left, so everything stays where it is."
-            : "No files here are alike enough to share a folder, so everything stays where it is.",
+          grouping.folders.length > 0 ? "No folders are left." : "No files here are alike enough to share a folder.",
         ),
         ...leftLists([...left], row),
       ];
@@ -889,7 +916,7 @@ export async function render(root, nav, result, duplicateGroups) {
         addTo: () => ["Add to ", el("strong", {}, existingName)],
         createHere: () => [`New folder in ${rootName}`],
         createIn: () => ["New folder in ", el("span", { className: "path" }, choice.elsewhere), " ", change],
-        trashAll: () => ["Every file is trashed"],
+        trashAll: () => [`Every file goes to ${trashPlace(pathSeparator)}`],
       };
       where.replaceChildren(...parts[choice.choice]());
     }
@@ -946,14 +973,31 @@ export async function render(root, nav, result, duplicateGroups) {
     return { node, draw, drawName };
   }
 
-  /** A file left where it is: its name, with its summary on hover, and when it was last changed. */
-  function leftRow(path) {
-    return el(
+  /** A button trashing the file at `path`, left where it is, or putting it back once it's trashed. */
+  function trashToggle(path) {
+    const trashed = left.trashed.has(path);
+    const button = el("button", { type: "button", className: "small" }, trashed ? "Put back" : "Trash");
+    button.addEventListener("click", () => {
+      if (trashed) left.trashed.delete(path);
+      else left.trashed.add(path);
+      drawPane();
+      // The file's row is drawn again: the focus goes with it.
+      pane.querySelector(`[data-path="${CSS.escape(path)}"] button`)?.focus();
+    });
+    return button;
+  }
+
+  /** A file left where it is: its name, with its summary on hover, when it was last changed, and `actions`. */
+  function leftRow(path, actions = []) {
+    const trashed = left.trashed.has(path);
+    const row = el(
       "li",
       { className: "folder-file" },
-      el("span", { className: "folder-file-name", title: summaryOf(path) }, fileName(path)),
-      el("span", { className: "muted folder-file-date" }, formatDate(modifiedOf(path))),
+      el("span", { className: "folder-file-name", title: summaryOf(path) }, fileName(path), el("span", { className: "muted" }, trashed ? " · Trashed" : "")),
+      el("span", { className: "folder-file-actions" }, el("span", { className: "muted folder-file-date" }, formatDate(modifiedOf(path))), ...actions),
     );
+    row.classList.toggle("out", trashed);
+    return row;
   }
 
   /** `paths` under a heading per kind, each kind newest first, with `rowFor(path)` per file. */

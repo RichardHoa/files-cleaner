@@ -24,9 +24,6 @@ use std::path::{Component, Path, PathBuf, Prefix};
 
 use crate::config::Config;
 
-/// The name of the Holding Folder Trash creates inside a Scan Root.
-pub const HOLDING_FOLDER_NAME: &str = "Files Cleaner Trash";
-
 /// Package extensions known regardless of the OS or which apps are
 /// installed: a `.pages` folder is still a Package on a Mac without Pages,
 /// or on a disk copied to Windows.
@@ -104,8 +101,8 @@ pub fn canonical(path: &Path) -> io::Result<PathBuf> {
     }
 }
 
-/// The Protected Paths for one config: the OS's built-in list, the user's
-/// Never-Touch Paths and the Holding Folder.
+/// The Protected Paths for one config: the OS's built-in list and the user's
+/// Never-Touch Paths.
 ///
 /// Every check asks whether a path *is* protected, never whether it is
 /// inside something protected: the scanner never walks into a protected
@@ -140,12 +137,6 @@ impl Protection {
                 "{} is one of your Never-Touch Paths",
                 never.display()
             ));
-        }
-        if path
-            .file_name()
-            .is_some_and(|name| name == HOLDING_FOLDER_NAME)
-        {
-            return Some(format!("{HOLDING_FOLDER_NAME} is the app's Holding Folder"));
         }
         os::builtin_reason(path, &self.home)
             .or_else(|| app_files::reason(path))

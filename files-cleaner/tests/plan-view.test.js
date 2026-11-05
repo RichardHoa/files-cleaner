@@ -9,7 +9,7 @@ function dup(path, size = 0, kept = "keep.txt") {
     id: `trash:${path}`,
     kind: "trash",
     relativePath,
-    destination: ["Files Cleaner Trash", "This Session", ...relativePath],
+    destination: [],
     size,
     reason: { type: "duplicate", kept: kept.split("/") },
   };

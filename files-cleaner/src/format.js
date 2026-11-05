@@ -86,3 +86,6 @@ export function splitPath(path, separator) {
   if (at === -1 || at === trimmed.length - 1) return { name: path, parent: "" };
   return { name: trimmed.slice(at + 1), parent: at === 0 ? separator : trimmed.slice(0, at) };
 }
+
+/** What the OS with path separator `separator` calls its System Trash. */
+export const trashPlace = (separator) => (separator === "\\" ? "Recycle Bin" : "Trash");

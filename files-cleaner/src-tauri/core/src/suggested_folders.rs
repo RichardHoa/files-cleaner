@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::clash;
-use crate::config::Config;
 use crate::folder_name::safe_folder_name;
+use crate::os_trash::OsTrash;
 use crate::planner::{finish, move_to, names_below, trash, Plan, Reason};
 use crate::scanner::{ScanEntry, ScanResult};
 
@@ -81,10 +81,10 @@ pub struct DuplicateChoice {
 /// with no duplicates.
 pub fn build_suggested_folders_plan(
     scan: &ScanResult,
-    config: &Config,
+    os_trash: &dyn OsTrash,
     folders: &[SuggestedFolderChoice],
 ) -> Result<Plan, SuggestedFolderError> {
-    build_review_plan(scan, config, &[], folders)
+    build_review_plan(scan, os_trash, &[], folders)
 }
 
 /// Proposes the whole review as one Plan. Each Duplicate Group's copies to
@@ -92,13 +92,14 @@ pub fn build_suggested_folders_plan(
 /// choice is a new folder (with a Clash Suffix if its name is taken) and a
 /// Move per file into it, a Move per file into an existing folder, or a Trash
 /// per file. A file the user trashes on its own is trashed whatever the
-/// folder's choice; a file taken out stays put. A copy already trashed as a
-/// duplicate is left out of its folder, as are files the scan didn't find.
-/// Emptied folders, worked out from all of it, and moves to another disk are
-/// handled as in `build_plan`.
+/// folder's choice; a file taken out, or already in that folder, stays put.
+/// A copy already trashed as a duplicate is left out of its folder, as are
+/// files the scan didn't find.
+/// Emptied folders, worked out from all of it, and Operations that can't
+/// happen are handled as in `build_plan`.
 pub fn build_review_plan(
     scan: &ScanResult,
-    config: &Config,
+    os_trash: &dyn OsTrash,
     duplicates: &[DuplicateChoice],
     folders: &[SuggestedFolderChoice],
 ) -> Result<Plan, SuggestedFolderError> {
@@ -114,7 +115,7 @@ pub fn build_review_plan(
         for path in &group.trash {
             if let Some(entry) = entries.get(path.as_path()) {
                 trashed.insert(path);
-                operations.push(trash(root, entry, reason.clone()));
+                operations.push(trash(entry, reason.clone()));
             }
         }
     }
@@ -163,8 +164,10 @@ pub fn build_review_plan(
             match (choice, &destination) {
                 (FileChoice::TakeOut, _) => {}
                 (FileChoice::Trash, _) | (FileChoice::InFolder, None) => {
-                    operations.push(trash(root, entry, reason.clone()))
+                    operations.push(trash(entry, reason.clone()))
                 }
+                (FileChoice::InFolder, Some(destination))
+                    if entry.path.parent() == Some(destination.as_path()) => {}
                 (FileChoice::InFolder, Some(destination)) => {
                     let file_name = claim(destination, &entry.name, clash::free_name);
                     operations.push(move_to(
@@ -177,7 +180,7 @@ pub fn build_review_plan(
             }
         }
     }
-    Ok(finish(root, config, operations, created))
+    Ok(finish(root, os_trash, operations, created))
 }
 
 /// The Reason for a Suggested Folder whose files go to `destination`: named

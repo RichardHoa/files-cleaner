@@ -4,8 +4,8 @@ use std::fs;
 use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
 
-use common::{config, scan_root, write};
-use files_cleaner_core::{build_rule_plan, scan, OperationKind, Plan, Reason};
+use common::{build_rule_plan, config, scan_root, write};
+use files_cleaner_core::{scan, OperationKind, Plan, Reason};
 
 fn set_modified(path: &Path, secs: u64) {
     let time = UNIX_EPOCH + Duration::from_secs(secs);
@@ -40,7 +40,7 @@ fn summary(plan: &Plan) -> Vec<(OperationKind, String, String)> {
 }
 
 #[test]
-fn a_trash_rule_trashes_matching_files_into_the_holding_folder() {
+fn a_trash_rule_trashes_matching_files() {
     let dir = scan_root();
     write(dir.path(), "setup.dmg", "installer");
     write(dir.path(), "old/Other.DMG", "another installer");
@@ -55,16 +55,8 @@ fn a_trash_rule_trashes_matching_files_into_the_holding_folder() {
     assert_eq!(
         summary(&plan),
         [
-            (
-                OperationKind::Trash,
-                "old/Other.DMG".into(),
-                "Files Cleaner Trash/This Session/old/Other.DMG".into()
-            ),
-            (
-                OperationKind::Trash,
-                "setup.dmg".into(),
-                "Files Cleaner Trash/This Session/setup.dmg".into()
-            ),
+            (OperationKind::Trash, "old/Other.DMG".into(), String::new()),
+            (OperationKind::Trash, "setup.dmg".into(), String::new()),
         ]
     );
     let reasons = plan.operations.iter().map(|op| &op.reason);
@@ -226,10 +218,10 @@ fn a_relative_target_is_inside_the_scan_root_and_missing_folders_are_created_fir
             rule: "Slides".into()
         }
     );
-    assert_eq!(create.destination_path, plan.root.join("Study"));
+    assert_eq!(create.destination_path, Some(plan.root.join("Study")));
     assert_eq!(
         plan.operations[3].destination_path,
-        plan.root.join("Study/Slides/talk.pptx")
+        Some(plan.root.join("Study/Slides/talk.pptx"))
     );
 }
 
@@ -268,7 +260,10 @@ fn home_and_absolute_targets_can_be_outside_the_scan_root() {
     let plan = plan_with(dir.path(), home.path(), &move_rule("~/Study", None));
     assert_eq!(
         destinations(plan),
-        [(OperationKind::Move, home.path().join("Study/talk.pptx"))]
+        [(
+            OperationKind::Move,
+            Some(home.path().join("Study/talk.pptx"))
+        )]
     );
 
     let plan = plan_with(
@@ -278,7 +273,10 @@ fn home_and_absolute_targets_can_be_outside_the_scan_root() {
     );
     assert_eq!(
         destinations(plan),
-        [(OperationKind::Move, elsewhere.path().join("talk.pptx"))]
+        [(
+            OperationKind::Move,
+            Some(elsewhere.path().join("talk.pptx"))
+        )]
     );
 }
 
@@ -378,11 +376,7 @@ fn a_relative_target_that_is_protected_proposes_nothing() {
     let dir = scan_root();
     write(dir.path(), "talk.pptx", "slides");
 
-    for target in [
-        "Files Cleaner Trash",
-        "project/node_modules",
-        "Keynote.app/Slides",
-    ] {
+    for target in ["project/node_modules", "Keynote.app/Slides"] {
         let plan = plan_with(dir.path(), dir.path(), &move_rule(target, None));
         assert!(plan.operations.is_empty(), "{target}: {:?}", summary(&plan));
     }

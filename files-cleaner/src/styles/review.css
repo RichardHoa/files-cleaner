@@ -249,6 +249,7 @@
 
 .folder-file-actions {
   display: flex;
+  align-items: center;
   flex-shrink: 0;
   gap: var(--space-1-5);
 }

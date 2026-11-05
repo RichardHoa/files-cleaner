@@ -1,9 +1,24 @@
 // What the user chose on the review screen, and what that does to the files: for each Duplicate Group,
 // which copies are kept and which are trashed; for each Suggested Folder, where it goes and what happens
-// to each of its files. A folder's choice is "addTo" (into the existing subfolder it matched), "createHere"
+// to each of its files. A folder's choice is "addTo" (into an existing folder, the subfolder it matched or one the user picked), "createHere"
 // (a new folder in the Scan Root), "createIn" (a new folder inside `elsewhere`, a folder the user picked)
 // or "trashAll"; each of its files is "inFolder" (goes wherever the folder's choice sends it), "trash" or
-// "takeOut". The user can also add a folder, merge one into another, or remove one.
+// "takeOut". The user can also add a folder, merge one into another, or remove one. The files left where they
+// are stay there, unless the user trashes one or moves it to a folder, suggested or any other on disk.
+import { plural, splitPath } from "./format.js";
+
+/** What the Plan calls the files trashed from those left where they are. */
+const LEFT_NAME = "Left where they are";
+
+/** The files left where they are, and in `trashed` those of them the user trashes. A file that leaves is no longer trashed. */
+export class LeftFiles extends Set {
+  trashed = new Set();
+
+  delete(path) {
+    this.trashed.delete(path);
+    return super.delete(path);
+  }
+}
 
 /**
  * The starting choice for each Duplicate Group of `groups` (`{ size, copies }`, as `findDuplicates` gives
@@ -139,9 +154,9 @@ export function initialChoices(folders) {
   }));
 }
 
-/** Adds a Suggested Folder of the user's own to `choices`, with no files and going in the Scan Root, and returns it. */
-export function addFolder(choices) {
-  const [choice] = initialChoices([{ name: "untitled folder", files: [], existing: null }]);
+/** Adds a Suggested Folder of the user's own to `choices`, with no files, going into the folder `existing` or else in the Scan Root, and returns it. */
+export function addFolder(choices, name = "untitled folder", existing = null) {
+  const [choice] = initialChoices([{ name, files: [], existing }]);
   choices.push(choice);
   return choice;
 }
@@ -166,28 +181,37 @@ export function removeFolder(choices, left, duplicates, choice) {
   dropFolder(choices, duplicates, choice, null);
 }
 
-/** What happens to `path` of the Suggested Folder `choice`: "move", "trash" or "stay". */
-function fileFate(choice, path) {
+/** What happens to `path` of the Suggested Folder `choice`: "move", "trash" or "stay", as for a file already directly in the folder it goes to. */
+function fileFate(choice, path, separator) {
   const file = choice.files.get(path);
   if (file === "takeOut") return "stay";
   if (file === "trash" || choice.choice === "trashAll") return "trash";
+  if (choice.choice === "addTo" && splitPath(path, separator).parent === choice.folder.existing) return "stay";
   return "move";
 }
 
 /**
- * `{ moved, trashed }`: how many files of all `choices` go into a folder, and how many are trashed, the
- * copies `duplicates` trash included.
+ * `{ moved, trashed }`: how many files of all `choices` go into a folder, and how many are trashed, those
+ * trashed from `left` and the copies `duplicates` trash included.
  */
-export function totals(choices, duplicates = []) {
-  const sum = { moved: 0, trashed: duplicates.reduce((n, duplicate) => n + trashedCopies(duplicate), 0) };
+export function totals(choices, left, separator, duplicates = []) {
+  const sum = { moved: 0, trashed: left.trashed.size + duplicates.reduce((n, duplicate) => n + trashedCopies(duplicate), 0) };
   for (const choice of choices) {
     for (const path of choice.files.keys()) {
-      const fate = fileFate(choice, path);
+      const fate = fileFate(choice, path, separator);
       if (fate === "move") sum.moved += 1;
       if (fate === "trash") sum.trashed += 1;
     }
   }
   return sum;
+}
+
+/** What the review's `{ heading, button }` say about `totals`. */
+export function describeChange({ moved, trashed }) {
+  if (moved > 0 && trashed > 0) return { heading: `${plural(moved, "file")} will move, ${trashed} will be trashed`, button: `Move ${moved}, trash ${trashed}` };
+  if (moved > 0) return { heading: `${plural(moved, "file")} will move`, button: `Move ${plural(moved, "file")}` };
+  if (trashed > 0) return { heading: `${plural(trashed, "file")} will be trashed`, button: `Trash ${plural(trashed, "file")}` };
+  return { heading: "Nothing will change", button: "Nothing to move" };
 }
 
 /** Whether the Suggested Folder `choice` lacks the name it needs: it needs one once it has files, and an empty name is never read as "trash". */
@@ -201,9 +225,30 @@ export function moveFile(choices, left, path, to) {
   else left.add(path);
 }
 
-/** `choices` as `buildReviewPlan` takes them, leaving out those with no files, so no empty folder is made. */
-export function planChoices(choices) {
-  return choices.filter((choice) => choice.files.size > 0).map((choice) => ({
+/**
+ * Moves `paths` into the Suggested Folder going into `folder`, a folder on disk the user picked, adding it if
+ * there's none yet, and returns it. A file already directly in `folder` is left where it is instead, and
+ * returns null when that's all of them.
+ */
+export function moveToOtherFolder(choices, left, paths, folder, separator) {
+  const moving = paths.filter((path) => splitPath(path, separator).parent !== folder);
+  for (const path of paths) {
+    if (!moving.includes(path)) moveFile(choices, left, path, null);
+  }
+  if (moving.length === 0) return null;
+  // A Disk Root has no name of its own, and a Suggested Folder needs one.
+  const { name, parent } = splitPath(folder, separator);
+  const to = choices.find((choice) => choice.choice === "addTo" && choice.folder.existing === folder) ?? addFolder(choices, parent ? name : "Disk Root", folder);
+  for (const path of moving) moveFile(choices, left, path, to);
+  return to;
+}
+
+/**
+ * `choices` as `buildReviewPlan` takes them, leaving out those with no files, so no empty folder is made,
+ * then the files of `left` being trashed, as a folder that trashes all of its own.
+ */
+export function planChoices(choices, left = new LeftFiles()) {
+  const folders = choices.filter((choice) => choice.files.size > 0).map((choice) => ({
     name: choice.name,
     choice:
       choice.choice === "addTo"
@@ -213,6 +258,8 @@ export function planChoices(choices) {
           : { type: choice.choice },
     files: [...choice.files],
   }));
+  if (left.trashed.size === 0) return folders;
+  return [...folders, { name: LEFT_NAME, choice: { type: "trashAll" }, files: [...left.trashed].map((path) => [path, "inFolder"]) }];
 }
 
 /** `paths` by kind, A–Z with "Other" last, each kind's files newest first: `[[kind, paths], …]`. */

@@ -10,7 +10,6 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::TrashDestination;
 use crate::planner::{OperationKind, SourceState};
 use crate::scanner::millis;
 use crate::session_id;
@@ -24,7 +23,6 @@ const LOCK_FILE_NAME: &str = "sessions.lock";
 pub struct SessionHeader {
     pub id: String,
     pub scan_root: PathBuf,
-    pub trash_destination: TrashDestination,
     /// Milliseconds since the Unix epoch.
     pub started_at: i64,
 }
@@ -52,7 +50,7 @@ pub enum OutcomeKind {
     Skipped,
     /// The Run's move failed.
     Failed,
-    /// Undo found the trashed copy gone.
+    /// The trashed copy is gone, or its location was never recorded.
     Unrecoverable,
 }
 
@@ -60,14 +58,17 @@ pub enum OutcomeKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "record", rename_all = "camelCase")]
 pub enum Record {
-    /// Written before the Run touches the item, with everything Undo and
-    /// Redo need: the Run's intent.
+    /// Written before the Run touches the item, with everything known so
+    /// far: the Run's intent.
     #[serde(rename_all = "camelCase")]
     Operation {
         operation_id: String,
         kind: OperationKind,
         source: PathBuf,
-        destination: PathBuf,
+        /// Where it goes. A Trash's isn't known until it has happened, so it
+        /// comes with the outcome instead; only older Journals have one here.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        destination: Option<PathBuf>,
         /// The source as planned, which Redo checks it against.
         planned: SourceState,
     },
@@ -82,6 +83,9 @@ pub enum Record {
         phase: Phase,
         outcome: OutcomeKind,
         reason: Option<String>,
+        /// Where a Run or Redo's Trash put the item in the System Trash.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        landed: Option<PathBuf>,
     },
     /// The Run has recorded its last Operation.
     Finished,
@@ -153,11 +157,7 @@ pub struct Journal {
 impl Journal {
     /// Starts the Journal of a new Session of `scan_root`, starting now,
     /// and writes its header.
-    pub fn create(
-        journal_dir: &Path,
-        scan_root: PathBuf,
-        trash_destination: TrashDestination,
-    ) -> io::Result<(SessionHeader, Journal)> {
+    pub fn create(journal_dir: &Path, scan_root: PathBuf) -> io::Result<(SessionHeader, Journal)> {
         let now = SystemTime::now();
         for id in session_id::candidates(now) {
             let file = match OpenOptions::new()
@@ -173,7 +173,6 @@ impl Journal {
             let header = SessionHeader {
                 id,
                 scan_root,
-                trash_destination,
                 started_at: millis(now),
             };
             let mut journal = Journal { file };

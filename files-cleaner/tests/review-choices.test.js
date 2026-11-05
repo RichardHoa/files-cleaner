@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   byKindNewestFirst,
+  describeChange,
   foldersHoldingCopies,
   initialChoices,
   initialDuplicates,
+  LeftFiles,
   mergeFolder,
   moveFile,
+  moveToOtherFolder,
   planChoices,
   planDuplicates,
   removeFolder,
@@ -69,6 +72,54 @@ test("removing a folder leaves its files where they are, and a group with no cop
   assert.deepEqual([...left], ["/d/b.pdf", "/d/x/a.pdf"]);
 });
 
+test("files moved to another folder end up there in the Plan, and one already in it stays where it is", () => {
+  const choices = initialChoices([{ name: "Labs", files: ["/d/a.pdf"], existing: null }]);
+  const left = new LeftFiles(["/d/b.pdf", "/other/c.pdf"]);
+
+  moveToOtherFolder(choices, left, ["/d/a.pdf", "/other/c.pdf"], "/other", "/");
+  moveToOtherFolder(choices, left, ["/d/b.pdf"], "/other", "/");
+
+  assert.deepEqual(planChoices(choices, left), [
+    {
+      name: "other",
+      choice: { type: "addTo", folder: "/other" },
+      files: [
+        ["/d/a.pdf", "inFolder"],
+        ["/d/b.pdf", "inFolder"],
+      ],
+    },
+  ]);
+  assert.deepEqual([...left], ["/other/c.pdf"]);
+});
+
+test("a file left where it is can be trashed, until it leaves", () => {
+  const choices = initialChoices([{ name: "Labs", files: [], existing: null }]);
+  const left = new LeftFiles(["/d/a.pdf", "/d/b.pdf"]);
+  left.trashed.add("/d/a.pdf");
+  left.trashed.add("/d/b.pdf");
+
+  moveFile(choices, left, "/d/b.pdf", choices[0]);
+
+  assert.deepEqual(planChoices(choices, left), [
+    { name: "Labs", choice: { type: "createHere" }, files: [["/d/b.pdf", "inFolder"]] },
+    { name: "Left where they are", choice: { type: "trashAll" }, files: [["/d/a.pdf", "inFolder"]] },
+  ]);
+});
+
+test("the count leaves out a file already in the folder it goes to, and takes in the files trashed from Left", () => {
+  const choices = initialChoices([{ name: "Old", files: ["/d/Old/a.pdf", "/d/b.pdf"], existing: "/d/Old" }]);
+  const left = new LeftFiles(["/d/c.pdf"]);
+  left.trashed.add("/d/c.pdf");
+  assert.deepEqual(totals(choices, left, "/"), { moved: 1, trashed: 1 });
+});
+
+test("the header and button say what will happen to the files", () => {
+  assert.deepEqual(describeChange({ moved: 0, trashed: 0 }), { heading: "Nothing will change", button: "Nothing to move" });
+  assert.deepEqual(describeChange({ moved: 2, trashed: 0 }), { heading: "2 files will move", button: "Move 2 files" });
+  assert.deepEqual(describeChange({ moved: 0, trashed: 1 }), { heading: "1 file will be trashed", button: "Trash 1 file" });
+  assert.deepEqual(describeChange({ moved: 2, trashed: 1 }), { heading: "2 files will move, 1 will be trashed", button: "Move 2, trash 1" });
+});
+
 test("files left where they are go by kind, Other last, each kind newest first", () => {
   const kinds = { "a.pdf": "Documents", "b.html": "Code", "c.pdf": "Documents", "d.xyz": "Other" };
   const dates = { "a.pdf": 1, "b.html": 5, "c.pdf": 3, "d.xyz": 9 };
@@ -84,7 +135,7 @@ test("files left where they are go by kind, Other last, each kind newest first",
 function threeCopies() {
   const [duplicate] = initialDuplicates([{ size: 3, copies: [{ path: "/d/a.pdf" }, { path: "/d/x/a.pdf" }, { path: "/d/y/a.pdf" }] }]);
   const choices = initialChoices([{ name: "Labs", files: ["/d/b.pdf", "/d/a.pdf"], existing: null }]);
-  return { duplicate, choices, left: new Set() };
+  return { duplicate, choices, left: new LeftFiles() };
 }
 
 test("keeping two copies files the first and lists the second under Left; trashing the Filed Copy hands its place to the next", () => {
@@ -104,7 +155,7 @@ test("keeping two copies files the first and lists the second under Left; trashi
     ["/d/x/a.pdf", "inFolder"],
   ]);
   assert.equal(left.size, 0);
-  assert.deepEqual(totals(choices, [duplicate]), { moved: 2, trashed: 2 });
+  assert.deepEqual(totals(choices, left, "/", [duplicate]), { moved: 2, trashed: 2 });
 });
 
 test("a copy kept is never trashed because the copy before it was marked Trash in its folder", () => {
