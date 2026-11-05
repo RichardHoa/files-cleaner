@@ -69,6 +69,8 @@ cargo build --release -p files-cleaner-core --bin bench-scan
 
 ## things to improve
 
+fix the falling action with the latest commit
+
 in the review screen right click to show in folder, add more open to open the file, by default (the os decides)
 
 user can choose multiple files in the review screen and perform actions on that, they can drag and select files just like every os
