@@ -1,67 +1,109 @@
 // What the user chose on the review screen, and what that does to the files: for each Duplicate Group,
-// which copy stays, which are trashed and which are left where they are; for each Suggested Folder,
-// where it goes and what happens to each of its files. A folder's choice is "addTo" (into the existing
-// subfolder it matched), "createHere" (a new folder in the Scan Root), "createIn" (a new folder inside
-// `elsewhere`, a folder the user picked), "trashAll" or "skip"; each of its files is "inFolder" (goes
-// wherever the folder's choice sends it), "trash" or "takeOut".
+// which copies are kept and which are trashed; for each Suggested Folder, where it goes and what happens
+// to each of its files. A folder's choice is "addTo" (into the existing subfolder it matched), "createHere"
+// (a new folder in the Scan Root), "createIn" (a new folder inside `elsewhere`, a folder the user picked),
+// "trashAll" or "skip"; each of its files is "inFolder" (goes wherever the folder's choice sends it),
+// "trash" or "takeOut".
 
 /**
  * The starting choice for each Duplicate Group of `groups` (`{ size, copies }`, as `findDuplicates` gives
- * them): its first copy, the default Keeper, stays, and every other copy is trashed. Each copy is
- * "keeper", "trash" or "leave" (it stays where it is, in no folder), by path.
+ * them): its first copy is kept and every other copy is trashed. Each copy is "keep" or "trash", by path.
+ * `placed` is the copy holding the group's place among the Suggested Folders and the files left where they
+ * are, and `emptyPlace` where that was while no copy is kept.
  */
 export function initialDuplicates(groups) {
   return groups.map((group) => ({
     group,
-    copies: new Map(group.copies.map((copy, i) => [copy.path, i === 0 ? "keeper" : "trash"])),
+    copies: new Map(group.copies.map((copy, i) => [copy.path, i === 0 ? "keep" : "trash"])),
+    placed: group.copies[0].path,
+    emptyPlace: null,
   }));
 }
 
 /** How many copies of the Duplicate Group `duplicate` are trashed. */
 export const trashedCopies = (duplicate) => [...duplicate.copies.values()].filter((fate) => fate === "trash").length;
 
-/** How many copies of the Duplicate Group `duplicate` are left where they are. */
-export const leftCopies = (duplicate) => [...duplicate.copies.values()].filter((fate) => fate === "leave").length;
+/** The path of the Filed Copy of the Duplicate Group `duplicate`: its first Kept Copy, or null if no copy is kept. */
+export const filedCopy = (duplicate) => [...duplicate.copies].find(([, fate]) => fate === "keep")?.[0] ?? null;
 
-/** The path of the Keeper of the Duplicate Group `duplicate`. */
-const keeperOf = (duplicate) => [...duplicate.copies].find(([, fate]) => fate === "keeper")[0];
+/** The Kept Copies of `duplicates` that aren't filed: they stay where they are, so they're listed with the files left there and can't be moved. */
+export const otherKeptCopies = (duplicates) =>
+  new Set(
+    duplicates.flatMap((duplicate) => {
+      const filed = filedCopy(duplicate);
+      return [...duplicate.copies].filter(([path, fate]) => fate === "keep" && path !== filed).map(([path]) => path);
+    }),
+  );
 
-/** Puts the file `to` wherever `from` is among `choices` and the Set `left`, with the same choice and in the same place in its folder. */
+/** The choice a Kept Copy takes over from the file whose place it takes: the same, except that a Trash clicked on that file was never about this copy. */
+const handedOver = (file) => (file === "trash" ? "inFolder" : file);
+
+/** Puts the file `to` wherever `from` is among `choices` and the Set `left`, with its choice handed over and in the same place in its folder. */
 function replaceFile(choices, left, from, to) {
+  if (from === to) return;
   for (const choice of choices) {
     if (!choice.files.has(from)) continue;
-    choice.files = new Map([...choice.files].map(([path, file]) => [path === from ? to : path, file]));
+    choice.files = new Map([...choice.files].map(([path, file]) => (path === from ? [to, handedOver(file)] : [path, file])));
   }
   if (left.delete(from)) left.add(to);
 }
 
-/**
- * Sets the copy at `path` of the Duplicate Group `duplicate` to `fate`. A new Keeper takes the old one's
- * place among `choices` and the files `left` where they are, needing no reading as it's the same, and the
- * old Keeper is trashed. The Keeper itself can only change by making another copy the Keeper.
- */
-export function setCopy(duplicate, path, fate, choices, left) {
-  const keeper = keeperOf(duplicate);
-  if (path === keeper) return;
-  if (fate === "keeper") {
-    duplicate.copies.set(keeper, "trash");
-    replaceFile(choices, left, keeper, path);
+/** Removes `path` from `choices` and the Set `left`, returning where it was: `{ choice, file }`, `choice` null for `left`, or null if it was in neither. */
+function removeFile(choices, left, path) {
+  const choice = choices.find((candidate) => candidate.files.has(path));
+  if (choice) {
+    const file = choice.files.get(path);
+    choice.files.delete(path);
+    return { choice, file };
   }
+  return left.delete(path) ? { choice: null } : null;
+}
+
+/** Puts the Kept Copy `path` at `place`, as `removeFile` gave it. */
+function putBack(left, path, { choice, file }) {
+  if (choice) choice.files.set(path, handedOver(file));
+  else left.add(path);
+}
+
+/**
+ * Brings the copies of `duplicate` in line with its choices: the Filed Copy takes the group's place, needing
+ * no reading as it's the same as the copy read, the other Kept Copies are listed in `left`, and a trashed
+ * copy is nowhere. With no copy kept the group's place is remembered, for when one is kept again.
+ */
+function placeCopies(duplicate, choices, left) {
+  const filed = filedCopy(duplicate);
+  const { placed, emptyPlace } = duplicate;
+  for (const path of duplicate.copies.keys()) {
+    if (path !== placed) left.delete(path);
+  }
+  if (placed && filed) replaceFile(choices, left, placed, filed);
+  else if (placed) duplicate.emptyPlace = removeFile(choices, left, placed);
+  else if (filed && emptyPlace) putBack(left, filed, emptyPlace);
+  duplicate.placed = filed;
+  for (const path of otherKeptCopies([duplicate])) left.add(path);
+}
+
+/** Sets the copy at `path` of the Duplicate Group `duplicate` to `fate`, "keep" or "trash", and puts its copies where that leaves them. */
+export function setCopy(duplicate, path, fate, choices, left) {
   duplicate.copies.set(path, fate);
+  placeCopies(duplicate, choices, left);
 }
 
-/** Puts each Keeper of `duplicates` the user picked while the files were read where the copy read for it was placed: its first copy. */
-export function placeKeepers(choices, left, duplicates) {
-  for (const duplicate of duplicates) replaceFile(choices, left, duplicate.group.copies[0].path, keeperOf(duplicate));
+/** Puts the copies of `duplicates` where the choices made while the files were read leave them; the copy read, the first, holds each group's place until then. */
+export function placeDuplicates(choices, left, duplicates) {
+  for (const duplicate of duplicates) {
+    duplicate.placed = duplicate.group.copies[0].path;
+    placeCopies(duplicate, choices, left);
+  }
 }
 
-/** `duplicates` as `buildReviewPlan` takes them: each group's Keeper and the copies it trashes. */
+/** `duplicates` as `buildReviewPlan` takes them: each group's Filed Copy, or null, and the copies it trashes. */
 export function planDuplicates(duplicates) {
   return duplicates
-    .map(({ copies }) => {
-      const paths = (fate) => [...copies].filter(([, f]) => f === fate).map(([path]) => path);
-      return { keeper: paths("keeper")[0], trash: paths("trash") };
-    })
+    .map((duplicate) => ({
+      kept: filedCopy(duplicate),
+      trash: [...duplicate.copies].filter(([, fate]) => fate === "trash").map(([path]) => path),
+    }))
     .filter(({ trash }) => trash.length > 0);
 }
 

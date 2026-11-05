@@ -185,3 +185,4 @@ Steps 1, 2 and 3 each change a GLOSSARY term or an ADR, so they're worth grillin
 ## Comments
 - 2026-10-29: Steps 1–2 grilled and settled. Decisions: `GLOSSARY.md` (Kept Copy, Filed Copy, Default Copy Rule, Suggested Folder), ADR 0007; tickets in `issues/01`–`05`. Step 3 (X1, emptying Files Cleaner Trash) deferred to later. Nothing implemented yet.
 - 2026-10-29: Every preference lives on the Settings screen only, never as a control on Review or any other screen. So step 5 (G6's in-place regroup control) is dropped, and D5's rule is a Settings option (ticket 02). G7 (smallest folder) stays a Settings option as it is.
+- 2026-11-05: Step 3 (X1) grilled and settled: Trash always goes to the System Trash, with no setting and no Empty action in the app. Spec and tickets: `../os-trash/`. ADR 0001 accepted, ADR 0002 updated. Also adds Delete all Sessions (X6, all at once only).

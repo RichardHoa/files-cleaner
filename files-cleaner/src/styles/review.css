@@ -303,7 +303,7 @@
   gap: var(--space-3);
 }
 
-/* A Duplicate Group: its name and totals, then each copy under it with Keep, Trash or Leave before its name. */
+/* A Duplicate Group: its name and totals, then each copy under it with Keep or Trash before its name, its folder and date after. */
 .duplicate-groups {
   list-style: none;
   margin: var(--space-2) 0 0;
@@ -362,6 +362,11 @@
 .duplicate-copy-name {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.duplicate-copy-folder {
+  min-width: 0;
+  margin-inline-start: auto;
 }
 
 .emptied-folder {

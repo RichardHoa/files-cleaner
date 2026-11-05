@@ -79,12 +79,12 @@ Why an Operation of a Session didn't happen: why it was skipped, failed or could
 _Avoid_: reason
 
 **Trash** (Operation):
-Taking a file out of the user's way without destroying it, sending it to the Trash Destination.
+Taking a file out of the user's way without destroying it, sending it to the System Trash.
 _Avoid_: delete, remove
 
-**Trash Destination**:
-A setting for where Trash sends files: a **Holding Folder** created inside the Scan Root, or (not yet supported) the **System Trash**, the OS's own trash can.
-_Avoid_: recycle bin, quarantine
+**System Trash**:
+The OS's own trash can, where every Trash sends files; shown as "Trash" on macOS and Linux and "Recycle Bin" on Windows. The user empties it through the OS; the tool never does.
+_Avoid_: Holding Folder, Trash Destination, quarantine
 
 **Clash Suffix**:
 The ` (1)`, ` (2)`, … added before the extension when a file's new name is already taken (`notes (1).pptx`); the same style on every OS. Names that differ only in letter case count as taken.
@@ -111,9 +111,9 @@ The record of a Session's Operations, each written down before it happens, so th
 _Avoid_: log, history file
 
 **Undo**:
-Reversing completed Operations of a Session, in reverse order, using its Journal: all of them at once, or only the ones the user picks.
+Reversing completed Operations of a Session, in reverse order, using its Journal: all of them at once, or only the ones the user picks. A file the user has emptied from the System Trash can't be recovered.
 _Avoid_: rollback, revert
 
 **Redo**:
-Carrying out an undone Operation again, putting the item back where its Session put it; skipped if the item changed since Undo put it back.
+Carrying out an undone Operation again, putting the item back where its Session put it (or in the System Trash again, for a Trash); skipped if the item changed since Undo put it back.
 _Avoid_: reapply, replay
