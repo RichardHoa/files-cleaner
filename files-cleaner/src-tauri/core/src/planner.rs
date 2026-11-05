@@ -130,13 +130,13 @@ pub fn build_plan_with_progress(
 ) -> Plan {
     let root = &scan.root;
     let mut operations = Vec::new();
-    for group in duplicates::find(&scan.entries, on_progress) {
+    for group in duplicates::find(&scan.entries, config.default_copy_rule, on_progress) {
         for copy in group.copies {
             operations.push(trash(
                 root,
                 copy,
                 Reason::Duplicate {
-                    kept: Some(group.keeper.relative_path.clone()),
+                    kept: Some(group.kept.relative_path.clone()),
                 },
             ));
         }
