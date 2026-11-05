@@ -1,0 +1,22 @@
+[package]
+name = "os-trash-test"
+version = "0.0.0"
+edition = "2021"
+description = "THROWAWAY: tests System Trash and restore on each OS (.scratch/os-trash/issues/01)"
+publish = false
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSError", "NSFileManager", "NSPathUtilities", "NSString", "NSURL"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+] }
+windows-core = "0.62"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"

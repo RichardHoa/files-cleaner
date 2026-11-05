@@ -5,9 +5,10 @@
 // offered in the Suggested Folders' place), and the Suggested Folders are filled in once that's done.
 // The copies are trashed from the Duplicates pane, as a Session of their own, without waiting for the
 // reading. Files are selected as in Finder, then moved by dragging them onto a folder in the sidebar, from
-// their right-click menu, or with "Move to…". The header's button waits for the reading, which can be
-// stopped early to group only what was read, then runs the rest of the Plan as one Session; Cancel stops
-// the reading and goes Home, leaving whatever was already run.
+// their right-click menu, or with "Move to…". The sidebar also adds a folder, and merges one into another
+// by dragging it there, or removes one, from its right-click menu. The header's button waits for the
+// reading, which can be stopped early to group only what was read, then runs the rest of the Plan as one
+// Session; Cancel stops the reading and goes Home, leaving whatever was already run.
 import {
   analyseLooseFiles,
   answerNotifications,
@@ -36,18 +37,21 @@ import { tickState, toggleAll } from "../plan-selection.js";
 import { progressBar } from "../progress-bar.js";
 import { describeEstimate, readingEstimate, updatedAverage } from "../reading-estimate.js";
 import {
+  addFolder,
   byKindNewestFirst,
   copyFolder,
   filedCopy,
   foldersHoldingCopies,
   initialChoices,
   initialDuplicates,
+  mergeFolder,
   moveFile,
   nameMissing,
   otherKeptCopies,
   placeDuplicates,
   planChoices,
   planDuplicates,
+  removeFolder,
   setCopiesIn,
   setCopy,
   totals,
@@ -177,8 +181,9 @@ export async function render(root, nav, result, duplicateGroups) {
   // What the pane lists: "duplicates", "folders" (until they're ready), "left" (the files left where they
   // are), "emptied", or a Suggested Folder's choice.
   let current = duplicates.length > 0 ? "duplicates" : "folders";
-  // The files being dragged, while a drag is on.
+  // The files being dragged, or the Suggested Folder, while a drag is on.
   let dragged = null;
+  let draggedFolder = null;
   // The files selected in the pane, and the one last clicked without Shift.
   let selection = new Set();
   let anchor = null;
@@ -193,6 +198,19 @@ export async function render(root, nav, result, duplicateGroups) {
   const selectionBar = el("div", { className: "selection-bar", hidden: true });
   const footer = el("div");
   const menu = revealMenu();
+  const newFolder = el(
+    "button",
+    { type: "button", className: "folder-sidebar-item folder-sidebar-new" },
+    icon("plus"),
+    el("span", { className: "folder-sidebar-name" }, "New folder"),
+  );
+  newFolder.addEventListener("click", () => {
+    const choice = addFolder(choices);
+    panels.set(choice, folderPanel(choice));
+    renaming = { choice, node: renameField(choice) };
+    show(choice);
+    selectName();
+  });
   const displayName = (choice) => choice.name.trim() || "No name";
   // The Suggested Folder being renamed in the sidebar, if any: `{ choice, node }`, its name field kept
   // across redraws of the sidebar, so the name from before and the focus stay.
@@ -214,6 +232,21 @@ export async function render(root, nav, result, duplicateGroups) {
     selection = new Set();
     anchor = null;
     drawPane();
+  };
+  /** Forgets the Suggested Folder `gone`, just dropped, listing `next` if it was the one listed. */
+  const forgetFolder = (gone, next) => {
+    if (renaming?.choice === gone) renaming = null;
+    panels.delete(gone);
+    if (current === gone) show(next);
+    else drawPane();
+  };
+  const merge = (from, into) => {
+    mergeFolder(choices, duplicates, from, into);
+    forgetFolder(from, into);
+  };
+  const remove = (choice) => {
+    removeFolder(choices, left, duplicates, choice);
+    forgetFolder(choice, "left");
   };
   /** Where the selected files can go from the pane: every folder but the one listed, or back where they are. */
   const destinations = () => [...(current === "left" ? [] : [null]), ...choices.filter((choice) => choice !== current)];
@@ -254,7 +287,7 @@ export async function render(root, nav, result, duplicateGroups) {
       if (blocked.length > 0) {
         const { reason, error } = blocked[0];
         throw new Error(
-          `${plural(blocked.length, "file")} can't be moved into “${reason.folder}”: ${error}. Choose another place for that folder, or skip it.`,
+          `${plural(blocked.length, "file")} can't be moved into “${reason.folder}”: ${error}. Choose another place for that folder, or remove it.`,
         );
       }
       // The trashed copies are only there to work out the Emptied Folders: they were run already.
@@ -359,8 +392,8 @@ export async function render(root, nav, result, duplicateGroups) {
   }
 
   /**
-   * The Plan in order: Duplicates, then the files left where they are and each Suggested Folder (or one
-   * entry for them until they're ready), then the Emptied Folders. Clicking one lists it, and a file
+   * The Plan in order: Duplicates, then the files left where they are, each Suggested Folder and New folder
+   * (or one entry for them until they're ready), then the Emptied Folders. Clicking one lists it, and a file
    * dragged onto a folder goes into it. The item that had focus keeps it.
    */
   function drawSidebar() {
@@ -377,7 +410,7 @@ export async function render(root, nav, result, duplicateGroups) {
       ),
       el("hr", { className: "folder-sidebar-divider" }),
       ...(folders === "ready"
-        ? [sidebarItem("left", "Left where they are", left.size), ...choices.map(choiceItem)]
+        ? [sidebarItem("left", "Left where they are", left.size), ...choices.map(choiceItem), newFolder]
         : [sidebarItem("folders", "Suggested Folders", null)]),
       ...(emptied.length > 0
         ? [el("hr", { className: "folder-sidebar-divider" }), sidebarItem("emptied", "Emptied Folders", emptied.length)]
@@ -391,14 +424,13 @@ export async function render(root, nav, result, duplicateGroups) {
   /** The sidebar item for the Suggested Folder `choice`, or its name field while it's renamed. */
   function choiceItem(choice) {
     if (choice === renaming?.choice) return renaming.node;
-    const className = nameMissing(choice) ? "unnamed" : choice.choice === "skip" ? "skipped" : "";
-    return sidebarItem(choice, displayName(choice), choice.files.size, className);
+    return sidebarItem(choice, displayName(choice), choice.files.size, nameMissing(choice) ? "unnamed" : "");
   }
 
   /**
    * A sidebar item listing `section` with `n` items, or no count when `n` is null. A Suggested Folder's
-   * is renamed by double-clicking it, or Return once it's listed, as in Finder; files can be dragged onto
-   * it, and onto the files left where they are.
+   * is renamed by double-clicking it, or Return once it's listed, as in Finder, merged by dragging it onto
+   * another, and has a right-click menu; files can be dragged onto it, and onto the files left where they are.
    */
   function sidebarItem(section, label, n, className = "", iconName = "folder") {
     const node = el(
@@ -417,15 +449,41 @@ export async function render(root, nav, result, duplicateGroups) {
         event.preventDefault();
         rename(section, node);
       });
+      node.draggable = true;
+      node.addEventListener("dragstart", (event) => {
+        draggedFolder = section;
+        dragged = null;
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", section.name);
+      });
+      node.addEventListener("dragend", () => {
+        draggedFolder = null;
+      });
+      node.addEventListener("contextmenu", (event) => folderMenu(section, node, event));
       dropTarget(node, section);
     } else if (section === "left") dropTarget(node, null);
     return node;
+  }
+
+  /** The right-click menu of the Suggested Folder `choice`: "Merge into…", which then lists the other folders, and Remove. */
+  function folderMenu(choice, node, event) {
+    event.preventDefault();
+    const others = choices.filter((other) => other !== choice).map((into) => ({ label: displayName(into), action: () => merge(choice, into) }));
+    menu.open([], node, event, [
+      ...(others.length > 0 ? [{ label: "Merge into…", action: () => menu.open([], node, event, others) }] : []),
+      { label: "Remove", action: () => remove(choice) },
+    ]);
   }
 
   /** Turns the sidebar item `node` of `choice` into a name field. */
   function rename(choice, node) {
     renaming = { choice, node: renameField(choice) };
     node.replaceWith(renaming.node);
+    selectName();
+  }
+
+  /** Puts the focus in the name field being renamed, with the name selected. */
+  function selectName() {
     const input = renaming.node.querySelector("input");
     input.focus();
     input.select();
@@ -534,6 +592,7 @@ export async function render(root, nav, result, duplicateGroups) {
     });
     row.addEventListener("dragstart", (event) => {
       dragged = selection.has(path) ? [...selection] : [path];
+      draggedFolder = null;
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", dragged.join("\n"));
       for (const node of pane.querySelectorAll("[data-path]")) {
@@ -547,10 +606,10 @@ export async function render(root, nav, result, duplicateGroups) {
     return row;
   }
 
-  /** Makes `node` take the dragged files into the Suggested Folder `to`, or leave them where they are when `to` is null. */
+  /** Makes `node` take the dragged files into the Suggested Folder `to`, or leave them where they are when `to` is null, and merge another dragged folder into `to`. */
   function dropTarget(node, to) {
     const holds = (path) => (to ? to.files.has(path) : left.has(path));
-    const accepts = () => dragged !== null && dragged.some((path) => !holds(path));
+    const accepts = () => (draggedFolder ? to !== null && to !== draggedFolder : dragged !== null && dragged.some((path) => !holds(path)));
     node.addEventListener("dragover", (event) => {
       if (!accepts()) return;
       event.preventDefault();
@@ -564,7 +623,11 @@ export async function render(root, nav, result, duplicateGroups) {
       node.classList.remove("drop-target");
       if (!accepts()) return;
       event.preventDefault();
-      move(dragged, to);
+      if (!draggedFolder) return move(dragged, to);
+      // The folder's sidebar item goes with it, so its own drag may not get to end.
+      const from = draggedFolder;
+      draggedFolder = null;
+      merge(from, to);
     });
   }
 
@@ -702,7 +765,13 @@ export async function render(root, nav, result, duplicateGroups) {
     if (choices.length === 0) {
       return [
         el("h2", {}, `Left where they are (${count(left.size)})`),
-        el("p", { className: "note" }, "No files here are alike enough to share a folder, so everything stays where it is."),
+        el(
+          "p",
+          { className: "note" },
+          grouping.folders.length > 0
+            ? "No folders are left, so everything stays where it is."
+            : "No files here are alike enough to share a folder, so everything stays where it is.",
+        ),
         ...leftLists([...left], row),
       ];
     }
@@ -767,7 +836,6 @@ export async function render(root, nav, result, duplicateGroups) {
       ["createHere", existingName ? "New folder here" : "Create here"],
       ["createIn", "Elsewhere…"],
       ["trashAll", "Trash all"],
-      ["skip", "Skip"],
     ];
     const segments = options.map(([value, label]) => {
       const segment = el("button", { type: "button", role: "radio", className: "segment" }, label);
@@ -822,7 +890,6 @@ export async function render(root, nav, result, duplicateGroups) {
         createHere: () => [`New folder in ${rootName}`],
         createIn: () => ["New folder in ", el("span", { className: "path" }, choice.elsewhere), " ", change],
         trashAll: () => ["Every file is trashed"],
-        skip: () => ["Every file stays where it is"],
       };
       where.replaceChildren(...parts[choice.choice]());
     }
@@ -834,7 +901,7 @@ export async function render(root, nav, result, duplicateGroups) {
         draw();
       };
       const button = (label, next) => {
-        const node = el("button", { type: "button", className: "small", disabled: choice.choice === "skip" }, label);
+        const node = el("button", { type: "button", className: "small" }, label);
         node.addEventListener("click", set(next));
         return node;
       };
@@ -857,7 +924,6 @@ export async function render(root, nav, result, duplicateGroups) {
       const paths = [...choice.files.keys()];
       size.textContent = ` · ${plural(paths.length, "file")} · ${formatSize(paths.reduce((sum, path) => sum + (sizes.get(path) ?? 0), 0))}`;
       const shown = Math.min(paths.length, limit);
-      list.classList.toggle("skipped", choice.choice === "skip");
       list.replaceChildren(...paths.slice(0, shown).map(fileRow));
       empty.hidden = paths.length > 0;
       drawMore(more, paths.length, shown, (next) => {

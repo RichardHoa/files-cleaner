@@ -83,7 +83,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-.folder-sidebar-item.skipped .folder-sidebar-name {
+.folder-sidebar-new {
   color: var(--muted);
 }
 
@@ -253,8 +253,7 @@
   gap: var(--space-1-5);
 }
 
-.folder-file.out .folder-file-name,
-.folder-files.skipped .folder-file-name {
+.folder-file.out .folder-file-name {
   color: var(--muted);
 }
 

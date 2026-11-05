@@ -35,8 +35,6 @@ pub enum FolderChoice {
     CreateIn { folder: PathBuf },
     /// Every file is trashed.
     TrashAll,
-    /// Every file stays where it is.
-    Skip,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,12 +90,12 @@ pub fn build_suggested_folders_plan(
 /// Proposes the whole review as one Plan. Each Duplicate Group's copies to
 /// trash are trashed, naming its Kept Copy, if any. Each Suggested Folder's
 /// choice is a new folder (with a Clash Suffix if its name is taken) and a
-/// Move per file into it, a Move per file into an existing folder, a Trash
-/// per file, or nothing. A file the user trashes on its own is trashed
-/// whatever the folder's choice, unless the folder is skipped; a file taken
-/// out stays put. A copy already trashed as a duplicate is left out of its
-/// folder, as are files the scan didn't find. Emptied folders, worked out
-/// from all of it, and moves to another disk are handled as in `build_plan`.
+/// Move per file into it, a Move per file into an existing folder, or a Trash
+/// per file. A file the user trashes on its own is trashed whatever the
+/// folder's choice; a file taken out stays put. A copy already trashed as a
+/// duplicate is left out of its folder, as are files the scan didn't find.
+/// Emptied folders, worked out from all of it, and moves to another disk are
+/// handled as in `build_plan`.
 pub fn build_review_plan(
     scan: &ScanResult,
     config: &Config,
@@ -132,15 +130,12 @@ pub fn build_review_plan(
     };
     let mut created = Vec::new();
     for folder in folders {
-        if folder.choice == FolderChoice::Skip {
-            continue;
-        }
         let name =
             safe_folder_name(&folder.name).ok_or_else(|| SuggestedFolderError::EmptyName {
                 name: folder.name.clone(),
             })?;
         let destination = match &folder.choice {
-            FolderChoice::Skip | FolderChoice::TrashAll => None,
+            FolderChoice::TrashAll => None,
             FolderChoice::AddTo { folder } => Some(folder.clone()),
             FolderChoice::CreateHere | FolderChoice::CreateIn { .. } => {
                 let parent = match &folder.choice {
