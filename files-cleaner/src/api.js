@@ -158,8 +158,8 @@ export async function notifyInBackground(title) {
 /**
  * Plans the whole review over the latest scan as one Plan. `duplicates` is `[{ kept, trash }]`, the path
  * of the Filed Copy, or null if no copy is kept, and the paths of those trashed. `folders` is `[{ name, choice, files }]`, `choice`
- * one of `{ type: "createHere" }`, `{ type: "addTo", folder }`, `{ type: "createIn", folder }`,
- * `{ type: "trashAll" }` or `{ type: "skip" }`, and `files` `[[path, "inFolder" | "trash" | "takeOut"]]`.
+ * one of `{ type: "createHere" }`, `{ type: "addTo", folder }`, `{ type: "createIn", folder }` or
+ * `{ type: "trashAll" }`, and `files` `[[path, "inFolder" | "trash" | "takeOut"]]`.
  * Resolves to `{ root, trashDestination, operations }`, each Operation `{ id, kind, source, relativePath,
  * destination, destinationPath, size, modified, isPackage, isFolder, reason, ticked, error }`, `kind` being
  * "trash", "move" or "createFolder", `reason` one of `{ type: "duplicate", kept }` (`kept` null if no copy is),

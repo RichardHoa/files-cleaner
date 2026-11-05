@@ -25,8 +25,9 @@ export function drawMore(node, total, shown, setLimit) {
 
 /**
  * A right-click menu with "Show in folder". `node` goes on the page once; `open(paths, row, event, items)`
- * opens it for the `contextmenu` `event` on `row`, and Show in folder selects `paths` in the file manager.
- * `items`, `[{ label, action }]`, go above Show in folder, each closing the menu once its `action()` ran.
+ * opens it for the `contextmenu` `event` on `row`, and Show in folder selects `paths` in the file manager,
+ * left out when `paths` is empty. `items`, `[{ label, action }]`, go above Show in folder, each closing the
+ * menu before its `action()` runs.
  */
 export function revealMenu() {
   const menu = el("div", { className: "row-menu file-menu", role: "menu", hidden: true });
@@ -56,7 +57,8 @@ export function revealMenu() {
     reveal.addEventListener("click", () =>
       revealInFileManager(paths).then(close, (error) => menu.replaceChildren(el("p", { className: "status error" }, describeError(error)))),
     );
-    menu.replaceChildren(...buttons, buttons.length ? el("hr", { className: "menu-separator" }) : "", reveal);
+    menu.replaceChildren(...buttons);
+    if (paths.length > 0) menu.append(buttons.length ? el("hr", { className: "menu-separator" }) : "", reveal);
     menu.hidden = false;
     // At the pointer, kept inside the window; opened from the keyboard, under the row.
     const fromKeyboard = event.clientX === 0 && event.clientY === 0;

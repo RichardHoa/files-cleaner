@@ -5,9 +5,11 @@ import {
   foldersHoldingCopies,
   initialChoices,
   initialDuplicates,
+  mergeFolder,
   moveFile,
   planChoices,
   planDuplicates,
+  removeFolder,
   setCopiesIn,
   setCopy,
   totals,
@@ -33,6 +35,38 @@ test("a file dragged to another folder leaves the first, and an emptied folder i
     },
   ]);
   assert.equal(left.size, 0);
+});
+
+test("merging moves every file into the target, which keeps its name, and drops the merged folder", () => {
+  const choices = initialChoices([
+    { name: "IELTS", files: ["/d/a.pdf", "/d/b.pdf"], existing: null },
+    { name: "Labs", files: ["/d/c.pdf"], existing: null },
+  ]);
+  const [ielts, labs] = choices;
+  ielts.files.set("/d/b.pdf", "trash");
+  mergeFolder(choices, [], ielts, labs);
+  assert.deepEqual(planChoices(choices), [
+    {
+      name: "Labs",
+      choice: { type: "createHere" },
+      files: [
+        ["/d/c.pdf", "inFolder"],
+        ["/d/a.pdf", "inFolder"],
+        ["/d/b.pdf", "trash"],
+      ],
+    },
+  ]);
+});
+
+test("removing a folder leaves its files where they are, and a group with no copy kept comes back there too", () => {
+  const { duplicate, choices, left } = threeCopies();
+  setCopy(duplicate, "/d/a.pdf", "trash", choices, left);
+  removeFolder(choices, left, [duplicate], choices[0]);
+  assert.deepEqual(choices, []);
+  assert.deepEqual([...left], ["/d/b.pdf"]);
+
+  setCopy(duplicate, "/d/x/a.pdf", "keep", choices, left);
+  assert.deepEqual([...left], ["/d/b.pdf", "/d/x/a.pdf"]);
 });
 
 test("files left where they are go by kind, Other last, each kind newest first", () => {

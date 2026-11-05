@@ -1,9 +1,9 @@
 // What the user chose on the review screen, and what that does to the files: for each Duplicate Group,
 // which copies are kept and which are trashed; for each Suggested Folder, where it goes and what happens
 // to each of its files. A folder's choice is "addTo" (into the existing subfolder it matched), "createHere"
-// (a new folder in the Scan Root), "createIn" (a new folder inside `elsewhere`, a folder the user picked),
-// "trashAll" or "skip"; each of its files is "inFolder" (goes wherever the folder's choice sends it),
-// "trash" or "takeOut".
+// (a new folder in the Scan Root), "createIn" (a new folder inside `elsewhere`, a folder the user picked)
+// or "trashAll"; each of its files is "inFolder" (goes wherever the folder's choice sends it), "trash" or
+// "takeOut". The user can also add a folder, merge one into another, or remove one.
 
 /**
  * The starting choice for each Duplicate Group of `groups` (`{ size, copies }`, as `findDuplicates` gives
@@ -139,10 +139,37 @@ export function initialChoices(folders) {
   }));
 }
 
+/** Adds a Suggested Folder of the user's own to `choices`, with no files and going in the Scan Root, and returns it. */
+export function addFolder(choices) {
+  const [choice] = initialChoices([{ name: "untitled folder", files: [], existing: null }]);
+  choices.push(choice);
+  return choice;
+}
+
+/** Takes the Suggested Folder `choice` off `choices`; a Duplicate Group that remembers its place there remembers `to` instead, the folder its files went to, or null for the files left where they are. */
+function dropFolder(choices, duplicates, choice, to) {
+  choices.splice(choices.indexOf(choice), 1);
+  for (const { emptyPlace } of duplicates) {
+    if (emptyPlace?.choice === choice) emptyPlace.choice = to;
+  }
+}
+
+/** Merges the Suggested Folder `from` into `into`, which keeps its name and where it goes: each file comes along with the choice made on it. */
+export function mergeFolder(choices, duplicates, from, into) {
+  for (const [path, file] of from.files) into.files.set(path, file);
+  dropFolder(choices, duplicates, from, into);
+}
+
+/** Removes the Suggested Folder `choice`, leaving every file of it where it is, in the Set `left`. */
+export function removeFolder(choices, left, duplicates, choice) {
+  for (const path of choice.files.keys()) left.add(path);
+  dropFolder(choices, duplicates, choice, null);
+}
+
 /** What happens to `path` of the Suggested Folder `choice`: "move", "trash" or "stay". */
 function fileFate(choice, path) {
   const file = choice.files.get(path);
-  if (choice.choice === "skip" || file === "takeOut") return "stay";
+  if (file === "takeOut") return "stay";
   if (file === "trash" || choice.choice === "trashAll") return "trash";
   return "move";
 }
@@ -163,8 +190,8 @@ export function totals(choices, duplicates = []) {
   return sum;
 }
 
-/** Whether the Suggested Folder `choice` lacks the name it needs: any choice but skip needs one once it has files, and an empty name is never read as "trash". */
-export const nameMissing = (choice) => choice.choice !== "skip" && choice.files.size > 0 && choice.name.trim() === "";
+/** Whether the Suggested Folder `choice` lacks the name it needs: it needs one once it has files, and an empty name is never read as "trash". */
+export const nameMissing = (choice) => choice.files.size > 0 && choice.name.trim() === "";
 
 /** Moves `path` into the Suggested Folder `to`, in with the rest, or into the Set `left` of files left where they are when `to` is null. */
 export function moveFile(choices, left, path, to) {
