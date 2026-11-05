@@ -188,15 +188,15 @@ fn skips_app_libraries() {
 }
 
 #[test]
-fn skips_the_holding_folder() {
+fn an_old_files_cleaner_trash_folder_is_scanned_like_any_other() {
     let dir = scan_root();
     write(dir.path(), "new.pdf", "pdf");
     write(dir.path(), "Files Cleaner Trash/session-1/old.pdf", "pdf");
 
     let result = scan(dir.path(), &empty_config(dir.path())).unwrap();
 
-    assert_eq!(names(&result), ["new.pdf"]);
-    assert_eq!(result.skipped, 1);
+    assert_eq!(names(&result), ["new.pdf", "old.pdf"]);
+    assert_eq!(result.skipped, 0);
 }
 
 #[test]

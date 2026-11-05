@@ -4,11 +4,11 @@
 import { describeError, pathSeparator, redoOperations, revealInFileManager, sessionDetails, undo } from "../api.js";
 import { el } from "../dom.js";
 import { drawMore, revealMenu } from "../file-list.js";
-import { count, formatDate, formatSize, plural, splitPath } from "../format.js";
+import { count, formatDate, formatSize, plural, splitPath, trashPlace } from "../format.js";
 import { describeSummary } from "../outcomes.js";
 import { tickState, toggleAll } from "../plan-selection.js";
 import { PAGE_SIZE, fileName, folderLabel, paging, selectedFile, visibleFiles } from "../plan-view.js";
-import { groupByState, holdingName, paneSentence, sessionHeading } from "../session-view.js";
+import { groupByState, paneSentence, sessionHeading, sessionLead } from "../session-view.js";
 import { showStatus } from "../status.js";
 
 /** "3 moved": how many files a group has, as its card and list heading say it. */
@@ -40,9 +40,9 @@ const ACTIONS = {
 
 const SORT_NAMES = { size: "biggest first", name: "by name", folder: "by folder" };
 
-/** Where the file is now, for Show in folder: null once it is gone for good. */
+/** Where the file is now, for Show in folder: null once it is gone for good, or while it's in the System Trash, which is the OS's to show. */
 function whereNow(op) {
-  if (op.state === "done") return op.destination;
+  if (op.state === "done") return op.inSystemTrash ? null : op.destination;
   return op.state === "unrecoverable" ? null : op.source;
 }
 
@@ -105,9 +105,9 @@ export function render(root, nav, sessionId, from, message) {
       el(
         "div",
         {},
-        el("h1", {}, sessionHeading(operations, info.status)),
+        el("h1", {}, sessionHeading(operations, info.status, pathSeparator)),
         el("p", { className: "session-meta" }, `${formatDate(info.startedAt)} · `, el("span", { title: info.scanRoot }, rootName)),
-        el("p", { className: "lead" }, "Nothing was deleted. You can put back any file, or all of them, at any time."),
+        el("p", { className: "lead" }, sessionLead(operations, pathSeparator)),
       ),
       el("div", { className: "actions" }, putAll),
     );
@@ -123,10 +123,7 @@ export function render(root, nav, sessionId, from, message) {
     const sizeOf = (ops) => formatSize(ops.reduce((sum, op) => sum + op.size, 0));
     function cardText({ group: name, operations: ops }) {
       if (name === "moved") {
-        // The folder and its note are one item, so the note wraps with the folder's name.
-        const where = ops.every((op) => op.kind === "trash")
-          ? el("span", {}, el("strong", {}, holdingName(ops)), muted(`, a folder inside ${rootName}`))
-          : "where the Session put them";
+        const where = ops.every((op) => op.inSystemTrash) ? el("strong", {}, trashPlace(pathSeparator)) : "where the Session put them";
         return [line(el("strong", {}, GROUP_COUNTS.moved(ops.length)), muted(" · "), sizeOf(ops), muted(" → "), where)];
       }
       if (name === "putBack") {
@@ -135,7 +132,7 @@ export function render(root, nav, sessionId, from, message) {
       const [n, ...rest] = GROUP_COUNTS.attention(ops.length).split(" ");
       return [
         line(el("strong", {}, el("span", { className: "session-attention" }, n), ` ${rest.join(" ")}`)),
-        el("span", { className: "plan-card-explain" }, "Skipped, failed or stopped part-way. Nothing here was lost."),
+        el("span", { className: "plan-card-explain" }, "Skipped, failed, stopped part-way or no longer recoverable. Each file says why."),
       ];
     }
     const cards = groups.map((g) => {

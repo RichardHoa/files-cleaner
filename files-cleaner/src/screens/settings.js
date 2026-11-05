@@ -1,4 +1,4 @@
-// Settings: the Trash Destination, the Never-Touch Paths, the Default Copy Rule, how files are grouped,
+// Settings: the Never-Touch Paths, the Default Copy Rule, how files are grouped,
 // notifications, and the Grouping Models.
 // This is the only way settings change: the config file behind them is never edited by hand. Each change
 // is saved as soon as it's made; an invalid value says why beside it and isn't saved. Grouping changes
@@ -90,7 +90,6 @@ async function showConfigSections(node) {
     return;
   }
   node.replaceChildren(
-    trashSection(),
     neverTouchSection(config.neverTouch),
     duplicatesSection(config.defaultCopyRule),
     groupingSection(config.grouping),
@@ -109,19 +108,6 @@ const choice = (name, label, detail, props) =>
     el("input", { type: "radio", name, ...props }),
     el("span", {}, label, el("span", { className: "muted" }, ` · ${detail}`)),
   );
-
-function trashSection() {
-  return section(
-    "Trash Destination",
-    el(
-      "fieldset",
-      { className: "settings-choices" },
-      el("legend", { className: "note" }, "Where trashed files go. Nothing is ever deleted for good."),
-      choice("trash-destination", "Holding Folder", "a “Files Cleaner Trash” folder inside the folder you clean", { checked: true }),
-      choice("trash-destination", "System Trash", "not yet supported", { disabled: true }),
-    ),
-  );
-}
 
 /** The Default Copy Rule: which copy of each Duplicate Group starts out kept. A failure says why and puts the choice back. */
 function duplicatesSection(initial) {

@@ -14,7 +14,7 @@ mod ocr_languages;
 use files_cleaner_core::{
     self as core, Config, DuplicateChoice, DuplicateGroup, DuplicateProgress, Plan, RecentScanRoot,
     RunProgress, ScanProgress, ScanResult, SessionDetails, SessionPage, SettingChange,
-    SuggestedFolderChoice, Summary, EXAMPLE_CONFIG,
+    SuggestedFolderChoice, Summary, SystemTrash, EXAMPLE_CONFIG,
 };
 use files_cleaner_grouping::{self as grouping, CardStore, Grouping, LlamaModels};
 use serde::{Deserialize, Serialize};
@@ -284,7 +284,7 @@ async fn run_plan(
     let plan = plan.ok_or_else(|| CommandError::new("Build a Plan first"))?;
     blocking(move || {
         // A closed window can't receive progress; the Run carries on.
-        core::run_with_progress(&plan, &approved, &journal_dir, |progress| {
+        core::run_with_progress(&plan, &approved, &journal_dir, &SystemTrash, |progress| {
             let _ = on_progress.send(progress);
         })
     })
@@ -301,8 +301,8 @@ async fn undo(
 ) -> Result<Summary, CommandError> {
     let journal_dir = journal_dir(&app)?;
     blocking(move || match operation_ids {
-        Some(ids) => core::undo_operations(&session_id, &ids, &journal_dir),
-        None => core::undo(&session_id, &journal_dir),
+        Some(ids) => core::undo_operations(&session_id, &ids, &journal_dir, &SystemTrash),
+        None => core::undo(&session_id, &journal_dir, &SystemTrash),
     })
     .await
 }
@@ -315,7 +315,8 @@ async fn redo_operations(
     operation_ids: Vec<String>,
 ) -> Result<Summary, CommandError> {
     let journal_dir = journal_dir(&app)?;
-    blocking(move || core::redo_operations(&session_id, &operation_ids, &journal_dir)).await
+    blocking(move || core::redo_operations(&session_id, &operation_ids, &journal_dir, &SystemTrash))
+        .await
 }
 
 /// A past Session and each of its Operations, for the Session screen.
@@ -488,18 +489,16 @@ fn clear_grouping_cards(app: AppHandle) -> Result<(), CommandError> {
 /// about to run.
 #[tauri::command]
 async fn build_review_plan(
-    app: AppHandle,
     latest: State<'_, Latest>,
     duplicates: Vec<DuplicateChoice>,
     folders: Vec<SuggestedFolderChoice>,
     keep: bool,
 ) -> Result<Plan, CommandError> {
-    let loaded = read_config(&app)?;
     let scan = latest_scan(&latest)?;
     let planned = Arc::clone(&scan);
     // Finding names already taken, and emptied folders, reads the disk.
     let plan =
-        blocking(move || core::build_review_plan(&planned, &loaded.config, &duplicates, &folders))
+        blocking(move || core::build_review_plan(&planned, &SystemTrash, &duplicates, &folders))
             .await?;
     if !keep {
         return Ok(plan);
@@ -531,6 +530,14 @@ fn open_file(app: AppHandle, latest: State<'_, Latest>, path: PathBuf) -> Result
     app.opener()
         .open_path(path.to_string_lossy(), None::<&str>)
         .map_err(CommandError::new)
+}
+
+/// Whether any of the files at `paths` is on a different disk from `folder`.
+#[tauri::command]
+fn on_another_disk(paths: Vec<PathBuf>, folder: PathBuf) -> bool {
+    paths
+        .iter()
+        .any(|path| core::different_disks(path, &folder))
 }
 
 /// The Grouping Models' status: `{ state, downloaded, total, error }`.
@@ -671,7 +678,8 @@ pub fn run() {
             reading_pace,
             save_reading_pace,
             build_review_plan,
-            open_file
+            open_file,
+            on_another_disk
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use common::scan_root;
 use files_cleaner_core::{
     load_config, reset_config, save_config, ConfigError, DefaultCopyRule, RuleOperation,
-    RuleTarget, SettingChange, TrashDestination, EXAMPLE_CONFIG,
+    RuleTarget, SettingChange, EXAMPLE_CONFIG,
 };
 
 fn error(text: &str) -> ConfigError {
@@ -17,7 +17,6 @@ fn error(text: &str) -> ConfigError {
 fn the_example_config_loads() {
     let config = load_config(EXAMPLE_CONFIG, Path::new("/Users/me")).unwrap();
 
-    assert_eq!(config.trash_destination, TrashDestination::HoldingFolder);
     assert_eq!(
         config.never_touch,
         [PathBuf::from("/Users/me/Downloads/Keep")]
@@ -27,22 +26,19 @@ fn the_example_config_loads() {
 }
 
 #[test]
-fn settings_default_to_the_holding_folder() {
+fn settings_default_to_nothing_set() {
     let config = load_config("{}", Path::new("/Users/me")).unwrap();
 
-    assert_eq!(config.trash_destination, TrashDestination::HoldingFolder);
     assert!(config.never_touch.is_empty());
     assert!(config.rules.is_empty());
 }
 
 #[test]
-fn reads_every_setting_value() {
-    let config = load_config(
-        r#"{ "trashDestination": "holdingFolder" }"#,
-        Path::new("/Users/me"),
-    )
-    .unwrap();
-    assert_eq!(config.trash_destination, TrashDestination::HoldingFolder);
+fn the_old_trash_destination_setting_is_ignored() {
+    for value in ["holdingFolder", "systemTrash", "bin"] {
+        let text = format!(r#"{{ "trashDestination": "{value}" }}"#);
+        load_config(&text, Path::new("/Users/me")).unwrap();
+    }
 }
 
 #[test]
@@ -65,16 +61,8 @@ fn the_old_duplicate_handling_setting_is_ignored() {
 }
 
 #[test]
-fn the_system_trash_is_rejected_as_not_supported_yet_with_its_line() {
-    let err = error("{\n  \"trashDestination\": \"systemTrash\"\n}");
-
-    assert!(err.message.contains("not supported yet"), "{}", err.message);
-    assert_eq!(err.line, Some(2));
-}
-
-#[test]
 fn invalid_json_reports_line_and_column() {
-    let err = error("{\n  \"trashDestination\": \"holdingFolder\"\n  \"rules\": []\n}");
+    let err = error("{\n  \"neverTouch\": []\n  \"rules\": []\n}");
 
     assert_eq!((err.line, err.column), (Some(3), Some(3)));
     assert!(
@@ -86,7 +74,7 @@ fn invalid_json_reports_line_and_column() {
 
 #[test]
 fn unknown_setting_values_are_rejected_with_their_line() {
-    let err = error("{\n  \"trashDestination\": \"bin\"\n}");
+    let err = error("{\n  \"defaultCopyRule\": \"bin\"\n}");
     assert_eq!(err.line, Some(2));
     assert!(err.message.contains("bin"), "{}", err.message);
 }

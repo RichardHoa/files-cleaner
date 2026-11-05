@@ -1207,11 +1207,14 @@ name = "files-cleaner-core"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "libc",
  "objc2",
  "objc2-foundation",
  "serde",
  "serde_json",
  "tempfile",
+ "windows",
+ "windows-core",
 ]
 
 [[package]]

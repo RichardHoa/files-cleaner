@@ -3,7 +3,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use files_cleaner_core::{load_config, Config};
+use files_cleaner_core::{
+    self as core, load_config, Config, DuplicateChoice, DuplicateProgress, OsTrash, Plan,
+    RunProgress, ScanResult, SessionError, SuggestedFolderChoice, SuggestedFolderError, Summary,
+};
 use tempfile::TempDir;
 
 /// A temp folder for a test to scan.
@@ -67,4 +70,140 @@ pub fn symlink(target: impl AsRef<Path>, link: impl AsRef<Path>) {
             std::os::windows::fs::symlink_file(target, link).unwrap();
         }
     }
+}
+
+/// A folder for a test's Journals, on the same disk as `scan_root`'s folders
+/// so its `FakeTrash` can rename items into it.
+pub fn journal_dir() -> TempDir {
+    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("test-tmp");
+    fs::create_dir_all(&base).unwrap();
+    tempfile::Builder::new()
+        .prefix("journal-")
+        .tempdir_in(base)
+        .unwrap()
+}
+
+/// An OS Trash that moves items into a folder beside the Journals, so tests
+/// never touch a real Trash. It can refuse items, or say up front that
+/// everything in a folder can't be trashed.
+pub struct FakeTrash {
+    folder: PathBuf,
+    pub refuses: Vec<PathBuf>,
+    pub blocks: Vec<PathBuf>,
+}
+
+impl FakeTrash {
+    pub fn new(journal: &Path) -> Self {
+        FakeTrash {
+            folder: journal.join("fake-trash"),
+            refuses: Vec::new(),
+            blocks: Vec::new(),
+        }
+    }
+}
+
+impl OsTrash for FakeTrash {
+    fn blocked(&self, folder: &Path) -> Option<String> {
+        self.blocks
+            .iter()
+            .any(|blocked| blocked == folder)
+            .then(|| "This drive has no Trash".to_string())
+    }
+
+    fn trash(&self, path: &Path) -> Result<PathBuf, String> {
+        if self.refuses.iter().any(|refused| refused == path) {
+            return Err("The fake Trash refused it".to_string());
+        }
+        fs::create_dir_all(&self.folder).unwrap();
+        let name = path.file_name().unwrap().to_string_lossy();
+        let landed = (1..)
+            .map(|n| self.folder.join(format!("{n} {name}")))
+            .find(|landed| !landed.exists())
+            .unwrap();
+        fs::rename(path, &landed).map_err(|e| e.to_string())?;
+        Ok(landed)
+    }
+
+    fn put_back(&self, landed: &Path, to: &Path) -> Result<(), String> {
+        if to.exists() {
+            return Err(format!("{} already exists", to.display()));
+        }
+        fs::create_dir_all(to.parent().unwrap()).unwrap();
+        fs::rename(landed, to).map_err(|e| e.to_string())
+    }
+}
+
+/// An OS Trash for building Plans, which has nothing to refuse.
+fn no_trash() -> FakeTrash {
+    FakeTrash::new(Path::new(""))
+}
+
+pub fn run(plan: &Plan, approved: &[String], journal: &Path) -> Result<Summary, SessionError> {
+    core::run(plan, approved, journal, &FakeTrash::new(journal))
+}
+
+pub fn run_with_progress(
+    plan: &Plan,
+    approved: &[String],
+    journal: &Path,
+    on_progress: impl FnMut(RunProgress),
+) -> Result<Summary, SessionError> {
+    core::run_with_progress(
+        plan,
+        approved,
+        journal,
+        &FakeTrash::new(journal),
+        on_progress,
+    )
+}
+
+pub fn undo(session_id: &str, journal: &Path) -> Result<Summary, SessionError> {
+    core::undo(session_id, journal, &FakeTrash::new(journal))
+}
+
+pub fn undo_operations(
+    session_id: &str,
+    operation_ids: &[String],
+    journal: &Path,
+) -> Result<Summary, SessionError> {
+    core::undo_operations(session_id, operation_ids, journal, &FakeTrash::new(journal))
+}
+
+pub fn redo_operations(
+    session_id: &str,
+    operation_ids: &[String],
+    journal: &Path,
+) -> Result<Summary, SessionError> {
+    core::redo_operations(session_id, operation_ids, journal, &FakeTrash::new(journal))
+}
+
+pub fn build_plan(scan: &ScanResult, config: &Config) -> Plan {
+    core::build_plan(scan, config, &no_trash())
+}
+
+pub fn build_plan_with_progress(
+    scan: &ScanResult,
+    config: &Config,
+    on_progress: impl FnMut(DuplicateProgress),
+) -> Plan {
+    core::build_plan_with_progress(scan, config, &no_trash(), on_progress)
+}
+
+pub fn build_rule_plan(scan: &ScanResult, config: &Config) -> Plan {
+    core::build_rule_plan(scan, config, &no_trash())
+}
+
+pub fn build_review_plan(
+    scan: &ScanResult,
+    duplicates: &[DuplicateChoice],
+    folders: &[SuggestedFolderChoice],
+) -> Result<Plan, SuggestedFolderError> {
+    core::build_review_plan(scan, &no_trash(), duplicates, folders)
+}
+
+pub fn build_suggested_folders_plan(
+    scan: &ScanResult,
+    folders: &[SuggestedFolderChoice],
+) -> Result<Plan, SuggestedFolderError> {
+    core::build_suggested_folders_plan(scan, &no_trash(), folders)
 }

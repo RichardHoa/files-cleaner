@@ -43,3 +43,10 @@ Open points for the run and for ticket 02:
 - Q4 No-Trash volume: NOT ANSWERED. The folder used, `~/Downloads`, has a Trash (`~/.Trash`), so it wasn't a no-Trash test. Needs a network share or similar.
 
 Windows and Linux haven't been run yet.
+
+**Developer decision (2026-11-05):** Two questions no longer need answering, on any OS:
+
+- **Full Disk Access (macOS):** not tested. Assume the user will grant it. If they haven't, the app tells them to turn it on in System Settings themselves.
+- **Drive with no Trash:** not tested, as an edge case. Most users are on a drive with a Trash. `--no-trash-volume` is optional, so Windows and Linux only need `cargo run -- --pause`.
+
+The spec's rule that a trash never becomes a permanent delete is unchanged. Ticket 02 still builds that refusal, but no run has checked it.

@@ -9,7 +9,6 @@ use crate::rules::PLACEHOLDERS;
 
 /// The config written on first launch, as a working starting point.
 pub const EXAMPLE_CONFIG: &str = r#"{
-  "trashDestination": "holdingFolder",
   "neverTouch": ["~/Downloads/Keep"]
 }
 "#;
@@ -20,7 +19,6 @@ pub const EXAMPLE_CONFIG: &str = r#"{
 pub struct Config {
     /// The user's home folder, which `~/` paths were expanded against.
     pub home: PathBuf,
-    pub trash_destination: TrashDestination,
     pub never_touch: Vec<PathBuf>,
     pub default_copy_rule: DefaultCopyRule,
     /// In file order: the first matching Rule wins. Rules are frozen: they
@@ -79,17 +77,6 @@ pub enum DefaultCopyRule {
     ShortestPath,
 }
 
-/// Where Trash sends files. Only the Holding Folder is supported: the
-/// System Trash is deferred (ADR-0001), and a config asking for it is
-/// rejected rather than silently ignored.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum TrashDestination {
-    #[default]
-    HoldingFolder,
-    SystemTrash,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Rule {
@@ -146,8 +133,10 @@ impl std::error::Error for ConfigError {}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RawConfig {
-    #[serde(default)]
-    trash_destination: TrashDestination,
+    /// The old Trash Destination setting: Trash always goes to the System
+    /// Trash now, so any value is ignored.
+    #[serde(default, rename = "trashDestination")]
+    _trash_destination: serde::de::IgnoredAny,
     /// The old Duplicate Handling setting: running or skipping the
     /// duplicate step is the choice now, so any value is ignored.
     #[serde(default, rename = "duplicates")]
@@ -199,15 +188,6 @@ struct RawThen {
 /// Parses and validates the config JSON. `home` expands `~/` paths.
 pub fn load_config(text: &str, home: &Path) -> Result<Config, ConfigError> {
     let raw: RawConfig = serde_json::from_str(text).map_err(json_error)?;
-    if raw.trash_destination == TrashDestination::SystemTrash {
-        return Err(error_at(
-            text,
-            0,
-            "systemTrash",
-            "trashDestination \"systemTrash\" is not supported yet; use \"holdingFolder\"".into(),
-        ));
-    }
-
     let mut never_touch = Vec::new();
     for written in &raw.never_touch {
         match expand_home(written, home) {
@@ -226,7 +206,6 @@ pub fn load_config(text: &str, home: &Path) -> Result<Config, ConfigError> {
     let grouping = validate_grouping(&raw.grouping, text)?;
     let mut config = Config {
         home: home.to_path_buf(),
-        trash_destination: raw.trash_destination,
         never_touch,
         default_copy_rule: raw.default_copy_rule,
         rules: Vec::new(),

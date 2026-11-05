@@ -5,11 +5,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
-use common::{empty_config, real_path, scan_root, write};
+use common::{
+    build_plan, empty_config, journal_dir, real_path, redo_operations, run, run_with_progress,
+    scan_root, undo, undo_operations, write,
+};
 use files_cleaner_core::{
-    build_plan, list_sessions, lock_sessions, redo_operations, run, run_with_progress, scan,
-    session_details, undo, undo_operations, OperationKind, OperationState, Plan, SessionError,
-    SessionInfo, SessionStatus, TrashDestination, HOLDING_FOLDER_NAME,
+    list_sessions, lock_sessions, scan, session_details, OperationKind, OperationState, Plan,
+    SessionError, SessionInfo, SessionStatus,
 };
 use tempfile::TempDir;
 
@@ -78,6 +80,16 @@ fn id_of(plan: &Plan, relative: &str) -> String {
         .clone()
 }
 
+/// Where Session `id` says the item from `relative` landed.
+fn landed(journal: &Path, id: &str, relative: &str) -> PathBuf {
+    let details = session_details(id, journal).unwrap();
+    let op = details
+        .operations
+        .iter()
+        .find(|op| op.relative_path.join("/") == relative);
+    op.unwrap().destination.clone().unwrap()
+}
+
 /// Every Session, newest first.
 fn all_sessions(journal: &Path) -> Vec<SessionInfo> {
     list_sessions(journal, 0, usize::MAX).unwrap().sessions
@@ -94,19 +106,15 @@ fn all_ids(plan: &Plan) -> Vec<String> {
 }
 
 #[test]
-fn run_trashes_only_approved_operations_into_the_holding_folder() {
+fn run_trashes_only_approved_operations() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let plan = plan_for(dir.path());
 
     let summary = run(&plan, &[id_of(&plan, "b/c/copy.txt")], journal.path()).unwrap();
 
-    let holding = dir
-        .path()
-        .join(HOLDING_FOLDER_NAME)
-        .join(&summary.session_id);
     assert_eq!(
-        fs::read_to_string(holding.join("b/c/copy.txt")).unwrap(),
+        fs::read_to_string(landed(journal.path(), &summary.session_id, "b/c/copy.txt")).unwrap(),
         "same contents"
     );
     assert!(!dir.path().join("b/c/copy.txt").exists());
@@ -132,7 +140,7 @@ fn a_run_reports_its_progress_ending_with_every_operation_finished() {
             1_000,
         );
     }
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let plan = plan_for(dir.path());
     let approved = all_ids(&plan);
     assert_eq!(approved.len(), 300);
@@ -162,7 +170,7 @@ fn a_run_reports_its_progress_ending_with_every_operation_finished() {
 #[test]
 fn a_source_that_changed_after_planning_is_skipped_with_a_note() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let plan = plan_for(dir.path());
     set_modified(&dir.path().join("a/copy.txt"), 9_000);
     fs::remove_file(dir.path().join("b/c/copy.txt")).unwrap();
@@ -187,7 +195,7 @@ fn a_source_that_changed_after_planning_is_skipped_with_a_note() {
 #[test]
 fn a_source_whose_size_changed_is_skipped() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let plan = plan_for(dir.path());
     let path = dir.path().join("a/copy.txt");
     fs::write(&path, "longer contents now").unwrap();
@@ -202,7 +210,7 @@ fn a_source_whose_size_changed_is_skipped() {
 #[test]
 fn scan_plan_run_undo_restores_the_original_folder_exactly() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let before = snapshot(dir.path());
     let plan = plan_for(dir.path());
 
@@ -222,7 +230,7 @@ fn scan_plan_run_undo_restores_the_original_folder_exactly() {
 #[test]
 fn undo_never_overwrites_a_file_now_at_the_original_location() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let plan = plan_for(dir.path());
     let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
     write(dir.path(), "a/copy.txt", "something new");
@@ -244,13 +252,8 @@ fn undo_never_overwrites_a_file_now_at_the_original_location() {
         1,
         "the rest of the Session is still undone"
     );
-    let held = dir
-        .path()
-        .join(HOLDING_FOLDER_NAME)
-        .join(&summary.session_id)
-        .join("a/copy.txt");
     assert_eq!(
-        fs::read_to_string(held).unwrap(),
+        fs::read_to_string(landed(journal.path(), &summary.session_id, "a/copy.txt")).unwrap(),
         "same contents",
         "the trashed copy stays put"
     );
@@ -259,14 +262,10 @@ fn undo_never_overwrites_a_file_now_at_the_original_location() {
 #[test]
 fn undo_reports_a_trashed_copy_that_is_gone_as_unrecoverable() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let plan = plan_for(dir.path());
     let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
-    let held = dir
-        .path()
-        .join(HOLDING_FOLDER_NAME)
-        .join(&summary.session_id);
-    fs::remove_file(held.join("a/copy.txt")).unwrap();
+    fs::remove_file(landed(journal.path(), &summary.session_id, "a/copy.txt")).unwrap();
 
     let undone = undo(&summary.session_id, journal.path()).unwrap();
 
@@ -283,7 +282,7 @@ fn undo_reports_a_trashed_copy_that_is_gone_as_unrecoverable() {
 
 #[test]
 fn sessions_are_listed_newest_first_with_their_status() {
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
 
     let first = messy_folder();
     let plan = plan_for(first.path());
@@ -314,17 +313,13 @@ fn sessions_are_listed_newest_first_with_their_status() {
     assert_eq!(sessions[1].status, SessionStatus::Undone);
     assert_eq!(sessions[2].status, SessionStatus::Completed);
     assert_eq!(sessions[2].scan_root, real_path(first.path()));
-    assert_eq!(
-        sessions[2].trash_destination,
-        TrashDestination::HoldingFolder
-    );
     assert_eq!(sessions[2].done, 2);
 }
 
 #[test]
 fn undoing_a_partly_undone_session_again_retries_what_was_skipped() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let before = snapshot(dir.path());
     let plan = plan_for(dir.path());
     let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
@@ -345,7 +340,7 @@ fn undoing_a_partly_undone_session_again_retries_what_was_skipped() {
 #[test]
 fn only_one_session_runs_at_a_time() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let plan = plan_for(dir.path());
     let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
 
@@ -364,7 +359,7 @@ fn only_one_session_runs_at_a_time() {
 #[test]
 fn a_damaged_journal_doesnt_hide_the_other_sessions() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let plan = plan_for(dir.path());
     let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
     // A crash right after the Journal file was created leaves it empty.
@@ -399,7 +394,7 @@ fn states(journal: &Path, root: &Path, id: &str) -> Vec<(String, OperationState)
 #[test]
 fn session_details_list_every_operation_with_its_state_size_and_note() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let plan = plan_for(dir.path());
     fs::remove_file(dir.path().join("b/c/copy.txt")).unwrap();
     let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
@@ -436,49 +431,36 @@ fn session_details_give_each_operation_its_paths_from_the_scan_root() {
     set_modified(&write(dir.path(), "keep/top.txt", "same contents"), 3_000);
     set_modified(&write(dir.path(), "top.txt", "same contents"), 2_000);
     set_modified(&write(dir.path(), "a/b/copy.txt", "same contents"), 1_000);
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let plan = plan_for(dir.path());
     let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
 
     let details = session_details(&summary.session_id, journal.path()).unwrap();
 
-    let paths: Vec<(Vec<String>, Vec<String>)> = details
+    let paths: Vec<Vec<String>> = details
         .operations
         .iter()
-        .map(|op| (op.relative_path.clone(), op.relative_destination.clone()))
+        .map(|op| op.relative_path.clone())
         .collect();
-    let held = |path: &str| {
-        names(&format!(
-            "{HOLDING_FOLDER_NAME}/{}/{path}",
-            summary.session_id
-        ))
-    };
-    assert_eq!(
-        paths,
-        [
-            (names("a/b/copy.txt"), held("a/b/copy.txt")),
-            (names("top.txt"), held("top.txt"))
-        ]
-    );
+    assert_eq!(paths, [names("a/b/copy.txt"), names("top.txt")]);
     let root = real_path(dir.path());
     assert_eq!(
         details.operations[1].source,
         root.join("top.txt"),
         "the absolute paths stay"
     );
+    assert!(details.operations[1].in_system_trash);
     assert_eq!(
         details.operations[1].destination,
-        root.join(HOLDING_FOLDER_NAME)
-            .join(&summary.session_id)
-            .join("top.txt")
+        summary.done[1].destination
     );
 }
 
 #[test]
 fn a_journal_written_before_notes_still_reads_with_its_reason_as_the_note() {
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let id = "2026-01-01_00-00-00-000Z";
-    let held = format!("/root/{HOLDING_FOLDER_NAME}/{id}/a/x.txt");
+    let held = format!("/root/Files Cleaner Trash/{id}/a/x.txt");
     let records = [
         serde_json::json!({ "id": id, "scanRoot": "/root", "trashDestination": "holdingFolder", "startedAt": 0 }),
         serde_json::json!({
@@ -497,16 +479,14 @@ fn a_journal_written_before_notes_still_reads_with_its_reason_as_the_note() {
     assert_eq!(op.state, OperationState::Skipped);
     assert_eq!(op.note.as_deref(), Some("It no longer exists"));
     assert_eq!(op.relative_path, names("a/x.txt"));
-    assert_eq!(
-        op.relative_destination,
-        names(&format!("{HOLDING_FOLDER_NAME}/{id}/a/x.txt"))
-    );
+    assert_eq!(op.destination, Some(PathBuf::from(held)));
+    assert!(!op.in_system_trash);
 }
 
 #[test]
 fn undoing_one_operation_restores_only_that_file() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let plan = plan_for(dir.path());
     let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
 
@@ -539,7 +519,7 @@ fn undoing_one_operation_restores_only_that_file() {
 #[test]
 fn redo_trashes_an_undone_file_again() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let plan = plan_for(dir.path());
     let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
     let after_run = snapshot(dir.path());
@@ -549,11 +529,7 @@ fn redo_trashes_an_undone_file_again() {
 
     assert_eq!(redone.done.len(), 2);
     assert!(redone.skipped.is_empty());
-    assert_eq!(
-        snapshot(dir.path()),
-        after_run,
-        "each file is back where the Session put it"
-    );
+    assert_eq!(snapshot(dir.path()), after_run, "each file has left again");
     assert_eq!(
         all_sessions(journal.path())[0].status,
         SessionStatus::Completed
@@ -563,7 +539,7 @@ fn redo_trashes_an_undone_file_again() {
 #[test]
 fn undo_and_redo_can_go_back_and_forth() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let before = snapshot(dir.path());
     let plan = plan_for(dir.path());
     let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
@@ -585,7 +561,7 @@ fn undo_and_redo_can_go_back_and_forth() {
 #[test]
 fn redo_skips_a_file_that_changed_after_it_was_restored() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let plan = plan_for(dir.path());
     let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
     undo(&summary.session_id, journal.path()).unwrap();
@@ -609,7 +585,7 @@ fn redo_skips_a_file_that_changed_after_it_was_restored() {
 #[test]
 fn undo_and_redo_leave_operations_in_the_wrong_state_alone() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let plan = plan_for(dir.path());
     let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
 
@@ -666,7 +642,7 @@ fn page_ids(journal: &Path, offset: usize, limit: usize) -> Vec<String> {
 
 #[test]
 fn sessions_are_listed_a_page_at_a_time_newest_first() {
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let mut ids = fake_journals(journal.path(), 23);
     ids.reverse();
 
@@ -696,7 +672,7 @@ fn sessions_are_listed_a_page_at_a_time_newest_first() {
 
 #[test]
 fn no_journals_is_an_empty_first_page() {
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
 
     let page = list_sessions(&journal.path().join("not yet"), 0, 10).unwrap();
 
@@ -706,7 +682,7 @@ fn no_journals_is_an_empty_first_page() {
 
 #[test]
 fn a_damaged_journal_is_left_out_without_moving_the_other_pages() {
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let mut ids = fake_journals(journal.path(), 12);
     ids.reverse();
     // The newest Session's Journal was cut short by a crash.
@@ -719,7 +695,7 @@ fn a_damaged_journal_is_left_out_without_moving_the_other_pages() {
 #[test]
 fn each_session_counts_its_carried_out_operations_by_kind_with_their_total_size() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let plan = plan_for(dir.path());
     // One of the two copies vanishes, so its Operation is skipped.
     fs::remove_file(dir.path().join("b/c/copy.txt")).unwrap();
@@ -737,7 +713,7 @@ fn each_session_counts_its_carried_out_operations_by_kind_with_their_total_size(
 #[test]
 fn undone_operations_still_count_towards_the_session() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let plan = plan_for(dir.path());
     let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
     undo_operations(
@@ -756,7 +732,7 @@ fn undone_operations_still_count_towards_the_session() {
 
 #[test]
 fn sessions_started_in_the_same_millisecond_keep_their_order() {
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let base = "2026-01-01_00-00-00-000Z";
     let ids: Vec<String> = ["", "-002", "-010"]
         .iter()
@@ -784,18 +760,17 @@ fn append_record(journal: &Path, id: &str, record: serde_json::Value) {
 #[test]
 fn an_undo_cut_short_after_the_move_counts_as_restored_not_unrecoverable() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let before = snapshot(dir.path());
     let plan = plan_for(dir.path());
     let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
     // Undo moved a/copy.txt back, then the app crashed before journaling it.
     let id = id_of(&plan, "a/copy.txt");
-    let held = dir
-        .path()
-        .join(HOLDING_FOLDER_NAME)
-        .join(&summary.session_id)
-        .join("a/copy.txt");
-    fs::rename(held, dir.path().join("a/copy.txt")).unwrap();
+    fs::rename(
+        landed(journal.path(), &summary.session_id, "a/copy.txt"),
+        dir.path().join("a/copy.txt"),
+    )
+    .unwrap();
     append_record(
         journal.path(),
         &summary.session_id,
@@ -820,7 +795,7 @@ fn an_undo_cut_short_after_the_move_counts_as_restored_not_unrecoverable() {
 #[test]
 fn an_undo_cut_short_before_the_move_is_simply_undone_again() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let before = snapshot(dir.path());
     let plan = plan_for(dir.path());
     let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
@@ -838,43 +813,42 @@ fn an_undo_cut_short_before_the_move_is_simply_undone_again() {
 }
 
 #[test]
-fn a_redo_cut_short_after_the_move_counts_as_done() {
+fn a_redo_cut_short_after_the_trash_says_to_restore_it_by_hand() {
     let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+    let journal = journal_dir();
     let plan = plan_for(dir.path());
     let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
     undo(&summary.session_id, journal.path()).unwrap();
     let id = id_of(&plan, "a/copy.txt");
-    let held = dir
-        .path()
-        .join(HOLDING_FOLDER_NAME)
-        .join(&summary.session_id)
-        .join("a/copy.txt");
-    fs::create_dir_all(held.parent().unwrap()).unwrap();
-    fs::rename(dir.path().join("a/copy.txt"), &held).unwrap();
+    // The Redo's Trash happened, then the app crashed before recording where.
+    fs::remove_file(dir.path().join("a/copy.txt")).unwrap();
     append_record(
         journal.path(),
         &summary.session_id,
         serde_json::json!({ "record": "intent", "operationId": &id, "phase": "redo" }),
     );
 
-    let undone = undo_operations(&summary.session_id, &[id], journal.path()).unwrap();
-
     assert_eq!(
-        undone.done.len(),
-        1,
-        "the redo was settled as done, so it can be undone"
+        states(journal.path(), dir.path(), &summary.session_id)[0].1,
+        OperationState::Unrecoverable
     );
-    assert!(dir.path().join("a/copy.txt").exists());
+    let undone = undo_operations(&summary.session_id, &[id], journal.path()).unwrap();
+    assert!(undone.done.is_empty(), "the app never guesses: {undone:?}");
 }
 
 #[test]
-fn a_run_cut_short_after_the_move_can_still_be_undone() {
-    let dir = messy_folder();
-    let journal = TempDir::new().unwrap();
+fn a_move_cut_short_after_it_happened_can_still_be_undone() {
+    let dir = scan_root();
+    write(dir.path(), "talk.pptx", "talk");
+    write(dir.path(), "Slides/other.txt", "other");
+    let journal = journal_dir();
     let before = snapshot(dir.path());
-    let plan = plan_for(dir.path());
-    let summary = run(&plan, &[id_of(&plan, "a/copy.txt")], journal.path()).unwrap();
+    let config = common::config(
+        r#"{ "rules": [{ "name": "Slides", "match": { "extensions": ["pptx"] }, "then": { "moveTo": "Slides" } }] }"#,
+        dir.path(),
+    );
+    let plan = common::build_rule_plan(&scan(dir.path(), &config).unwrap(), &config);
+    let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
     // Rewrite the Journal as if the app crashed right after the move.
     let path = journal.path().join(format!("{}.jsonl", summary.session_id));
     let text = fs::read_to_string(&path).unwrap();

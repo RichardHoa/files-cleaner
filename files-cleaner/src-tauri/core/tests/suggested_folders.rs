@@ -1,9 +1,11 @@
 mod common;
 
-use common::{empty_config, real_path, scan_root, write};
+use common::{
+    build_review_plan, build_suggested_folders_plan, empty_config, real_path, scan_root, write,
+};
 use files_cleaner_core::{
-    build_review_plan, build_suggested_folders_plan, duplicate_groups, scan, DuplicateChoice,
-    FileChoice, FolderChoice, OperationKind, Reason, SuggestedFolderChoice,
+    duplicate_groups, scan, DuplicateChoice, FileChoice, FolderChoice, OperationKind, Reason,
+    SuggestedFolderChoice,
 };
 
 #[test]
@@ -25,7 +27,7 @@ fn create_here_plans_the_folder_then_a_move_per_file() {
             (real_path(&slides), FileChoice::InFolder),
         ],
     };
-    let plan = build_suggested_folders_plan(&scan, &config, &[folder]).unwrap();
+    let plan = build_suggested_folders_plan(&scan, &[folder]).unwrap();
 
     let ops: Vec<(OperationKind, Vec<String>)> = plan
         .operations
@@ -43,7 +45,7 @@ fn create_here_plans_the_folder_then_a_move_per_file() {
     );
     assert_eq!(
         plan.operations[1].destination_path,
-        root.join("CS101").join("lecture 1.pdf")
+        Some(root.join("CS101").join("lecture 1.pdf"))
     );
     assert!(plan.operations.iter().all(|op| op.reason
         == Reason::SuggestedFolder {
@@ -80,7 +82,7 @@ fn one_plan_trashes_copies_moves_folder_files_and_offers_the_folder_both_empty()
         choice: FolderChoice::CreateHere,
         files: vec![(real_path(&notes), FileChoice::InFolder)],
     };
-    let plan = build_review_plan(&scan, &config, &duplicates, &[folder]).unwrap();
+    let plan = build_review_plan(&scan, &duplicates, &[folder]).unwrap();
 
     let ops: Vec<(OperationKind, Vec<String>, &Reason, bool)> = plan
         .operations
@@ -126,6 +128,41 @@ fn one_plan_trashes_copies_moves_folder_files_and_offers_the_folder_both_empty()
 }
 
 #[test]
+fn add_to_moves_a_file_into_the_folder_and_leaves_one_already_in_it() {
+    let dir = scan_root();
+    let root = dir.path();
+    let loose = write(root, "report.pdf", "one");
+    let already = write(root, "Old/notes.pdf", "two");
+    let config = empty_config(root);
+    let scan = scan(root, &config).unwrap();
+
+    let folder = SuggestedFolderChoice {
+        name: "Old".to_string(),
+        choice: FolderChoice::AddTo {
+            folder: scan.root.join("Old"),
+        },
+        files: vec![
+            (real_path(&loose), FileChoice::InFolder),
+            (real_path(&already), FileChoice::InFolder),
+        ],
+    };
+    let plan = build_suggested_folders_plan(&scan, &[folder]).unwrap();
+
+    let moves: Vec<_> = plan
+        .operations
+        .iter()
+        .map(|op| (op.kind, op.destination_path.clone()))
+        .collect();
+    assert_eq!(
+        moves,
+        [(
+            OperationKind::Move,
+            Some(scan.root.join("Old").join("report.pdf"))
+        )]
+    );
+}
+
+#[test]
 fn a_group_with_no_kept_copy_trashes_every_copy_and_its_reason_names_none() {
     let dir = scan_root();
     let root = dir.path();
@@ -138,7 +175,7 @@ fn a_group_with_no_kept_copy_trashes_every_copy_and_its_reason_names_none() {
         kept: None,
         trash: vec![real_path(&first), real_path(&second)],
     }];
-    let plan = build_review_plan(&scan, &config, &duplicates, &[]).unwrap();
+    let plan = build_review_plan(&scan, &duplicates, &[]).unwrap();
 
     let trashed: Vec<_> = plan
         .operations

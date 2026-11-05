@@ -4,10 +4,8 @@ use std::fs;
 use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
 
-use common::{config, empty_config, scan_root, write};
-use files_cleaner_core::{
-    build_plan, build_plan_with_progress, duplicate_groups, scan, OperationKind, Plan, Reason,
-};
+use common::{build_plan, build_plan_with_progress, config, empty_config, scan_root, write};
+use files_cleaner_core::{duplicate_groups, scan, OperationKind, Plan, Reason};
 
 /// Sets `path`'s modified date to `secs` after the epoch.
 fn set_modified(path: &Path, secs: u64) {
@@ -241,7 +239,7 @@ fn operation_ids_are_stable_between_plans() {
 }
 
 #[test]
-fn each_trashed_copy_names_where_it_goes_and_its_keeper() {
+fn each_trashed_copy_has_no_destination_and_names_its_kept_copy() {
     let dir = scan_root();
     let keeper = write(dir.path(), "keep/report.pdf", "copy");
     let copy = write(dir.path(), "sub/copy.pdf", "copy");
@@ -271,13 +269,7 @@ fn each_trashed_copy_names_where_it_goes_and_its_keeper() {
         })
         .collect();
 
-    let trashed = |path: &str, keeper: &str| {
-        (
-            path.to_string(),
-            format!("Files Cleaner Trash/This Session/{path}"),
-            keeper.to_string(),
-        )
-    };
+    let trashed = |path: &str, keeper: &str| (path.to_string(), String::new(), keeper.to_string());
     assert_eq!(
         summary,
         [

@@ -1,14 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PAGE_SIZE, paging, selectedFile, visibleFiles } from "../src/plan-view.js";
-import { groupByState, holdingName, paneSentence, sessionHeading } from "../src/session-view.js";
-
-const HOLDING = "Files Cleaner Trash";
+import { groupByState, paneSentence, sessionHeading, sessionLead } from "../src/session-view.js";
 
 /** A Session's Trash Operation for the `/`-separated `path`, in `state`. */
 function op(path, state = "done", { size = 0, note = null } = {}) {
   const relativePath = path.split("/");
-  return { id: `trash:${path}`, kind: "trash", relativePath, relativeDestination: [HOLDING, "S", ...relativePath], size, state, note };
+  return { id: `trash:${path}`, kind: "trash", inSystemTrash: true, relativePath, size, state, note };
 }
 
 test("each state goes into its group, in a fixed order, and empty groups are left out", () => {
@@ -29,7 +27,8 @@ test("each state goes into its group, in a fixed order, and empty groups are lef
 const many = (n, state, prefix = state) => Array.from({ length: n }, (_, i) => op(`${prefix}/${i}.txt`, state));
 
 test("the heading says what moved, and keeps up as files are put back", () => {
-  assert.equal(sessionHeading([...many(3, "done"), op("x.txt", "skipped")], "completed"), "3 files moved to Files Cleaner Trash");
+  assert.equal(sessionHeading([...many(3, "done"), op("x.txt", "skipped")], "completed", "/"), "3 files moved to Trash");
+  assert.equal(sessionHeading(many(2, "done"), "completed", "\\"), "2 files moved to Recycle Bin");
   assert.equal(sessionHeading([...many(2, "done"), ...many(1, "undone")], "partlyUndone"), "1 of 3 files put back");
   assert.equal(sessionHeading(many(3, "undone"), "undone"), "All 3 files are back");
 });
@@ -40,13 +39,14 @@ test("a Session that stopped part-way says how far it got", () => {
 });
 
 test("one file is singular", () => {
-  assert.equal(sessionHeading([op("a.txt")], "completed"), "1 file moved to Files Cleaner Trash");
+  assert.equal(sessionHeading([op("a.txt")], "completed", "/"), "1 file moved to Trash");
   assert.equal(sessionHeading([op("a.txt", "undone")], "undone"), "All 1 file is back");
   assert.equal(sessionHeading([op("a.txt", "started")], "crashed"), "Stopped after 0 of 1 file");
 });
 
 test("the pane says where a moved file is, and where a put-back one is", () => {
-  assert.equal(paneSentence(op("Zoom/a.mp4"), "Downloads"), "In Files Cleaner Trash, inside Downloads.");
+  assert.equal(paneSentence(op("Zoom/a.mp4"), "Downloads", "/"), "In the Trash.");
+  assert.equal(paneSentence(op("Zoom/a.mp4"), "Downloads", "\\"), "In the Recycle Bin.");
   assert.equal(paneSentence(op("Zoom/a.mp4", "undone"), "Downloads"), "Back in Zoom/.");
   assert.equal(paneSentence(op("a.mp4", "undone"), "Downloads"), "Back in Downloads/.");
 });
@@ -54,8 +54,8 @@ test("the pane says where a moved file is, and where a put-back one is", () => {
 test("the pane adds why the last Put back or Move again didn't happen", () => {
   const note = "Zoom/a.mp4 already exists";
   assert.equal(
-    paneSentence(op("Zoom/a.mp4", "done", { note }), "Downloads"),
-    "In Files Cleaner Trash, inside Downloads. Not put back: Zoom/a.mp4 already exists",
+    paneSentence(op("Zoom/a.mp4", "done", { note }), "Downloads", "/"),
+    "In the Trash. Not put back: Zoom/a.mp4 already exists",
   );
   assert.equal(paneSentence(op("Zoom/a.mp4", "undone", { note }), "Downloads"), "Back in Zoom/. Not moved again: Zoom/a.mp4 already exists");
 });
@@ -96,13 +96,23 @@ test("when search hides the selected file, the first file still shown is selecte
 /** A Session's Operation of `kind` for `path`, which went to the absolute `destination`. */
 function ruleOp(kind, path, destination, state = "done") {
   const relativePath = path.split("/");
-  return { id: `${kind}:${path}`, kind, relativePath, relativeDestination: relativePath, destination, size: 0, state, note: null };
+  return { id: `${kind}:${path}`, kind, relativePath, destination, size: 0, state, note: null };
 }
 
-test("a Session that moved files into folders doesn't say they all went to the Holding Folder", () => {
+test("an older Session's Trash is named by the folder it went to, not the System Trash", () => {
+  const old = { ...ruleOp("trash", "a.mp4", "/r/Files Cleaner Trash/S/a.mp4"), inSystemTrash: false };
+  assert.equal(paneSentence(old, "r", "/"), "In /r/Files Cleaner Trash/S.");
+  assert.equal(sessionHeading([old], "completed", "/"), "1 file moved");
+});
+
+test("the lead says files can be put back until the System Trash is emptied, if any went there", () => {
+  assert.match(sessionLead([op("a.txt")], "/"), /until you empty the Trash\.$/);
+  assert.match(sessionLead([ruleOp("move", "a.pptx", "/r/a.pptx")], "/"), /at any time\.$/);
+});
+
+test("a Session that moved files into folders doesn't say they all went to the System Trash", () => {
   const ops = [ruleOp("createFolder", "Study", "/r/Study"), ruleOp("move", "a.pptx", "/r/Study/a.pptx"), op("b.dmg")];
   assert.equal(sessionHeading(ops, "completed"), "2 files moved, 1 folder created");
-  assert.equal(holdingName(ops), HOLDING, "named from a trashed file, not a created folder");
   assert.equal(sessionHeading([ruleOp("move", "a.pptx", "/r/Study/a.pptx")], "completed"), "1 file moved");
 });
 

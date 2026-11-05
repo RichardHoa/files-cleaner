@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::config::TrashDestination;
-use crate::executor::Outcome;
+use crate::executor::{exists, Outcome};
 use crate::journal::{self, OutcomeKind, Phase, Record, SessionError, SessionHeader};
+use crate::os_trash::TRASH_PLACE;
 use crate::planner::{names_below, OperationKind, SourceState};
 
 /// One past Session, for the Session list.
@@ -16,7 +16,6 @@ use crate::planner::{names_below, OperationKind, SourceState};
 pub struct SessionInfo {
     pub id: String,
     pub scan_root: PathBuf,
-    pub trash_destination: TrashDestination,
     /// Milliseconds since the Unix epoch.
     pub started_at: i64,
     pub status: SessionStatus,
@@ -74,13 +73,13 @@ pub struct SessionOperation {
     pub kind: OperationKind,
     /// Where the item was before the Operation.
     pub source: PathBuf,
-    /// Where the Operation put it.
-    pub destination: PathBuf,
+    /// Where the Operation put it; `None` for a Trash that hasn't landed.
+    pub destination: Option<PathBuf>,
+    /// Whether `destination` is in the System Trash. An older Session's
+    /// Trash isn't: it went to a folder inside its Scan Root.
+    pub in_system_trash: bool,
     /// The names from the Scan Root down to the source, its own name last.
     pub relative_path: Vec<String>,
-    /// The names from the Scan Root down to the destination, its own name
-    /// last.
-    pub relative_destination: Vec<String>,
     pub size: u64,
     pub state: OperationState,
     /// Why it was skipped or failed, or why the last Undo or Redo of it
@@ -100,7 +99,8 @@ pub enum OperationState {
     Failed,
     /// Carried out, then undone. Redo can carry it out again.
     Undone,
-    /// Carried out, but Undo found the trashed copy gone.
+    /// Carried out, but the trashed copy is gone, or where it landed was
+    /// never recorded.
     Unrecoverable,
 }
 
@@ -109,7 +109,10 @@ pub(crate) struct JournaledOperation {
     pub id: String,
     pub kind: OperationKind,
     pub source: PathBuf,
-    pub destination: PathBuf,
+    /// `None` for a Trash that hasn't landed.
+    pub destination: Option<PathBuf>,
+    /// Whether `destination` came from the OS Trash.
+    pub in_system_trash: bool,
     pub planned: SourceState,
     pub state: OperationState,
     /// Why it wasn't done, as journaled in its last outcome's `reason`.
@@ -137,20 +140,32 @@ impl JournaledOperation {
         }
     }
 
-    /// Where `phase` moves the item from, and to.
-    pub fn route(&self, phase: Phase) -> (&Path, &Path) {
-        match phase {
-            Phase::Run | Phase::Redo => (&self.source, &self.destination),
-            Phase::Undo => (&self.destination, &self.source),
-        }
+    /// Where `phase` moves the item from, and to, if that is known.
+    pub fn route(&self, phase: Phase) -> Option<(&Path, &Path)> {
+        let destination = self.destination.as_deref()?;
+        Some(match phase {
+            Phase::Run | Phase::Redo => (&self.source, destination),
+            Phase::Undo => (destination, &self.source),
+        })
     }
 
-    pub fn outcome(&self, note: Option<String>) -> Outcome {
+    /// True if a crash cut short sending it to the System Trash, it left its
+    /// place, and where it landed was never recorded. A location from before
+    /// an earlier Undo says nothing about this pass, so it isn't looked at:
+    /// the app never guesses which item in the Trash is this one.
+    pub fn may_be_in_trash(&self) -> bool {
+        self.kind == OperationKind::Trash
+            && matches!(self.interrupted, Some(Phase::Run | Phase::Redo))
+            && !exists(&self.source)
+            && (self.in_system_trash || self.destination.as_deref().is_none_or(|d| !exists(d)))
+    }
+
+    pub fn outcome(&self, landed: Option<PathBuf>, note: Option<String>) -> Outcome {
         Outcome {
             operation_id: self.id.clone(),
             kind: self.kind,
             source: self.source.clone(),
-            destination: self.destination.clone(),
+            destination: landed.or_else(|| self.destination.clone()),
             note,
         }
     }
@@ -167,6 +182,11 @@ fn next_state(state: OperationState, phase: Phase, outcome: OutcomeKind) -> Oper
         // A skipped Undo or Redo leaves the Operation as it was.
         (Phase::Undo | Phase::Redo, OutcomeKind::Skipped) => state,
     }
+}
+
+/// The Note for an item whose location wasn't recorded.
+pub(crate) fn restore_by_hand_note() -> String {
+    format!("It may be in the {TRASH_PLACE}, restore it by hand")
 }
 
 /// A Session's Journal, read.
@@ -188,6 +208,14 @@ impl SessionJournal {
         for record in &records {
             session.apply(record);
         }
+        // Worked out on each read, not journaled: if the user restores the
+        // item by hand, the Operation goes back to what it was.
+        for op in &mut session.operations {
+            if op.may_be_in_trash() {
+                op.state = OperationState::Unrecoverable;
+                op.note = Some(restore_by_hand_note());
+            }
+        }
         Ok(session)
     }
 
@@ -206,6 +234,7 @@ impl SessionJournal {
                     kind: *kind,
                     source: source.clone(),
                     destination: destination.clone(),
+                    in_system_trash: false,
                     planned: *planned,
                     state: OperationState::Started,
                     note: None,
@@ -225,8 +254,13 @@ impl SessionJournal {
                 phase,
                 outcome,
                 reason: note,
+                landed,
             } => {
                 if let Some(op) = self.operation(operation_id) {
+                    if landed.is_some() {
+                        op.destination = landed.clone();
+                        op.in_system_trash = true;
+                    }
                     op.state = next_state(op.state, *phase, *outcome);
                     op.note = note.clone();
                     op.interrupted = None;
@@ -276,7 +310,6 @@ impl SessionJournal {
         SessionInfo {
             id: self.header.id.clone(),
             scan_root: self.header.scan_root.clone(),
-            trash_destination: self.header.trash_destination,
             started_at: self.header.started_at,
             status,
             done,
@@ -340,8 +373,8 @@ pub fn session_details(
             kind: op.kind,
             source: op.source.clone(),
             destination: op.destination.clone(),
+            in_system_trash: op.in_system_trash,
             relative_path: names_below(root, &op.source),
-            relative_destination: names_below(root, &op.destination),
             size: op.planned.size,
             state: op.state,
             note: op.note.clone(),

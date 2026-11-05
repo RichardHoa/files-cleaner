@@ -7,6 +7,7 @@ mod duplicates;
 mod executor;
 mod folder_name;
 mod journal;
+mod os_trash;
 mod planner;
 mod protection;
 mod recent;
@@ -19,7 +20,7 @@ mod volume;
 
 pub use config::{
     load_config, reset_config, save_config, Config, ConfigError, DefaultCopyRule, GroupingSettings,
-    Rule, RuleOperation, RuleTarget, SettingChange, TrashDestination, EXAMPLE_CONFIG,
+    Rule, RuleOperation, RuleTarget, SettingChange, EXAMPLE_CONFIG,
 };
 pub use duplicates::{
     duplicate_groups, DuplicateCopy, DuplicateGroup, DuplicatePhase, DuplicateProgress,
@@ -29,11 +30,11 @@ pub use executor::{
 };
 pub use folder_name::safe_folder_name;
 pub use journal::{lock_sessions, SessionError, SessionLock};
+pub use os_trash::{OsTrash, SystemTrash};
 pub use planner::{
     build_plan, build_plan_with_progress, build_rule_plan, Operation, OperationKind, Plan, Reason,
-    SourceState, THIS_SESSION_FOLDER,
+    SourceState,
 };
-pub use protection::HOLDING_FOLDER_NAME;
 pub use recent::{
     recent_scan_roots, record_recent_scan_root, remove_recent_scan_root, RecentScanRoot,
 };
@@ -48,3 +49,4 @@ pub use suggested_folders::{
     build_review_plan, build_suggested_folders_plan, DuplicateChoice, FileChoice, FolderChoice,
     SuggestedFolderChoice, SuggestedFolderError,
 };
+pub use volume::different_disks;

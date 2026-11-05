@@ -7,18 +7,13 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::clash;
-use crate::config::{Config, Rule, RuleOperation, RuleTarget, TrashDestination};
+use crate::config::{Config, Rule, RuleOperation, RuleTarget};
 use crate::duplicates::DuplicateProgress;
-use crate::protection::{
-    is_os_metadata_file, is_package, is_within, same_path, Protection, HOLDING_FOLDER_NAME,
-};
+use crate::os_trash::OsTrash;
+use crate::protection::{is_os_metadata_file, is_package, is_within, same_path, Protection};
 use crate::scanner::{ScanEntry, ScanResult};
 use crate::volume::different_disks;
 use crate::{duplicates, rules};
-
-/// The name a Plan's destinations give the Session's folder inside the
-/// Holding Folder, which is only named once the Plan runs.
-pub const THIS_SESSION_FOLDER: &str = "This Session";
 
 /// The proposed Operations for one Scan Root.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,7 +21,6 @@ pub const THIS_SESSION_FOLDER: &str = "This Session";
 pub struct Plan {
     /// The Scan Root, with symlinks resolved.
     pub root: PathBuf,
-    pub trash_destination: TrashDestination,
     /// Create Folder Operations first, each folder before the ones inside
     /// it, so a Plan run in order has every folder before it is needed;
     /// Trash of the folders the Plan empties last, once they are empty.
@@ -47,12 +41,11 @@ pub struct Operation {
     pub relative_path: Vec<String>,
     /// The names from the Scan Root down to where the item will be once the
     /// Plan runs, its own name last. A destination outside the Scan Root is
-    /// given in full.
+    /// given in full. Empty for Trash, which goes to the System Trash.
     pub destination: Vec<String>,
-    /// Where the item will be once the Plan runs. For Trash, its Session's
-    /// folder in the Holding Folder is only named then, so this holds
-    /// `THIS_SESSION_FOLDER` instead.
-    pub destination_path: PathBuf,
+    /// Where the item will be once the Plan runs. `None` for Trash: only the
+    /// OS knows where it lands, and only once it has.
+    pub destination_path: Option<PathBuf>,
     /// The source when scanned; it is skipped if it has changed when the
     /// Plan runs.
     #[serde(flatten)]
@@ -62,8 +55,10 @@ pub struct Operation {
     /// Whether it starts ticked. Trashing an emptied folder starts
     /// unticked, as does an Operation that can't happen.
     pub ticked: bool,
-    /// Why it can't happen, such as a move to another disk. Such an
-    /// Operation can't be ticked, and is never run.
+    /// Why it can't happen, such as a move to another disk or a Trash on a
+    /// disk with no System Trash. Such an Operation can't be ticked, and is
+    /// never run; a blocked Trash that is approved anyway is journaled as
+    /// skipped, with this as its Note.
     pub error: Option<String>,
 }
 
@@ -115,10 +110,11 @@ pub enum Reason {
 
 /// Proposes the duplicate step: every copy but the first in a Duplicate Group
 /// is trashed, and nothing else. A folder the Plan would empty is offered
-/// for Trash, unticked. An Operation that would cross from one disk to
-/// another is kept, as an error that can't be ticked.
-pub fn build_plan(scan: &ScanResult, config: &Config) -> Plan {
-    build_plan_with_progress(scan, config, |_| {})
+/// for Trash, unticked. A Move that would cross from one disk to another,
+/// or a Trash `os_trash` says can't happen, is kept, as an error that can't be
+/// ticked.
+pub fn build_plan(scan: &ScanResult, config: &Config, os_trash: &dyn OsTrash) -> Plan {
+    build_plan_with_progress(scan, config, os_trash, |_| {})
 }
 
 /// Like `build_plan`, calling `on_progress` while finding duplicates (see
@@ -126,6 +122,7 @@ pub fn build_plan(scan: &ScanResult, config: &Config) -> Plan {
 pub fn build_plan_with_progress(
     scan: &ScanResult,
     config: &Config,
+    os_trash: &dyn OsTrash,
     on_progress: impl FnMut(DuplicateProgress),
 ) -> Plan {
     let root = &scan.root;
@@ -133,7 +130,6 @@ pub fn build_plan_with_progress(
     for group in duplicates::find(&scan.entries, config.default_copy_rule, on_progress) {
         for copy in group.copies {
             operations.push(trash(
-                root,
                 copy,
                 Reason::Duplicate {
                     kept: Some(group.kept.relative_path.clone()),
@@ -141,7 +137,7 @@ pub fn build_plan_with_progress(
             ));
         }
     }
-    finish(root, config, operations, Vec::new())
+    finish(root, os_trash, operations, Vec::new())
 }
 
 /// Rules are frozen: no Plan the app builds uses them, but the code stays
@@ -149,9 +145,9 @@ pub fn build_plan_with_progress(
 /// item matches says, treating duplicate copies like any other file. Rules
 /// move items into folders, which are created if missing, and never over
 /// anything: a taken name gets a Clash Suffix. An item already in its
-/// Rule's folder stays put. Emptied folders and moves to another disk are
-/// handled as in `build_plan`.
-pub fn build_rule_plan(scan: &ScanResult, config: &Config) -> Plan {
+/// Rule's folder stays put. Emptied folders and Operations that can't happen
+/// are handled as in `build_plan`.
+pub fn build_rule_plan(scan: &ScanResult, config: &Config, os_trash: &dyn OsTrash) -> Plan {
     let root = &scan.root;
     let protection = Protection::new(config);
     let mut operations = Vec::new();
@@ -164,7 +160,7 @@ pub fn build_rule_plan(scan: &ScanResult, config: &Config) -> Plan {
             rule: rule.name.clone(),
         };
         match &rule.operation {
-            RuleOperation::Trash => operations.push(trash(root, entry, reason)),
+            RuleOperation::Trash => operations.push(trash(entry, reason)),
             RuleOperation::MoveTo { folder, rename } => {
                 let folder = match folder {
                     RuleTarget::Absolute(folder) => folder.clone(),
@@ -192,15 +188,16 @@ pub fn build_rule_plan(scan: &ScanResult, config: &Config) -> Plan {
             }
         }
     }
-    finish(root, config, operations, folders.created)
+    finish(root, os_trash, operations, folders.created)
 }
 
 /// Makes a Plan of `operations` and of creating the folders in `created`,
 /// each with the Reason it is needed: in order, with the folders the Plan
-/// empties offered for Trash and moves to another disk marked as errors.
+/// empties offered for Trash, and moves to another disk and Trash that
+/// `os_trash` says can't happen marked as errors.
 pub(crate) fn finish(
     root: &Path,
-    config: &Config,
+    os_trash: &dyn OsTrash,
     mut operations: Vec<Operation>,
     mut created: Vec<(PathBuf, Reason)>,
 ) -> Plan {
@@ -212,13 +209,27 @@ pub(crate) fn finish(
         .into_iter()
         .map(|(folder, reason)| create_folder_operation(root, folder, reason));
     let mut operations: Vec<Operation> = created.chain(operations).collect();
+    // Asked per folder: the answer depends on the disk, and Plans are large.
+    let mut blocked_folders: HashMap<PathBuf, Option<String>> = HashMap::new();
+    let mut why_not = |op: &Operation| {
+        across_disks(op).or_else(|| {
+            let folder = op
+                .source
+                .parent()
+                .filter(|_| op.kind == OperationKind::Trash)?;
+            blocked_folders
+                .entry(folder.to_path_buf())
+                .or_insert_with(|| os_trash.blocked(folder))
+                .clone()
+        })
+    };
     for op in &mut operations {
-        op.error = across_disks(op);
+        op.error = why_not(op);
     }
     let emptied = emptied_folders(root, &operations);
     for folder in emptied {
         let mut op = trash_emptied_folder(root, &folder);
-        op.error = across_disks(&op);
+        op.error = why_not(&op);
         operations.push(op);
     }
     for op in &mut operations {
@@ -226,30 +237,24 @@ pub(crate) fn finish(
     }
     Plan {
         root: root.to_path_buf(),
-        trash_destination: config.trash_destination,
         operations,
     }
 }
 
-/// Why `op` can't happen, if its item would move to another disk.
+/// Why `op` can't happen, if it would move its item to another disk.
 fn across_disks(op: &Operation) -> Option<String> {
-    if op.kind == OperationKind::CreateFolder || !different_disks(&op.source, &op.destination_path)
-    {
+    let destination = op
+        .destination_path
+        .as_deref()
+        .filter(|_| op.kind == OperationKind::Move)?;
+    if !different_disks(&op.source, destination) {
         return None;
     }
     let name = op
         .relative_path
         .last()
         .map_or_else(|| op.source.display().to_string(), Clone::clone);
-    let to = match op.kind {
-        OperationKind::Trash => format!("the {HOLDING_FOLDER_NAME} folder"),
-        _ => op
-            .destination_path
-            .parent()
-            .unwrap_or(&op.destination_path)
-            .display()
-            .to_string(),
-    };
+    let to = destination.parent().unwrap_or(destination).display();
     Some(format!(
         "{name} is on a different disk from {to}, and the app only moves items within one disk"
     ))
@@ -270,8 +275,7 @@ fn emptied_folders(root: &Path, operations: &[Operation]) -> Vec<PathBuf> {
     let arriving: Vec<&Path> = operations
         .iter()
         .filter(runs)
-        .filter(|op| op.kind != OperationKind::Trash)
-        .map(|op| op.destination_path.as_path())
+        .filter_map(|op| op.destination_path.as_deref())
         .collect();
     // Sorted by path, each folder comes before the folders inside it.
     let candidates: BTreeSet<&Path> = leaving
@@ -372,17 +376,15 @@ fn protected_below(protection: &Protection, folder: &Path, root: &Path) -> bool 
         .any(|f| protection.reason(f, true).is_some() || is_package(f))
 }
 
-/// Trashes `entry` into this Session's folder in the Holding Folder,
-/// keeping its path from the Scan Root.
-pub(crate) fn trash(root: &Path, entry: &ScanEntry, reason: Reason) -> Operation {
-    let destination = in_holding_folder(&entry.relative_path);
+/// Sends `entry` to the System Trash.
+pub(crate) fn trash(entry: &ScanEntry, reason: Reason) -> Operation {
     Operation {
         id: format!("trash:{}", entry.relative_path.join("/")),
         kind: OperationKind::Trash,
         source: entry.path.clone(),
         relative_path: entry.relative_path.clone(),
-        destination_path: root.join(destination.iter().collect::<PathBuf>()),
-        destination,
+        destination: Vec::new(),
+        destination_path: None,
         planned: planned(entry),
         reason,
         ticked: true,
@@ -394,14 +396,13 @@ pub(crate) fn trash(root: &Path, entry: &ScanEntry, reason: Reason) -> Operation
 /// unticked.
 fn trash_emptied_folder(root: &Path, folder: &Path) -> Operation {
     let relative_path = names_below(root, folder);
-    let destination = in_holding_folder(&relative_path);
     Operation {
         id: format!("trashFolder:{}", relative_path.join("/")),
         kind: OperationKind::Trash,
         source: folder.to_path_buf(),
-        destination_path: root.join(destination.iter().collect::<PathBuf>()),
         relative_path,
-        destination,
+        destination: Vec::new(),
+        destination_path: None,
         planned: SourceState {
             size: 0,
             modified: 0,
@@ -412,16 +413,6 @@ fn trash_emptied_folder(root: &Path, folder: &Path) -> Operation {
         ticked: false,
         error: None,
     }
-}
-
-/// The names from the Scan Root down to where Trash puts the item at
-/// `relative_path`.
-fn in_holding_folder(relative_path: &[String]) -> Vec<String> {
-    [HOLDING_FOLDER_NAME, THIS_SESSION_FOLDER]
-        .into_iter()
-        .map(String::from)
-        .chain(relative_path.iter().cloned())
-        .collect()
 }
 
 pub(crate) fn move_to(
@@ -436,7 +427,7 @@ pub(crate) fn move_to(
         source: entry.path.clone(),
         relative_path: entry.relative_path.clone(),
         destination: names_below(root, &destination),
-        destination_path: destination,
+        destination_path: Some(destination),
         planned: planned(entry),
         reason,
         ticked: true,
@@ -452,7 +443,7 @@ fn create_folder_operation(root: &Path, folder: PathBuf, reason: Reason) -> Oper
         source: folder.clone(),
         relative_path: names.clone(),
         destination: names,
-        destination_path: folder,
+        destination_path: Some(folder),
         planned: SourceState {
             size: 0,
             modified: 0,
