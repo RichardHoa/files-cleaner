@@ -18,8 +18,8 @@ mod suggested_folders;
 mod volume;
 
 pub use config::{
-    load_config, reset_config, save_config, Config, ConfigError, GroupingSettings, Rule,
-    RuleOperation, RuleTarget, SettingChange, TrashDestination, EXAMPLE_CONFIG,
+    load_config, reset_config, save_config, Config, ConfigError, DefaultCopyRule, GroupingSettings,
+    Rule, RuleOperation, RuleTarget, SettingChange, TrashDestination, EXAMPLE_CONFIG,
 };
 pub use duplicates::{
     duplicate_groups, DuplicateCopy, DuplicateGroup, DuplicatePhase, DuplicateProgress,

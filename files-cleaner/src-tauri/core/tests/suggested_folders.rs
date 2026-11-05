@@ -63,7 +63,7 @@ fn one_plan_trashes_copies_moves_folder_files_and_offers_the_folder_both_empty()
     let config = empty_config(root);
     let scan = scan(root, &config).unwrap();
 
-    let groups = duplicate_groups(&scan, |_| {});
+    let groups = duplicate_groups(&scan, config.default_copy_rule, |_| {});
     assert_eq!(groups.len(), 1);
     let found: Vec<_> = groups[0].copies.iter().map(|c| c.path.clone()).collect();
     assert_eq!(

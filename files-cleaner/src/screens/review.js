@@ -37,7 +37,9 @@ import { progressBar } from "../progress-bar.js";
 import { describeEstimate, readingEstimate, updatedAverage } from "../reading-estimate.js";
 import {
   byKindNewestFirst,
+  copyFolder,
   filedCopy,
+  foldersHoldingCopies,
   initialChoices,
   initialDuplicates,
   moveFile,
@@ -46,6 +48,7 @@ import {
   placeDuplicates,
   planChoices,
   planDuplicates,
+  setCopiesIn,
   setCopy,
   totals,
   trashedCopies,
@@ -567,7 +570,8 @@ export async function render(root, nav, result, duplicateGroups) {
 
   /**
    * The Duplicate Groups, each with its name, how many copies and the space going to Files Cleaner Trash,
-   * then every copy, with a button trashing the copies marked Trash; once that's done, what it did.
+   * then every copy, with a button trashing the copies marked Trash and menus setting every copy in a
+   * folder; once that's done, what it did.
    */
   function duplicatesPanel() {
     if (duplicates.length === 0) return [el("h2", {}, "Duplicates"), el("p", { className: "note" }, "No file here is an exact copy of another.")];
@@ -596,9 +600,29 @@ export async function render(root, nav, result, duplicateGroups) {
         `${count(trashed)} ${trashed === 1 ? "copy" : "copies"} to trash`,
         `, of ${plural(duplicates.length, "file")} · ${formatSize(trashedSize)} to Files Cleaner Trash`,
       ),
+      el("div", { className: "duplicates-bulk" }, copiesInMenu("Keep every copy in…", "keep"), copiesInMenu("Trash every copy in…", "trash")),
       el("ul", { className: "duplicate-groups", ariaLabel: "Duplicate Groups" }, ...duplicates.slice(0, shown).map(duplicateGroup)),
       more,
     ];
+  }
+
+  /** A menu of the folders holding copies, setting every copy in the one picked to `fate`, in the groups not changed by hand. */
+  function copiesInMenu(label, fate) {
+    const holding = foldersHoldingCopies(duplicates);
+    const pick = el(
+      "select",
+      { ariaLabel: label },
+      el("option", { value: "", disabled: true, selected: true }, label),
+      ...holding.map((folder, i) => el("option", { value: i }, folder || rootName)),
+    );
+    pick.value = "";
+    pick.addEventListener("change", () => {
+      setCopiesIn(duplicates, holding[Number(pick.value)], fate, choices, left);
+      drawPane();
+      // The menu is drawn again: the focus goes with it.
+      pane.querySelector(`select[aria-label="${label}"]`)?.focus();
+    });
+    return pick;
   }
 
   /** A Duplicate Group: its name, how many copies, the space going to Files Cleaner Trash, a warning if no copy is kept, then each copy. */
@@ -657,7 +681,7 @@ export async function render(root, nav, result, duplicateGroups) {
       { className: `duplicate-copy ${fate}`, tabIndex: 0 },
       el("div", { className: "segmented", role: "radiogroup", ariaLabel: `What to do with ${own}` }, ...segments),
       el("span", { className: "duplicate-copy-name", title: copy.path }, own),
-      el("span", { className: "path duplicate-copy-folder" }, copy.relativePath.slice(0, -1).join("/") || rootName),
+      el("span", { className: "path duplicate-copy-folder" }, copyFolder(copy) || rootName),
       el("span", { className: "muted folder-file-date" }, formatDate(copy.modified)),
     );
     row.dataset.copy = copy.path;

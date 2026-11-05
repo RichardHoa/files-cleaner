@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 
 use common::scan_root;
 use files_cleaner_core::{
-    load_config, reset_config, save_config, ConfigError, RuleOperation, RuleTarget, SettingChange,
-    TrashDestination, EXAMPLE_CONFIG,
+    load_config, reset_config, save_config, ConfigError, DefaultCopyRule, RuleOperation,
+    RuleTarget, SettingChange, TrashDestination, EXAMPLE_CONFIG,
 };
 
 fn error(text: &str) -> ConfigError {
@@ -301,6 +301,28 @@ fn refusing_notifications_is_saved_in_the_config() {
 
     let config = load_config(&fs::read_to_string(&path).unwrap(), home).unwrap();
     assert_eq!(config.notifications, Some(false));
+}
+
+#[test]
+fn the_default_copy_rule_starts_as_newest_and_a_saved_one_loads_again() {
+    let root = scan_root();
+    let path = root.path().join("config.json");
+    fs::write(&path, EXAMPLE_CONFIG).unwrap();
+    let home = Path::new("/Users/me");
+    assert_eq!(
+        load_config(EXAMPLE_CONFIG, home).unwrap().default_copy_rule,
+        DefaultCopyRule::Newest
+    );
+
+    save_config(
+        &path,
+        &SettingChange::DefaultCopyRule(DefaultCopyRule::Oldest),
+        home,
+    )
+    .unwrap();
+
+    let config = load_config(&fs::read_to_string(&path).unwrap(), home).unwrap();
+    assert_eq!(config.default_copy_rule, DefaultCopyRule::Oldest);
 }
 
 #[test]

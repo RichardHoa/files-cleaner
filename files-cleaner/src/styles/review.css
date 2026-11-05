@@ -303,6 +303,17 @@
   gap: var(--space-3);
 }
 
+.duplicates-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.duplicates-bulk select {
+  max-width: 100%;
+}
+
 /* A Duplicate Group: its name and totals, then each copy under it with Keep or Trash before its name, its folder and date after. */
 .duplicate-groups {
   list-style: none;

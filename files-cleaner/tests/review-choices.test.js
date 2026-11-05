@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   byKindNewestFirst,
+  foldersHoldingCopies,
   initialChoices,
   initialDuplicates,
   moveFile,
   planChoices,
   planDuplicates,
+  setCopiesIn,
   setCopy,
   totals,
 } from "../src/review-choices.js";
@@ -77,6 +79,31 @@ test("a copy kept is never trashed because the copy before it was marked Trash i
   choices[0].files.set("/d/a.pdf", "trash");
   setCopy(duplicate, "/d/a.pdf", "trash", choices, left);
   assert.equal(choices[0].files.get("/d/x/a.pdf"), "inFolder");
+});
+
+/** A Duplicate Group of the file `name`, with a copy in each of `folders`, "" being the Scan Root. */
+const groupIn = (name, folders) => ({
+  size: 1,
+  copies: folders.map((folder) => ({
+    path: `/d/${folder ? `${folder}/` : ""}${name}`,
+    relativePath: [...(folder ? folder.split("/") : []), name],
+  })),
+});
+
+test("the folders holding copies are listed once each, A-Z, the Scan Root first", () => {
+  const duplicates = initialDuplicates([groupIn("a.pdf", ["y", "x/old"]), groupIn("b.pdf", ["", "y"])]);
+  assert.deepEqual(foldersHoldingCopies(duplicates), ["", "x/old", "y"]);
+});
+
+test("trashing every copy in a folder trashes its copies in untouched groups only", () => {
+  const [untouched, byHand] = initialDuplicates([groupIn("a.pdf", ["x", "y"]), groupIn("b.pdf", ["x", "y"])]);
+  const left = new Set();
+  setCopy(byHand, "/d/y/b.pdf", "keep", [], left);
+
+  setCopiesIn([untouched, byHand], "x", "trash", [], left);
+
+  assert.equal(untouched.copies.get("/d/x/a.pdf"), "trash");
+  assert.deepEqual([...byHand.copies.values()], ["keep", "keep"]);
 });
 
 test("trashing every copy takes the group out of its folder, and keeping one again puts it back", () => {

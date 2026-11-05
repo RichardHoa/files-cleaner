@@ -1,5 +1,5 @@
-// Settings: the Trash Destination, the Never-Touch Paths, how files are grouped, notifications, and the
-// Grouping Models.
+// Settings: the Trash Destination, the Never-Touch Paths, the Default Copy Rule, how files are grouped,
+// notifications, and the Grouping Models.
 // This is the only way settings change: the config file behind them is never edited by hand. Each change
 // is saved as soon as it's made; an invalid value says why beside it and isn't saved. Grouping changes
 // apply the next time files are grouped.
@@ -22,6 +22,13 @@ import { showStatus } from "../status.js";
 
 /** What this OS calls its file manager, for "Show in Finder". */
 const FILE_MANAGER = pathSeparator === "\\" ? "Explorer" : /Mac/.test(navigator.userAgent) ? "Finder" : "File Manager";
+
+/** The Default Copy Rule's choices. */
+const COPY_RULES = [
+  { value: "newest", label: "Newest", detail: "the copy modified last" },
+  { value: "oldest", label: "Oldest", detail: "the copy modified longest ago" },
+  { value: "shortestPath", label: "Shortest path", detail: "the copy with the shortest folder and file name" },
+];
 
 /** The two grouping thresholds: what each slider's ends mean, and one line on what it changes. */
 const THRESHOLDS = [
@@ -85,6 +92,7 @@ async function showConfigSections(node) {
   node.replaceChildren(
     trashSection(),
     neverTouchSection(config.neverTouch),
+    duplicatesSection(config.defaultCopyRule),
     groupingSection(config.grouping),
     notificationsSection(config.notifications),
   );
@@ -93,24 +101,48 @@ async function showConfigSections(node) {
 /** `title`'s section, holding `children`. */
 const section = (title, ...children) => el("section", { className: "settings-section" }, el("h2", {}, title), ...children);
 
+/** One radio button of the group `name`, with `label` and a muted `detail`. */
+const choice = (name, label, detail, props) =>
+  el(
+    "label",
+    { className: "settings-choice" },
+    el("input", { type: "radio", name, ...props }),
+    el("span", {}, label, el("span", { className: "muted" }, ` · ${detail}`)),
+  );
+
 function trashSection() {
-  const choice = (label, detail, props) =>
-    el(
-      "label",
-      { className: "settings-choice" },
-      el("input", { type: "radio", name: "trash-destination", ...props }),
-      el("span", {}, label, el("span", { className: "muted" }, ` · ${detail}`)),
-    );
   return section(
     "Trash Destination",
     el(
       "fieldset",
       { className: "settings-choices" },
       el("legend", { className: "note" }, "Where trashed files go. Nothing is ever deleted for good."),
-      choice("Holding Folder", "a “Files Cleaner Trash” folder inside the folder you clean", { checked: true }),
-      choice("System Trash", "not yet supported", { disabled: true }),
+      choice("trash-destination", "Holding Folder", "a “Files Cleaner Trash” folder inside the folder you clean", { checked: true }),
+      choice("trash-destination", "System Trash", "not yet supported", { disabled: true }),
     ),
   );
+}
+
+/** The Default Copy Rule: which copy of each Duplicate Group starts out kept. A failure says why and puts the choice back. */
+function duplicatesSection(initial) {
+  const status = el("p", { className: "status" });
+  const choices = el(
+    "fieldset",
+    { className: "settings-choices" },
+    el("legend", { className: "note" }, "Keep by default. Every other copy starts out trashed."),
+    ...COPY_RULES.map(({ value, label, detail }) => choice("default-copy-rule", label, detail, { value, checked: value === initial })),
+  );
+  let rule = initial;
+  choices.addEventListener("change", async ({ target }) => {
+    try {
+      ({ defaultCopyRule: rule } = (await changeSetting("defaultCopyRule", target.value)).config);
+      showStatus(status, "");
+    } catch (error) {
+      choices.querySelector(`input[value="${rule}"]`).checked = true;
+      showStatus(status, describeError(error), true);
+    }
+  });
+  return section("Duplicates", choices, el("p", { className: "note" }, "Changes apply the next time a folder is scanned."), status);
 }
 
 function neverTouchSection(initial) {

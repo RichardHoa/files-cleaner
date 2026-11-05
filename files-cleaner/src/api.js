@@ -12,14 +12,15 @@ const appWindow = window.__TAURI__.window;
 export const pathSeparator = window.__TAURI__.path.sep();
 
 /**
- * The config: `{ path, config }`, `config` being `{ home, trashDestination, neverTouch, rules, grouping, notifications }` and
- * `grouping` `{ folderThreshold, existingFolderThreshold, smallestFolder }`.
+ * The config: `{ path, config }`, `config` being `{ home, trashDestination, neverTouch, defaultCopyRule, rules, grouping,
+ * notifications }`, `defaultCopyRule` "newest", "oldest" or "shortestPath", and `grouping` `{ folderThreshold,
+ * existingFolderThreshold, smallestFolder }`.
  */
 export const loadConfig = () => invoke("load_config");
 
 /**
  * Saves one change to the config file, keeping everything else in it, and resolves to the config as
- * `loadConfig` does. `key` is "neverTouch" (the whole list of paths), "folderThreshold",
+ * `loadConfig` does. `key` is "neverTouch" (the whole list of paths), "defaultCopyRule", "folderThreshold",
  * "existingFolderThreshold", "smallestFolder" or "notifications" (whether the user wants them); a grouping
  * `value` of null resets it to the default.
  * Rejects, saving nothing, if the value is invalid.

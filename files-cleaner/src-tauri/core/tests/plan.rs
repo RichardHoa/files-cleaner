@@ -5,7 +5,9 @@ use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
 
 use common::{config, empty_config, scan_root, write};
-use files_cleaner_core::{build_plan, build_plan_with_progress, scan, OperationKind, Plan, Reason};
+use files_cleaner_core::{
+    build_plan, build_plan_with_progress, duplicate_groups, scan, OperationKind, Plan, Reason,
+};
 
 /// Sets `path`'s modified date to `secs` after the epoch.
 fn set_modified(path: &Path, secs: u64) {
@@ -34,6 +36,27 @@ fn trashed(plan: &Plan) -> Vec<String> {
         .collect();
     paths.sort();
     paths
+}
+
+#[test]
+fn with_the_oldest_rule_the_oldest_copy_comes_first() {
+    let dir = scan_root();
+    let newer = write(dir.path(), "newer.pdf", "same contents");
+    let oldest = write(dir.path(), "oldest.pdf", "same contents");
+    set_modified(&newer, 5_000);
+    set_modified(&oldest, 4_000);
+    let config = config(r#"{ "defaultCopyRule": "oldest" }"#, dir.path());
+    let scan = scan(dir.path(), &config).unwrap();
+
+    let groups = duplicate_groups(&scan, config.default_copy_rule, |_| {});
+
+    assert_eq!(groups.len(), 1);
+    let names: Vec<_> = groups[0]
+        .copies
+        .iter()
+        .map(|copy| copy.relative_path.join("/"))
+        .collect();
+    assert_eq!(names, ["oldest.pdf", "newer.pdf"]);
 }
 
 #[test]

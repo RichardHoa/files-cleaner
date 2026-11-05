@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+use crate::config::DefaultCopyRule;
 use crate::scanner::{ScanEntry, ScanResult};
 
 /// Bytes read from each end of a file for its partial hash.
@@ -44,14 +45,15 @@ pub struct DuplicateProgress {
     pub current: PathBuf,
 }
 
-/// Two or more files with the same contents, the Keeper first.
+/// Two or more files with the same contents: the copy that starts out kept,
+/// and the others.
 pub struct Found<'a> {
-    pub keeper: &'a ScanEntry,
+    pub kept: &'a ScanEntry,
     pub copies: Vec<&'a ScanEntry>,
 }
 
-/// A Duplicate Group as the review screen shows it: every copy, the default
-/// Keeper first.
+/// A Duplicate Group as the review screen shows it: every copy, the one that
+/// starts out kept first.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DuplicateGroup {
@@ -75,6 +77,7 @@ pub struct DuplicateCopy {
 /// Every Duplicate Group in `scan`, as `find` finds them.
 pub fn duplicate_groups(
     scan: &ScanResult,
+    rule: DefaultCopyRule,
     on_progress: impl FnMut(DuplicateProgress),
 ) -> Vec<DuplicateGroup> {
     let copy = |entry: &ScanEntry| DuplicateCopy {
@@ -83,11 +86,11 @@ pub fn duplicate_groups(
         modified: entry.modified,
         created: entry.created,
     };
-    find(&scan.entries, on_progress)
+    find(&scan.entries, rule, on_progress)
         .into_iter()
         .map(|found| DuplicateGroup {
-            size: found.keeper.size,
-            copies: std::iter::once(found.keeper)
+            size: found.kept.size,
+            copies: std::iter::once(found.kept)
                 .chain(found.copies)
                 .map(copy)
                 .collect(),
@@ -95,12 +98,16 @@ pub fn duplicate_groups(
         .collect()
 }
 
-/// Every Duplicate Group among `entries`, leaving out 0-byte files and
-/// Packages. Files that can't be read are left out too. Calls `on_progress`
-/// at most every `PROGRESS_INTERVAL` in each `DuplicatePhase`: first while
-/// comparing the start and end of every file that shares its size, then
-/// while reading in full those that still match.
-pub fn find(entries: &[ScanEntry], on_progress: impl FnMut(DuplicateProgress)) -> Vec<Found<'_>> {
+/// Every Duplicate Group among `entries`, its copies ordered by `rule`,
+/// leaving out 0-byte files and Packages. Files that can't be read are left
+/// out too. Calls `on_progress` at most every `PROGRESS_INTERVAL` in each
+/// `DuplicatePhase`: first while comparing the start and end of every file
+/// that shares its size, then while reading in full those that still match.
+pub fn find(
+    entries: &[ScanEntry],
+    rule: DefaultCopyRule,
+    on_progress: impl FnMut(DuplicateProgress),
+) -> Vec<Found<'_>> {
     let candidates: Vec<&ScanEntry> = entries
         .iter()
         .filter(|e| !e.is_package && e.size > 0)
@@ -134,15 +141,12 @@ pub fn find(entries: &[ScanEntry], on_progress: impl FnMut(DuplicateProgress)) -
             // Created dates are compared only if every copy has one, so the
             // order stays consistent whichever copies are compared.
             let by_created = same.iter().all(|e| e.created.is_some());
-            same.sort_by(|a, b| keeper_order(a, b, by_created));
-            let keeper = same.remove(0);
-            groups.push(Found {
-                keeper,
-                copies: same,
-            });
+            same.sort_by(|a, b| copy_order(a, b, rule, by_created));
+            let kept = same.remove(0);
+            groups.push(Found { kept, copies: same });
         }
     }
-    groups.sort_by(|a, b| a.keeper.path.cmp(&b.keeper.path));
+    groups.sort_by(|a, b| a.kept.path.cmp(&b.kept.path));
     groups
 }
 
@@ -213,20 +217,24 @@ fn split<K: Hash + Eq>(
         .collect()
 }
 
-/// Which of two copies is the better Keeper (sorts first): the newest by
-/// modified date, then by created date if `by_created`, then the shortest
-/// path, then the first alphabetically.
-fn keeper_order(a: &ScanEntry, b: &ScanEntry, by_created: bool) -> Ordering {
+/// Which of two copies `rule` prefers (sorts first). Dates compare by modified
+/// date, then by created date if `by_created`. Newest and oldest fall back on
+/// the shortest path; the shortest path falls back on the newest. Last comes
+/// the first alphabetically.
+fn copy_order(a: &ScanEntry, b: &ScanEntry, rule: DefaultCopyRule, by_created: bool) -> Ordering {
     let created = if by_created {
         b.created.cmp(&a.created)
     } else {
         Ordering::Equal
     };
-    b.modified
-        .cmp(&a.modified)
-        .then(created)
-        .then(a.path.as_os_str().len().cmp(&b.path.as_os_str().len()))
-        .then(a.path.cmp(&b.path))
+    let newest = b.modified.cmp(&a.modified).then(created);
+    let shortest = a.path.as_os_str().len().cmp(&b.path.as_os_str().len());
+    match rule {
+        DefaultCopyRule::Newest => newest.then(shortest),
+        DefaultCopyRule::Oldest => newest.reverse().then(shortest),
+        DefaultCopyRule::ShortestPath => shortest.then(newest),
+    }
+    .then(a.path.cmp(&b.path))
 }
 
 /// A hash of the file's first and last `PARTIAL_BYTES`.

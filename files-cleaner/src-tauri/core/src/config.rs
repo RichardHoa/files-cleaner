@@ -22,6 +22,7 @@ pub struct Config {
     pub home: PathBuf,
     pub trash_destination: TrashDestination,
     pub never_touch: Vec<PathBuf>,
+    pub default_copy_rule: DefaultCopyRule,
     /// In file order: the first matching Rule wins. Rules are frozen: they
     /// are still checked, but no Plan the app builds uses them.
     pub rules: Vec<Rule>,
@@ -60,11 +61,22 @@ impl Default for GroupingSettings {
 #[serde(rename_all = "camelCase", tag = "key", content = "value")]
 pub enum SettingChange {
     NeverTouch(Vec<PathBuf>),
+    DefaultCopyRule(DefaultCopyRule),
     FolderThreshold(Option<f32>),
     ExistingFolderThreshold(Option<f32>),
     SmallestFolder(Option<usize>),
     /// The user's answer when asked about notifications.
     Notifications(bool),
+}
+
+/// Which copy of a Duplicate Group starts out kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DefaultCopyRule {
+    #[default]
+    Newest,
+    Oldest,
+    ShortestPath,
 }
 
 /// Where Trash sends files. Only the Holding Folder is supported: the
@@ -143,6 +155,8 @@ struct RawConfig {
     #[serde(default)]
     never_touch: Vec<String>,
     #[serde(default)]
+    default_copy_rule: DefaultCopyRule,
+    #[serde(default)]
     rules: Vec<RawRule>,
     #[serde(default)]
     grouping: RawGrouping,
@@ -214,6 +228,7 @@ pub fn load_config(text: &str, home: &Path) -> Result<Config, ConfigError> {
         home: home.to_path_buf(),
         trash_destination: raw.trash_destination,
         never_touch,
+        default_copy_rule: raw.default_copy_rule,
         rules: Vec::new(),
         grouping,
         notifications: raw.notifications,
@@ -317,6 +332,10 @@ pub fn save_config(
                 })
                 .collect();
             object.insert("neverTouch".into(), serde_json::Value::Array(list));
+        }
+        SettingChange::DefaultCopyRule(rule) => {
+            let rule = serde_json::to_value(rule).map_err(|e| plain(&e))?;
+            object.insert("defaultCopyRule".into(), rule);
         }
         SettingChange::FolderThreshold(value) => {
             set_grouping(object, "folderThreshold", value.map(threshold_json))

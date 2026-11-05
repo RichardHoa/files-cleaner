@@ -231,14 +231,16 @@ async fn scan(
 /// kept, so reading leaves out the copies to trash.
 #[tauri::command]
 async fn find_duplicates(
+    app: AppHandle,
     latest: State<'_, Latest>,
     on_progress: Channel<DuplicateProgress>,
 ) -> Result<Vec<DuplicateGroup>, CommandError> {
+    let rule = read_config(&app)?.config.default_copy_rule;
     let scan = latest_scan(&latest)?;
     let searched = Arc::clone(&scan);
     let groups = blocking(move || {
         // A closed window can't receive progress; the search carries on.
-        Ok::<_, Infallible>(core::duplicate_groups(&searched, |progress| {
+        Ok::<_, Infallible>(core::duplicate_groups(&searched, rule, |progress| {
             let _ = on_progress.send(progress);
         }))
     })
