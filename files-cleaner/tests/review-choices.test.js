@@ -44,17 +44,51 @@ test("files left where they are go by kind, Other last, each kind newest first",
   ]);
 });
 
-test("a new Keeper takes the old one's place and the old one is trashed; a copy left is in no folder and isn't trashed", () => {
+/** A Duplicate Group of three copies, the first read into the folder "Labs", with nothing left where it is. */
+function threeCopies() {
   const [duplicate] = initialDuplicates([{ size: 3, copies: [{ path: "/d/a.pdf" }, { path: "/d/x/a.pdf" }, { path: "/d/y/a.pdf" }] }]);
   const choices = initialChoices([{ name: "Labs", files: ["/d/b.pdf", "/d/a.pdf"], existing: null }]);
-  const left = new Set();
-  setCopy(duplicate, "/d/x/a.pdf", "keeper", choices, left);
-  setCopy(duplicate, "/d/y/a.pdf", "leave", choices, left);
-  assert.deepEqual(planDuplicates([duplicate]), [{ keeper: "/d/x/a.pdf", trash: ["/d/a.pdf"] }]);
+  return { duplicate, choices, left: new Set() };
+}
+
+test("keeping two copies files the first and lists the second under Left; trashing the Filed Copy hands its place to the next", () => {
+  const { duplicate, choices, left } = threeCopies();
+  setCopy(duplicate, "/d/x/a.pdf", "keep", choices, left);
+  assert.deepEqual(planDuplicates([duplicate]), [{ kept: "/d/a.pdf", trash: ["/d/y/a.pdf"] }]);
+  assert.deepEqual(planChoices(choices)[0].files, [
+    ["/d/b.pdf", "inFolder"],
+    ["/d/a.pdf", "inFolder"],
+  ]);
+  assert.deepEqual([...left], ["/d/x/a.pdf"]);
+
+  setCopy(duplicate, "/d/a.pdf", "trash", choices, left);
+  assert.deepEqual(planDuplicates([duplicate]), [{ kept: "/d/x/a.pdf", trash: ["/d/a.pdf", "/d/y/a.pdf"] }]);
   assert.deepEqual(planChoices(choices)[0].files, [
     ["/d/b.pdf", "inFolder"],
     ["/d/x/a.pdf", "inFolder"],
   ]);
   assert.equal(left.size, 0);
-  assert.deepEqual(totals(choices, [duplicate]), { moved: 2, trashed: 1 });
+  assert.deepEqual(totals(choices, [duplicate]), { moved: 2, trashed: 2 });
+});
+
+test("a copy kept is never trashed because the copy before it was marked Trash in its folder", () => {
+  const { duplicate, choices, left } = threeCopies();
+  setCopy(duplicate, "/d/x/a.pdf", "keep", choices, left);
+  choices[0].files.set("/d/a.pdf", "trash");
+  setCopy(duplicate, "/d/a.pdf", "trash", choices, left);
+  assert.equal(choices[0].files.get("/d/x/a.pdf"), "inFolder");
+});
+
+test("trashing every copy takes the group out of its folder, and keeping one again puts it back", () => {
+  const { duplicate, choices, left } = threeCopies();
+  setCopy(duplicate, "/d/a.pdf", "trash", choices, left);
+  assert.deepEqual(planDuplicates([duplicate]), [{ kept: null, trash: ["/d/a.pdf", "/d/x/a.pdf", "/d/y/a.pdf"] }]);
+  assert.deepEqual(planChoices(choices)[0].files, [["/d/b.pdf", "inFolder"]]);
+
+  setCopy(duplicate, "/d/y/a.pdf", "keep", choices, left);
+  assert.deepEqual(planChoices(choices)[0].files, [
+    ["/d/b.pdf", "inFolder"],
+    ["/d/y/a.pdf", "inFolder"],
+  ]);
+  assert.equal(left.size, 0);
 });

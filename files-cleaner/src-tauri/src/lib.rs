@@ -20,6 +20,7 @@ use files_cleaner_grouping::{self as grouping, CardStore, Grouping, LlamaModels}
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
+use tauri_plugin_opener::OpenerExt;
 
 use models::GroupingModels;
 
@@ -356,7 +357,7 @@ fn latest_scan(latest: &Latest) -> Result<Arc<ScanResult>, CommandError> {
 }
 
 /// The latest scan without the copies its Duplicate Groups trash by
-/// default: every one but the Keeper.
+/// default: every one but the first.
 fn without_copies(latest: &Latest) -> Result<ScanResult, CommandError> {
     let (scan, duplicates) = {
         let guard = latest.0.lock().unwrap();
@@ -401,8 +402,8 @@ struct AnalysisResult {
 /// Reads the loose files of the latest scan with the Grouping Models, off
 /// the UI thread, sending progress to `on_progress`, and suggests folders
 /// for them by the config's grouping settings. Every copy of a Duplicate
-/// Group but its Keeper is left out, as it is trashed by default (ADR
-/// 0005). The models are loaded for this analysis only. `cancel_analysis`
+/// Group but its first is left out, as it is trashed by default (ADR
+/// 0007). The models are loaded for this analysis only. `cancel_analysis`
 /// stops it; `stop_reading` ends its reading early and groups what was read.
 #[tauri::command]
 async fn analyse_loose_files(
@@ -512,6 +513,22 @@ async fn build_review_plan(
         scanned.plan = Some(plan.clone());
     }
     Ok(plan)
+}
+
+/// Opens `path` in its default app. Only a file of the latest scan can be
+/// opened, so the UI can't open just any path.
+#[tauri::command]
+fn open_file(app: AppHandle, latest: State<'_, Latest>, path: PathBuf) -> Result<(), CommandError> {
+    if !latest_scan(&latest)?
+        .entries
+        .iter()
+        .any(|entry| entry.path == path)
+    {
+        return Err(CommandError::new("That file isn't part of this scan."));
+    }
+    app.opener()
+        .open_path(path.to_string_lossy(), None::<&str>)
+        .map_err(CommandError::new)
 }
 
 /// The Grouping Models' status: `{ state, downloaded, total, error }`.
@@ -651,7 +668,8 @@ pub fn run() {
             clear_grouping_cards,
             reading_pace,
             save_reading_pace,
-            build_review_plan
+            build_review_plan,
+            open_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

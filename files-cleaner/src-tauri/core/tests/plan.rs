@@ -237,13 +237,13 @@ fn each_trashed_copy_names_where_it_goes_and_its_keeper() {
         .iter()
         .filter(|op| op.reason != Reason::EmptiedFolder)
         .map(|op| {
-            let Reason::Duplicate { keeper } = &op.reason else {
+            let Reason::Duplicate { kept: Some(kept) } = &op.reason else {
                 panic!("{:?} isn't a duplicate", op.reason)
             };
             (
                 op.relative_path.join("/"),
                 op.destination.join("/"),
-                keeper.join("/"),
+                kept.join("/"),
             )
         })
         .collect();

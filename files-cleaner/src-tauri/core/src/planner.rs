@@ -99,9 +99,9 @@ pub enum OperationKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Reason {
-    /// The item is a copy of `keeper`, the names from the Scan Root down to
-    /// its Duplicate Group's Keeper, which stays where it is.
-    Duplicate { keeper: Vec<String> },
+    /// The item is a copy of `kept`, the names from the Scan Root down to a
+    /// Kept Copy of its Duplicate Group, or `None` if no copy is kept.
+    Duplicate { kept: Option<Vec<String>> },
     /// The Rule named `rule` matched the item, or, for Create Folder, needs
     /// the folder.
     Rule { rule: String },
@@ -113,7 +113,7 @@ pub enum Reason {
     SuggestedFolder { folder: String },
 }
 
-/// Proposes the duplicate step: every non-Keeper copy in a Duplicate Group
+/// Proposes the duplicate step: every copy but the first in a Duplicate Group
 /// is trashed, and nothing else. A folder the Plan would empty is offered
 /// for Trash, unticked. An Operation that would cross from one disk to
 /// another is kept, as an error that can't be ticked.
@@ -136,7 +136,7 @@ pub fn build_plan_with_progress(
                 root,
                 copy,
                 Reason::Duplicate {
-                    keeper: group.keeper.relative_path.clone(),
+                    kept: Some(group.keeper.relative_path.clone()),
                 },
             ));
         }

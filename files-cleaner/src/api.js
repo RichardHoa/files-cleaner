@@ -41,9 +41,9 @@ export function scan(scanRoot, onProgress) {
 
 /**
  * The Duplicate Groups of the latest scan: `[{ size, copies }]`, each copy `{ path, relativePath, modified,
- * created }`, the default Keeper first. Calls `onProgress({ phase, finished, total, current })` while finding
+ * created }`, the copy kept by default first. Calls `onProgress({ phase, finished, total, current })` while finding
  * them: `phase` "comparing" counts files whose start and end are compared, then "checking" counts the bytes
- * of those read in full. Reading for Suggested Folders then leaves out every copy but the Keeper.
+ * of those read in full. Reading for Suggested Folders then leaves out every copy but the first.
  */
 export function findDuplicates(onProgress) {
   const channel = new Channel();
@@ -155,13 +155,13 @@ export async function notifyInBackground(title) {
 }
 
 /**
- * Plans the whole review over the latest scan as one Plan. `duplicates` is `[{ keeper, trash }]`, the path
- * of the copy that stays and the paths of those trashed. `folders` is `[{ name, choice, files }]`, `choice`
+ * Plans the whole review over the latest scan as one Plan. `duplicates` is `[{ kept, trash }]`, the path
+ * of the Filed Copy, or null if no copy is kept, and the paths of those trashed. `folders` is `[{ name, choice, files }]`, `choice`
  * one of `{ type: "createHere" }`, `{ type: "addTo", folder }`, `{ type: "createIn", folder }`,
  * `{ type: "trashAll" }` or `{ type: "skip" }`, and `files` `[[path, "inFolder" | "trash" | "takeOut"]]`.
  * Resolves to `{ root, trashDestination, operations }`, each Operation `{ id, kind, source, relativePath,
  * destination, destinationPath, size, modified, isPackage, isFolder, reason, ticked, error }`, `kind` being
- * "trash", "move" or "createFolder", `reason` one of `{ type: "duplicate", keeper }`,
+ * "trash", "move" or "createFolder", `reason` one of `{ type: "duplicate", kept }` (`kept` null if no copy is),
  * `{ type: "suggestedFolder", folder }` or `{ type: "emptiedFolder" }`, `ticked` whether it starts ticked
  * (an emptied folder doesn't), and `error` why it can't happen (it can't be ticked then), or null.
  * Rejects if a name can't be a folder name.
@@ -179,6 +179,9 @@ export const pickFolder = (title = "Pick a folder to clean") => dialog.open({ di
  * Given a list of paths, selects them all, with a window for each folder they are in.
  */
 export const revealInFileManager = (path) => opener.revealItemInDir(path);
+
+/** Opens `path`, a file of the latest scan, in its default app. */
+export const openFile = (path) => invoke("open_file", { path });
 
 /** A command error as one line, with its config position when it has one. */
 export function describeError(error) {

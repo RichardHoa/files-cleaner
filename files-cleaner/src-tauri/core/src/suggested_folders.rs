@@ -70,12 +70,12 @@ impl fmt::Display for SuggestedFolderError {
 
 impl std::error::Error for SuggestedFolderError {}
 
-/// What the user chose for one Duplicate Group: the copy that stays, and
-/// the copies to trash. A copy in neither stays where it is.
+/// What the user chose for one Duplicate Group: its Filed Copy, if any copy
+/// is kept, and the copies to trash. A copy in neither stays where it is.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DuplicateChoice {
-    pub keeper: PathBuf,
+    pub kept: Option<PathBuf>,
     pub trash: Vec<PathBuf>,
 }
 
@@ -90,14 +90,14 @@ pub fn build_suggested_folders_plan(
 }
 
 /// Proposes the whole review as one Plan. Each Duplicate Group's copies to
-/// trash are trashed, naming its Keeper. Each Suggested Folder's choice is
-/// a new folder (with a Clash Suffix if its name is taken) and a Move per
-/// file into it, a Move per file into an existing folder, a Trash per file,
-/// or nothing. A file the user trashes on its own is trashed whatever the
-/// folder's choice, unless the folder is skipped; a file taken out stays
-/// put. A copy already trashed as a duplicate is left out of its folder,
-/// as are files the scan didn't find. Emptied folders, worked out from all
-/// of it, and moves to another disk are handled as in `build_plan`.
+/// trash are trashed, naming its Kept Copy, if any. Each Suggested Folder's
+/// choice is a new folder (with a Clash Suffix if its name is taken) and a
+/// Move per file into it, a Move per file into an existing folder, a Trash
+/// per file, or nothing. A file the user trashes on its own is trashed
+/// whatever the folder's choice, unless the folder is skipped; a file taken
+/// out stays put. A copy already trashed as a duplicate is left out of its
+/// folder, as are files the scan didn't find. Emptied folders, worked out
+/// from all of it, and moves to another disk are handled as in `build_plan`.
 pub fn build_review_plan(
     scan: &ScanResult,
     config: &Config,
@@ -111,7 +111,7 @@ pub fn build_review_plan(
     let mut trashed: HashSet<&Path> = HashSet::new();
     for group in duplicates {
         let reason = Reason::Duplicate {
-            keeper: names_below(root, &group.keeper),
+            kept: group.kept.as_ref().map(|kept| names_below(root, kept)),
         };
         for path in &group.trash {
             if let Some(entry) = entries.get(path.as_path()) {

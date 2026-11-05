@@ -17,6 +17,7 @@ import {
   groupingModelsStatus,
   notifications,
   notifyInBackground,
+  openFile,
   pathSeparator,
   pickFolder,
   previewReviewPlan,
@@ -36,12 +37,13 @@ import { progressBar } from "../progress-bar.js";
 import { describeEstimate, readingEstimate, updatedAverage } from "../reading-estimate.js";
 import {
   byKindNewestFirst,
+  filedCopy,
   initialChoices,
   initialDuplicates,
-  leftCopies,
   moveFile,
   nameMissing,
-  placeKeepers,
+  otherKeptCopies,
+  placeDuplicates,
   planChoices,
   planDuplicates,
   setCopy,
@@ -151,7 +153,7 @@ export async function render(root, nav, result, duplicateGroups) {
   const modified = new Map(result.entries.map((entry) => [entry.path, entry.modified]));
   const totalSize = result.entries.reduce((sum, entry) => sum + entry.size, 0);
   const duplicates = initialDuplicates(duplicateGroups);
-  // The copy read for each copy in a Duplicate Group, its first, so a Keeper the user picks shows what was read.
+  // The copy read for each copy in a Duplicate Group, its first, so any Kept Copy shows what was read.
   const readAs = new Map(duplicateGroups.flatMap((group) => group.copies.map((copy) => [copy.path, group.copies[0].path])));
 
   // The Suggested Folders: "reading", "offer" (without the Grouping Models), "failed" or "ready". Until
@@ -564,9 +566,8 @@ export async function render(root, nav, result, duplicateGroups) {
   }
 
   /**
-   * The Duplicate Groups, each with its name, how many copies and the space freed, then every copy, the
-   * Keeper first, with a button trashing the copies marked Trash; once that's done, what it did. A copy's
-   * right-click menu shows it in the file manager.
+   * The Duplicate Groups, each with its name, how many copies and the space going to Files Cleaner Trash,
+   * then every copy, with a button trashing the copies marked Trash; once that's done, what it did.
    */
   function duplicatesPanel() {
     if (duplicates.length === 0) return [el("h2", {}, "Duplicates"), el("p", { className: "note" }, "No file here is an exact copy of another.")];
@@ -578,8 +579,7 @@ export async function render(root, nav, result, duplicateGroups) {
       ];
     }
     const trashed = duplicates.reduce((n, duplicate) => n + trashedCopies(duplicate), 0);
-    const leaving = duplicates.reduce((n, duplicate) => n + leftCopies(duplicate), 0);
-    const freed = duplicates.reduce((sum, duplicate) => sum + duplicate.group.size * trashedCopies(duplicate), 0);
+    const trashedSize = duplicates.reduce((sum, duplicate) => sum + duplicate.group.size * trashedCopies(duplicate), 0);
     const shown = Math.min(duplicates.length, duplicatesShown);
     const more = el("div", { className: "plan-more" });
     drawMore(more, duplicates.length, shown, (limit) => {
@@ -594,19 +594,18 @@ export async function render(root, nav, result, duplicateGroups) {
         "p",
         { className: "muted" },
         `${count(trashed)} ${trashed === 1 ? "copy" : "copies"} to trash`,
-        leaving ? `, ${count(leaving)} left where ${leaving === 1 ? "it is" : "they are"}` : "",
-        `, of ${plural(duplicates.length, "file")} · ${formatSize(freed)} freed`,
+        `, of ${plural(duplicates.length, "file")} · ${formatSize(trashedSize)} to Files Cleaner Trash`,
       ),
       el("ul", { className: "duplicate-groups", ariaLabel: "Duplicate Groups" }, ...duplicates.slice(0, shown).map(duplicateGroup)),
       more,
     ];
   }
 
-  /** A Duplicate Group: its Keeper's name, how many copies, the space freed, then each copy, the Keeper first. */
+  /** A Duplicate Group: its name, how many copies, the space going to Files Cleaner Trash, a warning if no copy is kept, then each copy. */
   function duplicateGroup(duplicate) {
     const { group, copies } = duplicate;
-    const keeperFirst = [...group.copies].sort((a, b) => (copies.get(b.path) === "keeper") - (copies.get(a.path) === "keeper"));
-    const name = fileName(keeperFirst[0].path);
+    const filed = filedCopy(duplicate);
+    const name = fileName(filed ?? group.copies[0].path);
     return el(
       "li",
       { className: "duplicate-group" },
@@ -614,34 +613,41 @@ export async function render(root, nav, result, duplicateGroups) {
         "div",
         { className: "duplicate-group-head" },
         el("span", { className: "duplicate-group-name", title: name }, name),
-        el("span", { className: "muted" }, ` · ${count(group.copies.length)} copies · ${formatSize(group.size * trashedCopies(duplicate))} freed`),
+        el(
+          "span",
+          { className: "muted" },
+          ` · ${count(group.copies.length)} copies · ${formatSize(group.size * trashedCopies(duplicate))} to Files Cleaner Trash`,
+          filed ? "" : el("span", { className: "warning" }, " · No copy kept"),
+        ),
       ),
-      el("ul", { className: "duplicate-copies" }, ...keeperFirst.map((copy) => duplicateCopy(duplicate, copy))),
+      el("ul", { className: "duplicate-copies" }, ...group.copies.map((copy) => duplicateCopy(duplicate, copy))),
     );
   }
 
-  /**
-   * One copy of the Duplicate Group `duplicate`: Keep, Trash or Leave, then its name, with its full path
-   * on hover. Keep makes it the Keeper, trashing the one before; the Keeper can't be trashed or left itself.
-   */
+  /** Gives `row`, listing the copy at `path`, a right-click menu to open it or show it in the file manager. */
+  function copyMenu(row, path) {
+    row.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      const open = () => openFile(path).catch((error) => showStatus(status, describeError(error), true));
+      menu.open([path], row, event, [{ label: "Open", action: open }]);
+    });
+    return row;
+  }
+
+  /** One copy of the Duplicate Group `duplicate`: Keep or Trash, then its name, with its full path on hover, its folder from the Scan Root and its modified date. */
   function duplicateCopy(duplicate, copy) {
     const fate = duplicate.copies.get(copy.path);
     const own = fileName(copy.path);
     const segments = [
-      ["keeper", "Keep"],
+      ["keep", "Keep"],
       ["trash", "Trash"],
-      ["leave", "Leave"],
     ].map(([value, label]) => {
-      const segment = el(
-        "button",
-        { type: "button", role: "radio", className: "segment", ariaChecked: String(value === fate), disabled: fate === "keeper" && value !== "keeper" },
-        label,
-      );
+      const segment = el("button", { type: "button", role: "radio", className: "segment", ariaChecked: String(value === fate) }, label);
       segment.addEventListener("click", () => {
         if (value === fate) return;
         setCopy(duplicate, copy.path, value, choices, left);
         drawPane();
-        // The copy's row is drawn again, maybe elsewhere in its group: the focus goes with it.
+        // The copy's row is drawn again: the focus goes with it.
         pane.querySelector(`[data-copy="${CSS.escape(copy.path)}"] .segment[aria-checked="true"]`)?.focus();
       });
       return segment;
@@ -651,28 +657,35 @@ export async function render(root, nav, result, duplicateGroups) {
       { className: `duplicate-copy ${fate}`, tabIndex: 0 },
       el("div", { className: "segmented", role: "radiogroup", ariaLabel: `What to do with ${own}` }, ...segments),
       el("span", { className: "duplicate-copy-name", title: copy.path }, own),
+      el("span", { className: "path duplicate-copy-folder" }, copy.relativePath.slice(0, -1).join("/") || rootName),
+      el("span", { className: "muted folder-file-date" }, formatDate(copy.modified)),
     );
     row.dataset.copy = copy.path;
-    row.addEventListener("contextmenu", (event) => {
-      event.preventDefault();
-      menu.open([copy.path], row, event);
-    });
-    return row;
+    return copyMenu(row, copy.path);
   }
 
-  /** The files left where they are, by kind, for the pane. */
+  /** The files left where they are, by kind, for the pane. A Kept Copy that isn't filed stays where it is, so it can only be opened or shown. */
   function leftPanel() {
+    const others = otherKeptCopies(duplicates);
+    const row = (path) => {
+      const node = leftRow(path);
+      if (others.has(path)) {
+        node.tabIndex = 0;
+        return copyMenu(node, path);
+      }
+      return choices.length > 0 ? selectable(node, path) : node;
+    };
     if (choices.length === 0) {
       return [
         el("h2", {}, `Left where they are (${count(left.size)})`),
         el("p", { className: "note" }, "No files here are alike enough to share a folder, so everything stays where it is."),
-        ...leftLists([...left], (path) => leftRow(path)),
+        ...leftLists([...left], row),
       ];
     }
     return [
       el("h2", {}, `Left where they are (${count(left.size)})`),
       ...(left.size
-        ? leftLists([...left], (path) => selectable(leftRow(path), path))
+        ? leftLists([...left], row)
         : [el("p", { className: "note" }, "Drag a file onto “Left where they are” to leave it where it is.")]),
     ];
   }
@@ -914,12 +927,12 @@ export async function render(root, nav, result, duplicateGroups) {
     }
   }
 
-  /** Fills in the Suggested Folders and the files left where they are, from the analysis, each Keeper picked meanwhile in the place of the copy read. */
+  /** Fills in the Suggested Folders and the files left where they are, from the analysis, with the choices made on the copies meanwhile. */
   function ready(analysis) {
     grouping = analysis.grouping;
     choices = initialChoices(grouping.folders);
     for (const path of grouping.ungrouped) left.add(path);
-    placeKeepers(choices, left, duplicates);
+    placeDuplicates(choices, left, duplicates);
     panels = new Map(choices.map((choice) => [choice, folderPanel(choice)]));
     folders = "ready";
     if (analysis.device) footer.replaceChildren(el("p", { className: "note" }, `Files read on ${analysis.device}.`));

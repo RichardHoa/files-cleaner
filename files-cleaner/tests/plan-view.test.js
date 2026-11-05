@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PAGE_SIZE, folderLabel, paging, selectedFile, visibleFiles } from "../src/plan-view.js";
 
-/** A duplicate's Trash Operation for the `/`-separated `path`, a copy of `keeper`. */
-function dup(path, size = 0, keeper = "keep.txt") {
+/** A duplicate's Trash Operation for the `/`-separated `path`, a copy of `kept`. */
+function dup(path, size = 0, kept = "keep.txt") {
   const relativePath = path.split("/");
   return {
     id: `trash:${path}`,
@@ -11,7 +11,7 @@ function dup(path, size = 0, keeper = "keep.txt") {
     relativePath,
     destination: ["Files Cleaner Trash", "This Session", ...relativePath],
     size,
-    reason: { type: "duplicate", keeper: keeper.split("/") },
+    reason: { type: "duplicate", kept: kept.split("/") },
   };
 }
 
