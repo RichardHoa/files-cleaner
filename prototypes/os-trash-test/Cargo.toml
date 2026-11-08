@@ -2,7 +2,7 @@
 name = "os-trash-test"
 version = "0.0.0"
 edition = "2021"
-description = "THROWAWAY: tests System Trash and restore on each OS (.scratch/os-trash/issues/01)"
+description = "THROWAWAY: tests System Trash and restore on each OS (issue #5)"
 publish = false
 
 [target.'cfg(target_os = "macos")'.dependencies]

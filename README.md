@@ -57,7 +57,7 @@ The bundle is written to `files-cleaner/src-tauri/target/release/bundle/`: a `.a
 
 - `GLOSSARY.md`: domain vocabulary
 - `docs/adr/`: architecture decisions
-- `.scratch/milestone-1/`: the Milestone 1 spec and tickets
+- [GitHub Issues](https://github.com/RichardHoa/files-cleaner/issues): specs and tickets
 
 ## Measure the scanner
 

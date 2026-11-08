@@ -1,6 +1,6 @@
 # os-trash-test (throwaway)
 
-Answers `.scratch/os-trash/issues/01`: can the System Trash keep the Undo promise on each OS? It sends its own test items to the System Trash through a draft of each OS backend, restores them, and prints a result for each question.
+Answers issue #5: can the System Trash keep the Undo promise on each OS? It sends its own test items to the System Trash through a draft of each OS backend, restores them, and prints a result for each question.
 
 It creates a new folder in your home folder and only trashes and removes what it creates there. It never empties the Trash. Outside that folder, it leaves any Trash folder the OS makes on first use and, on Windows, may remove a test item's own record from the Recycle Bin. It's not part of the app and comes out of `main` once ticket 01 is decided.
 

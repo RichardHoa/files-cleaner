@@ -1,4 +1,4 @@
-//! THROWAWAY. Answers `.scratch/os-trash/issues/01`: can the System Trash keep
+//! THROWAWAY. Answers issue #5: can the System Trash keep
 //! the Undo promise on this OS? See README.md for how to run it.
 //!
 //! It only trashes and removes items in a new folder it creates itself, and
