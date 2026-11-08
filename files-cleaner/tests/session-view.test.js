@@ -13,7 +13,7 @@ test("each state goes into its group, in a fixed order, and empty groups are lef
   const ops = ["started", "undone", "failed", "done", "skipped", "unrecoverable"].map((state) => op(`${state}.txt`, state));
   const groups = groupByState(ops).map((g) => [g.group, g.operations.map((o) => o.state)]);
   assert.deepEqual(groups, [
-    ["moved", ["done"]],
+    ["trashed", ["done"]],
     ["putBack", ["undone"]],
     ["attention", ["started", "failed", "skipped", "unrecoverable"]],
   ]);
@@ -27,8 +27,7 @@ test("each state goes into its group, in a fixed order, and empty groups are lef
 const many = (n, state, prefix = state) => Array.from({ length: n }, (_, i) => op(`${prefix}/${i}.txt`, state));
 
 test("the heading says what moved, and keeps up as files are put back", () => {
-  assert.equal(sessionHeading([...many(3, "done"), op("x.txt", "skipped")], "completed", "/"), "3 files moved to Trash");
-  assert.equal(sessionHeading(many(2, "done"), "completed", "\\"), "2 files moved to Recycle Bin");
+  assert.equal(sessionHeading([...many(3, "done"), op("x.txt", "skipped")], "completed"), "3 trashed");
   assert.equal(sessionHeading([...many(2, "done"), ...many(1, "undone")], "partlyUndone"), "1 of 3 files put back");
   assert.equal(sessionHeading(many(3, "undone"), "undone"), "All 3 files are back");
 });
@@ -39,7 +38,7 @@ test("a Session that stopped part-way says how far it got", () => {
 });
 
 test("one file is singular", () => {
-  assert.equal(sessionHeading([op("a.txt")], "completed", "/"), "1 file moved to Trash");
+  assert.equal(sessionHeading([op("a.txt")], "completed"), "1 trashed");
   assert.equal(sessionHeading([op("a.txt", "undone")], "undone"), "All 1 file is back");
   assert.equal(sessionHeading([op("a.txt", "started")], "crashed"), "Stopped after 0 of 1 file");
 });
@@ -102,7 +101,7 @@ function ruleOp(kind, path, destination, state = "done") {
 test("an older Session's Trash is named by the folder it went to, not the System Trash", () => {
   const old = { ...ruleOp("trash", "a.mp4", "/r/Files Cleaner Trash/S/a.mp4"), inSystemTrash: false };
   assert.equal(paneSentence(old, "r", "/"), "In /r/Files Cleaner Trash/S.");
-  assert.equal(sessionHeading([old], "completed", "/"), "1 file moved");
+  assert.equal(sessionHeading([old], "completed"), "1 moved");
 });
 
 test("the lead says files can be put back until the System Trash is emptied, if any went there", () => {
@@ -110,15 +109,25 @@ test("the lead says files can be put back until the System Trash is emptied, if 
   assert.match(sessionLead([ruleOp("move", "a.pptx", "/r/a.pptx")], "/"), /at any time\.$/);
 });
 
-test("a Session that moved files into folders doesn't say they all went to the System Trash", () => {
-  const ops = [ruleOp("createFolder", "Study", "/r/Study"), ruleOp("move", "a.pptx", "/r/Study/a.pptx"), op("b.dmg")];
-  assert.equal(sessionHeading(ops, "completed"), "2 files moved, 1 folder created");
-  assert.equal(sessionHeading([ruleOp("move", "a.pptx", "/r/Study/a.pptx")], "completed"), "1 file moved");
-});
-
 test("the pane says where a file a Rule moved is, and what happened to a created folder", () => {
   assert.equal(paneSentence(ruleOp("move", "a.pptx", "/Users/me/Study/a.pptx"), "Downloads", "/"), "In /Users/me/Study.");
   assert.equal(paneSentence(ruleOp("move", "a.pptx", "C:\\Study\\a.pptx"), "Downloads", "\\"), "In C:\\Study.");
   assert.equal(paneSentence(ruleOp("createFolder", "Study", "/r/Study"), "Downloads"), "Created by this Session.");
   assert.equal(paneSentence(ruleOp("createFolder", "Study", "/r/Study", "undone"), "Downloads"), "Removed again.");
+});
+
+/** A Session's Move Operation of `path` into `Sorted/`, in `state`. */
+const moveOp = (path, state = "done") => ({ ...op(path, state), id: `move:${path}`, kind: "move", inSystemTrash: false, destination: `/d/Sorted/${path}` });
+
+test("moved and trashed files are grouped apart, and the heading counts each", () => {
+  const ops = [moveOp("a.pdf"), moveOp("b.pdf"), op("c.zip"), { ...moveOp("Sorted"), kind: "createFolder" }];
+  assert.deepEqual(
+    groupByState(ops).map((g) => [g.group, g.operations.length]),
+    [
+      ["moved", 3],
+      ["trashed", 1],
+    ],
+  );
+  assert.equal(sessionHeading(ops, "completed"), "2 moved, 1 trashed, 1 folder created");
+  assert.equal(sessionHeading([op("c.zip"), op("d.zip")], "completed"), "2 trashed");
 });

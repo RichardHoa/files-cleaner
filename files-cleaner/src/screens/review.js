@@ -4,10 +4,13 @@
 // files are read in the background meanwhile, which needs the Grouping Models (without them, they're
 // offered in the Suggested Folders' place), and the Suggested Folders are filled in once that's done.
 // The copies are trashed from the Duplicates pane, as a Session of their own, without waiting for the
-// reading. Files are selected as in Finder, then moved by dragging them onto a folder in the sidebar, from
-// their right-click menu, or with "Move to…", which also offers any other folder on disk. A file left where
-// it is can be trashed from its row. The sidebar also adds a folder, and merges one into another by
-// dragging it there, or removes one, from its right-click menu. The header's button waits for the
+// reading. Files, and copies, are selected as in Finder, by clicking or by dragging a rectangle over them,
+// then trashed, put back or taken out of their folder (or kept, for copies) from the selection bar or
+// their right-click menu. Files are moved by dragging them by the name onto a folder in the sidebar, from
+// their right-click menu, or with "Move to…", which also offers any other folder on disk. A file opens in
+// its default app by double-clicking it or from its right-click menu. The sidebar counts what goes into each
+// folder, and grays out a folder whose every file is trashed. It also adds a folder, and merges one into
+// another by dragging it there, or removes one, from its right-click menu. The header's button waits for the
 // reading, which can be stopped early to group only what was read, then runs the rest of the Plan as one
 // Session; Cancel stops the reading and goes Home, leaving whatever was already run.
 import {
@@ -30,9 +33,10 @@ import {
   stopReading,
 } from "../api.js";
 import { el } from "../dom.js";
-import { drawMore, revealMenu } from "../file-list.js";
+import { drawMore, openEach, revealMenu } from "../file-list.js";
 import { count, formatDate, formatSize, plural, splitPath, trashPlace } from "../format.js";
 import { icon } from "../icons.js";
+import { marqueeSelect } from "../marquee.js";
 import { groupingModelsPanel } from "../models-panel.js";
 import { describeRunProgress, describeSummary } from "../outcomes.js";
 import { tickState, toggleAll } from "../plan-selection.js";
@@ -44,6 +48,7 @@ import {
   copyFolder,
   describeChange,
   filedCopy,
+  folderTally,
   foldersHoldingCopies,
   initialChoices,
   initialDuplicates,
@@ -168,6 +173,8 @@ export async function render(root, nav, result, duplicateGroups) {
   const modified = new Map(result.entries.map((entry) => [entry.path, entry.modified]));
   const totalSize = result.entries.reduce((sum, entry) => sum + entry.size, 0);
   const duplicates = initialDuplicates(duplicateGroups);
+  /** The Duplicate Group each copy is in, by path. */
+  const duplicateOf = new Map(duplicates.flatMap((duplicate) => duplicate.group.copies.map((copy) => [copy.path, duplicate])));
   // The copy read for each copy in a Duplicate Group, its first, so any Kept Copy shows what was read.
   const readAs = new Map(duplicateGroups.flatMap((group) => group.copies.map((copy) => [copy.path, group.copies[0].path])));
 
@@ -388,6 +395,19 @@ export async function render(root, nav, result, duplicateGroups) {
     menu.node,
     footer,
   );
+  marqueeSelect(pane, {
+    rows: () => [...pane.querySelectorAll("[data-path]")],
+    // A drag from a file's name moves the file.
+    ignore: (target) => Boolean(target.closest("[draggable='true']")),
+    select: (paths) => {
+      selection = new Set(paths);
+      anchor = paths[0] ?? null;
+      drawSelection();
+    },
+    // Clicking the selection bar's blank part isn't clicking empty space.
+    ignoreClick: (target) => selectionBar.contains(target),
+    clear: clearSelection,
+  });
   drawPane();
 
   /** The pane: the listed section of the Plan. */
@@ -399,7 +419,7 @@ export async function render(root, nav, result, duplicateGroups) {
       return;
     }
     const sections = {
-      duplicates: duplicatesPanel,
+      duplicates: () => [selectionBar, ...duplicatesPanel()],
       folders: () => waiting,
       left: () => [selectionBar, ...leftPanel()],
       emptied: emptiedPanel,
@@ -435,7 +455,7 @@ export async function render(root, nav, result, duplicateGroups) {
       ),
       el("hr", { className: "folder-sidebar-divider" }),
       ...(folders === "ready"
-        ? [sidebarItem("left", "Left where they are", left.size), ...choices.map(choiceItem), newFolder]
+        ? [sidebarItem("left", "Left where they are", left.size - left.trashed.size), ...choices.map(choiceItem), newFolder]
         : [sidebarItem("folders", "Suggested Folders", null)]),
       ...(emptied.length > 0
         ? [el("hr", { className: "folder-sidebar-divider" }), sidebarItem("emptied", "Emptied Folders", emptied.length)]
@@ -449,7 +469,9 @@ export async function render(root, nav, result, duplicateGroups) {
   /** The sidebar item for the Suggested Folder `choice`, or its name field while it's renamed. */
   function choiceItem(choice) {
     if (choice === renaming?.choice) return renaming.node;
-    return sidebarItem(choice, displayName(choice), choice.files.size, nameMissing(choice) ? "unnamed" : "");
+    const { going, trashed } = folderTally(choice);
+    const classes = [nameMissing(choice) ? "unnamed" : "", trashed ? "trashed" : ""];
+    return sidebarItem(choice, displayName(choice), going, classes.filter(Boolean).join(" "));
   }
 
   /**
@@ -560,6 +582,11 @@ export async function render(root, nav, result, duplicateGroups) {
     return node;
   }
 
+  function clearSelection() {
+    selection = new Set();
+    drawSelection();
+  }
+
   /** Marks the selected rows in the pane, and shows what can be done with them. */
   function drawSelection() {
     const rows = [...pane.querySelectorAll("[data-path]")];
@@ -568,6 +595,20 @@ export async function render(root, nav, result, duplicateGroups) {
     for (const row of rows) row.classList.toggle("selected", selection.has(row.dataset.path));
     selectionBar.hidden = selection.size === 0;
     if (selection.size === 0) return;
+    const paths = [...selection];
+    const actions = fileActions(paths).map(({ label, action }) => {
+      const button = el("button", { type: "button", className: "small" }, label);
+      button.addEventListener("click", action);
+      return button;
+    });
+    const clear = el("button", { type: "button", className: "link" }, "Deselect");
+    clear.addEventListener("click", clearSelection);
+    const what = current === "duplicates" ? `${count(paths.length)} ${paths.length === 1 ? "copy" : "copies"}` : plural(paths.length, "file");
+    selectionBar.replaceChildren(el("span", {}, `${what} selected`), ...actions, ...(current === "duplicates" ? [] : [moveSelect(paths)]), clear);
+  }
+
+  /** The "Move to…" menu for the files at `paths`: the other folders, back where they are, or any other folder on disk. */
+  function moveSelect(paths) {
     const targets = destinations();
     const to = el(
       "select",
@@ -578,25 +619,56 @@ export async function render(root, nav, result, duplicateGroups) {
     );
     to.value = "";
     to.addEventListener("change", () => {
-      if (to.value === "other") moveToOther([...selection]);
-      else move([...selection], targets[Number(to.value)]);
+      if (to.value === "other") moveToOther(paths);
+      else move(paths, targets[Number(to.value)]);
     });
-    const clear = el("button", { type: "button", className: "link" }, "Deselect");
-    clear.addEventListener("click", () => {
-      selection = new Set();
-      drawSelection();
-    });
-    selectionBar.replaceChildren(el("span", {}, `${plural(selection.size, "file")} selected`), to, clear);
+    return to;
   }
 
   /**
-   * Makes `row`, listing the file at `path`, selectable as in Finder, with a right-click menu to move the
-   * selection, and draggable onto a folder in the sidebar, taking the whole selection when it is in it.
+   * What can be done to the files at `paths` in the listed section, besides moving them, as `[{ label, action }]`:
+   * Keep or Trash for copies; Trash, or Put back once they're all trashed, for the files left where they are;
+   * and for a Suggested Folder's, Trash, Take out and Put back, each unless every file is that already. The selection stays.
    */
-  function selectable(row, path) {
+  function fileActions(paths) {
+    const each = (change) => () => {
+      for (const path of paths) change(path);
+      drawPane();
+    };
+    if (current === "duplicates") {
+      const fate = (value) => each((path) => setCopy(duplicateOf.get(path), path, value, choices, left));
+      return [
+        { label: "Keep", action: fate("keep") },
+        { label: "Trash", action: fate("trash") },
+      ];
+    }
+    if (current === "left") {
+      if (paths.every((path) => left.trashed.has(path))) return [{ label: "Put back", action: each((path) => left.trashed.delete(path)) }];
+      return [{ label: "Trash", action: each((path) => left.trashed.add(path)) }];
+    }
+    const folder = current;
+    return [
+      ["Trash", "trash"],
+      ["Take out", "takeOut"],
+      ["Put back", "inFolder"],
+    ]
+      .filter(([, file]) => !paths.every((path) => folder.files.get(path) === file))
+      .map(([label, file]) => ({ label, action: each((path) => folder.files.set(path, file)) }));
+  }
+
+  /** Opens the files at `paths` in their default apps, saying so if one can't be opened. */
+  const openFiles = (paths) => openEach(paths, openFile).catch((error) => showStatus(status, describeError(error), true));
+
+  /**
+   * Makes `row`, listing the file at `path`, selectable as in Finder, opened by double-clicking it, with a
+   * right-click menu for the selection, and, when `movable`, draggable by its name onto a folder in the
+   * sidebar, taking the whole selection when it is in it. A copy isn't movable: its fate moves it.
+   */
+  function selectable(row, path, { movable = true } = {}) {
     row.dataset.path = path;
     row.tabIndex = 0;
-    row.draggable = true;
+    const handle = row.querySelector(".folder-file-name, .duplicate-copy-name");
+    handle.draggable = movable;
     const select = ({ toggle, range }) => {
       const order = [...pane.querySelectorAll("[data-path]")].map((node) => node.dataset.path);
       selection = clickSelection(selection, order, anchor, path, { toggle, range });
@@ -612,12 +684,17 @@ export async function render(root, nav, result, duplicateGroups) {
       event.preventDefault();
       select({ toggle: true, range: false });
     });
+    row.addEventListener("dblclick", (event) => {
+      if (!event.target.closest("button")) openFiles([path]);
+    });
     row.addEventListener("contextmenu", (event) => {
       event.preventDefault();
       if (!selection.has(path)) select({ toggle: false, range: false });
       const paths = [...selection];
-      const items = destinations().map((to) => ({ label: destinationLabel(to), action: () => move(paths, to) }));
-      menu.open(paths, row, event, [...items, { label: "Move to other folder…", action: () => moveToOther(paths) }]);
+      const moves = movable
+        ? [...destinations().map((to) => ({ label: destinationLabel(to), action: () => move(paths, to) })), { label: "Move to other folder…", action: () => moveToOther(paths) }]
+        : [];
+      menu.open(paths, row, event, [...fileActions(paths), ...moves], () => openFiles(paths));
     });
     row.addEventListener("dragstart", (event) => {
       dragged = selection.has(path) ? [...selection] : [path];
@@ -740,12 +817,12 @@ export async function render(root, nav, result, duplicateGroups) {
     );
   }
 
-  /** Gives `row`, listing the copy at `path`, a right-click menu to open it or show it in the file manager. */
+  /** Gives `row`, listing the Kept Copy at `path` that stays where it is, a right-click menu to open it or show it in the file manager, and opens it on a double-click. */
   function copyMenu(row, path) {
+    row.addEventListener("dblclick", () => openFiles([path]));
     row.addEventListener("contextmenu", (event) => {
       event.preventDefault();
-      const open = () => openFile(path).catch((error) => showStatus(status, describeError(error), true));
-      menu.open([path], row, event, [{ label: "Open", action: open }]);
+      menu.open([path], row, event, [], () => openFiles([path]));
     });
     return row;
   }
@@ -770,14 +847,14 @@ export async function render(root, nav, result, duplicateGroups) {
     });
     const row = el(
       "li",
-      { className: `duplicate-copy ${fate}`, tabIndex: 0 },
+      { className: `duplicate-copy ${fate}` },
       el("div", { className: "segmented", role: "radiogroup", ariaLabel: `What to do with ${own}` }, ...segments),
       el("span", { className: "duplicate-copy-name", title: copy.path }, own),
       el("span", { className: "path duplicate-copy-folder" }, copyFolder(copy) || rootName),
       el("span", { className: "muted folder-file-date" }, formatDate(copy.modified)),
     );
     row.dataset.copy = copy.path;
-    return copyMenu(row, copy.path);
+    return selectable(row, copy.path, { movable: false });
   }
 
   /** The files left where they are, by kind, for the pane. A Kept Copy that isn't filed stays where it is, so it can only be opened or shown. */

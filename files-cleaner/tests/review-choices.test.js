@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   byKindNewestFirst,
   describeChange,
+  folderTally,
   foldersHoldingCopies,
   initialChoices,
   initialDuplicates,
@@ -203,4 +204,19 @@ test("trashing every copy takes the group out of its folder, and keeping one aga
     ["/d/y/a.pdf", "inFolder"],
   ]);
   assert.equal(left.size, 0);
+});
+
+test("a folder counts only the files going into it, and is trashed once every file is", () => {
+  const [folder] = initialChoices([{ name: "Labs", files: ["/d/a.pdf", "/d/b.pdf", "/d/c.pdf"], existing: null }]);
+  folder.files.set("/d/a.pdf", "trash");
+  folder.files.set("/d/b.pdf", "takeOut");
+  assert.deepEqual(folderTally(folder), { going: 1, trashed: false });
+  folder.files.set("/d/b.pdf", "trash");
+  folder.files.set("/d/c.pdf", "trash");
+  assert.deepEqual(folderTally(folder), { going: 0, trashed: true });
+  folder.files.set("/d/c.pdf", "takeOut");
+  assert.deepEqual(folderTally(folder), { going: 0, trashed: false });
+  folder.files.set("/d/c.pdf", "inFolder");
+  folder.choice = "trashAll";
+  assert.deepEqual(folderTally(folder), { going: 0, trashed: true });
 });

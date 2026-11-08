@@ -32,26 +32,6 @@
   stroke-linejoin: round;
 }
 
-.kind-trash {
-  --kind: var(--kind-trash);
-}
-
-.kind-move {
-  --kind: var(--kind-move);
-}
-
-.kind-rename {
-  --kind: var(--kind-rename);
-}
-
-.kind-createFolder {
-  --kind: var(--kind-create-folder);
-}
-
-.icon[class*="kind-"] {
-  color: var(--kind, currentColor);
-}
-
 /* A filled, coloured label: Session statuses. */
 .pill {
   display: inline-flex;

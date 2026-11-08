@@ -1,6 +1,7 @@
 // Pieces shared by the Plan and Session screens' file lists: the "Show more" links under a
-// list, and the menu a right-click on a file opens.
-import { describeError, revealInFileManager } from "./api.js";
+// list, the menu a right-click on a file opens, and opening files in their default apps.
+import { askToConfirm, describeError, revealInFileManager } from "./api.js";
+import { count } from "./format.js";
 import { el } from "./dom.js";
 import { PAGE_SIZE } from "./plan-view.js";
 
@@ -23,11 +24,24 @@ export function drawMore(node, total, shown, setLimit) {
   node.append(all);
 }
 
+/** How many files can be opened at once without asking first. */
+const OPEN_WITHOUT_ASKING = 5;
+
 /**
- * A right-click menu with "Show in folder". `node` goes on the page once; `open(paths, row, event, items)`
- * opens it for the `contextmenu` `event` on `row`, and Show in folder selects `paths` in the file manager,
- * left out when `paths` is empty. `items`, `[{ label, action }]`, go above Show in folder, each closing the
- * menu before its `action()` runs.
+ * Opens each of `items` with `openOne(item)`, in the app the OS picks for it, asking first when there are
+ * more than a few. Rejects with the first error.
+ */
+export async function openEach(items, openOne) {
+  if (items.length > OPEN_WITHOUT_ASKING && !(await askToConfirm(`Open ${count(items.length)} files?`, "Open"))) return;
+  await Promise.all(items.map(openOne));
+}
+
+/**
+ * A right-click menu with "Open" and "Show in folder". `node` goes on the page once;
+ * `open(paths, row, event, items, openAll)` opens it for the `contextmenu` `event` on `row`, and Show in
+ * folder selects `paths` in the file manager, left out when `paths` is empty. Open runs `openAll()`, and is
+ * left out without it. `items`, `[{ label, action }]`, go above them, each closing the menu before its
+ * `action()` runs.
  */
 export function revealMenu() {
   const menu = el("div", { className: "row-menu file-menu", role: "menu", hidden: true });
@@ -44,7 +58,7 @@ export function revealMenu() {
   const closeOnEscape = (event) => {
     if (event.key === "Escape") close();
   };
-  function open(paths, row, event, items = []) {
+  function open(paths, row, event, items = [], openAll = null) {
     const buttons = items.map(({ label, action }) => {
       const button = el("button", { type: "button", role: "menuitem" }, label);
       button.addEventListener("click", () => {
@@ -57,8 +71,14 @@ export function revealMenu() {
     reveal.addEventListener("click", () =>
       revealInFileManager(paths).then(close, (error) => menu.replaceChildren(el("p", { className: "status error" }, describeError(error)))),
     );
+    const opener = el("button", { type: "button", role: "menuitem" }, "Open");
+    opener.addEventListener("click", () => {
+      close();
+      openAll();
+    });
+    const below = [...(openAll ? [opener] : []), ...(paths.length > 0 ? [reveal] : [])];
     menu.replaceChildren(...buttons);
-    if (paths.length > 0) menu.append(buttons.length ? el("hr", { className: "menu-separator" }) : "", reveal);
+    if (below.length > 0) menu.append(buttons.length ? el("hr", { className: "menu-separator" }) : "", ...below);
     menu.hidden = false;
     // At the pointer, kept inside the window; opened from the keyboard, under the row.
     const fromKeyboard = event.clientX === 0 && event.clientY === 0;
@@ -70,7 +90,7 @@ export function revealMenu() {
     document.addEventListener("pointerdown", closeOutside, true);
     document.addEventListener("keydown", closeOnEscape);
     window.addEventListener("scroll", close);
-    (buttons[0] ?? reveal).focus();
+    (buttons[0] ?? below[0])?.focus();
   }
   return { node: menu, open };
 }

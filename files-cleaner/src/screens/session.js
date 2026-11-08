@@ -1,10 +1,11 @@
 // Session: what one past Session did and where its files are now. One card per group (Moved,
-// Put back, Needs attention) picks which files are listed; the selected file is shown beside the
-// list. Files can be put back, or moved again, all at once, ticked, or one at a time.
-import { describeError, pathSeparator, redoOperations, revealInFileManager, sessionDetails, undo } from "../api.js";
+// Trashed, Put back, Needs attention) picks which files are listed; the selected file is shown beside
+// the list. Files can be put back, or moved again, all at once, ticked, or one at a time, and a file
+// not in the System Trash can be opened, by double-clicking it or from its right-click menu.
+import { describeError, openSessionFile, pathSeparator, redoOperations, revealInFileManager, sessionDetails, undo } from "../api.js";
 import { el } from "../dom.js";
 import { drawMore, revealMenu } from "../file-list.js";
-import { count, formatDate, formatSize, plural, splitPath, trashPlace } from "../format.js";
+import { count, formatDate, formatSize, plural, splitPath } from "../format.js";
 import { describeSummary } from "../outcomes.js";
 import { tickState, toggleAll } from "../plan-selection.js";
 import { PAGE_SIZE, fileName, folderLabel, paging, selectedFile, visibleFiles } from "../plan-view.js";
@@ -14,20 +15,23 @@ import { showStatus } from "../status.js";
 /** "3 moved": how many files a group has, as its card and list heading say it. */
 const GROUP_COUNTS = {
   moved: (n) => `${count(n)} moved`,
+  trashed: (n) => `${count(n)} trashed`,
   putBack: (n) => `${count(n)} put back`,
   attention: (n) => `${count(n)} ${n === 1 ? "needs" : "need"} attention`,
 };
 
 /** What can be done to a group's files, and how it is worded. Needs attention has no action. */
+const PUT_BACK = {
+  bulk: (n) => `Put back ${plural(n, "file")}`,
+  single: "Put back",
+  tickLabel: (name) => `Put back ${name}`,
+  busy: "Putting back…",
+  done: "put back",
+  call: (sessionId, ids) => undo(sessionId, ids),
+};
 const ACTIONS = {
-  moved: {
-    bulk: (n) => `Put back ${plural(n, "file")}`,
-    single: "Put back",
-    tickLabel: (name) => `Put back ${name}`,
-    busy: "Putting back…",
-    done: "put back",
-    call: (sessionId, ids) => undo(sessionId, ids),
-  },
+  moved: PUT_BACK,
+  trashed: PUT_BACK,
   putBack: {
     bulk: (n) => `Move ${plural(n, "file")} again`,
     single: "Move again",
@@ -97,7 +101,7 @@ export function render(root, nav, sessionId, from, message) {
     let ticked = new Set();
 
     const putAll = el("button", { type: "button", className: "primary" }, "Put all back");
-    putAll.hidden = !groups.some((g) => g.group === "moved");
+    putAll.hidden = !groups.some((g) => g.group === "moved" || g.group === "trashed");
     putAll.addEventListener("click", () => act("Putting back…", () => undo(sessionId), "put back"));
     const header = el(
       "header",
@@ -105,9 +109,9 @@ export function render(root, nav, sessionId, from, message) {
       el(
         "div",
         {},
-        el("h1", {}, sessionHeading(operations, info.status, pathSeparator)),
+        el("h1", {}, sessionHeading(operations, info.status)),
         el("p", { className: "session-meta" }, `${formatDate(info.startedAt)} · `, el("span", { title: info.scanRoot }, rootName)),
-        el("p", { className: "lead" }, sessionLead(operations, pathSeparator)),
+        el("p", { className: "lead session-lead" }, sessionLead(operations, pathSeparator)),
       ),
       el("div", { className: "actions" }, putAll),
     );
@@ -122,13 +126,7 @@ export function render(root, nav, sessionId, from, message) {
     const muted = (text) => el("span", { className: "muted" }, text);
     const sizeOf = (ops) => formatSize(ops.reduce((sum, op) => sum + op.size, 0));
     function cardText({ group: name, operations: ops }) {
-      if (name === "moved") {
-        const where = ops.every((op) => op.inSystemTrash) ? el("strong", {}, trashPlace(pathSeparator)) : "where the Session put them";
-        return [line(el("strong", {}, GROUP_COUNTS.moved(ops.length)), muted(" · "), sizeOf(ops), muted(" → "), where)];
-      }
-      if (name === "putBack") {
-        return [line(el("strong", {}, GROUP_COUNTS.putBack(ops.length)), muted(" · "), sizeOf(ops), muted(" → "), "where they were")];
-      }
+      if (name !== "attention") return [line(el("strong", {}, GROUP_COUNTS[name](ops.length)), muted(" · "), sizeOf(ops))];
       const [n, ...rest] = GROUP_COUNTS.attention(ops.length).split(" ");
       return [
         line(el("strong", {}, el("span", { className: "session-attention" }, n), ` ${rest.join(" ")}`)),
@@ -257,11 +255,15 @@ export function render(root, nav, sessionId, from, message) {
         select(op);
         if (event.target !== box) target.focus();
       });
+      const path = whereNow(op);
+      const openIt = () => openSessionFile(sessionId, op.id).catch((error) => showStatus(status, describeError(error), true));
+      row.addEventListener("dblclick", (event) => {
+        if (path && event.target !== box) openIt();
+      });
       row.addEventListener("contextmenu", (event) => {
         event.preventDefault();
         select(op);
-        const path = whereNow(op);
-        if (path) menu.open([path], row, event);
+        if (path) menu.open([path], row, event, [], openIt);
       });
       return { op, row, box, target };
     }

@@ -214,6 +214,16 @@ export function describeChange({ moved, trashed }) {
   return { heading: "Nothing will change", button: "Nothing to move" };
 }
 
+/**
+ * What the sidebar says about the Suggested Folder `choice`: `going`, how many files go into it, and
+ * `trashed`, whether every file it has goes to the System Trash, which is all of them under "Trash all".
+ */
+export function folderTally(choice) {
+  const files = [...choice.files.values()];
+  if (choice.choice === "trashAll") return { going: 0, trashed: files.length > 0 };
+  return { going: files.filter((file) => file === "inFolder").length, trashed: files.length > 0 && files.every((file) => file === "trash") };
+}
+
 /** Whether the Suggested Folder `choice` lacks the name it needs: it needs one once it has files, and an empty name is never read as "trash". */
 export const nameMissing = (choice) => choice.files.size > 0 && choice.name.trim() === "";
 

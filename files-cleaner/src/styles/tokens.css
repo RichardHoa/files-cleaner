@@ -49,10 +49,6 @@
   --warning: #9a5600;
 
   /* One colour per Operation kind. Trash is red but always reversible ("moved to Trash"). */
-  --kind-trash: #d92d20;
-  --kind-move: #1f6fe0;
-  --kind-rename: #7a4ae0;
-  --kind-create-folder: #1a7f3f;
 
   /* One colour per Session status, with the text colour that reads on it. */
   --status-completed: #1a7f3f;
@@ -79,10 +75,6 @@
     --error: #ff6b6b;
     --warning: #ffb340;
 
-    --kind-trash: #e5484d;
-    --kind-move: #3b8cf5;
-    --kind-rename: #9a7af0;
-    --kind-create-folder: #30a46c;
 
     --status-completed: #30a46c;
     --on-status-completed: #111113;

@@ -2,8 +2,12 @@
    its classes. What is here is only what a Session adds. */
 .session-meta {
   margin: var(--space-1) 0 0;
-  color: var(--muted);
   font-size: var(--font-sm);
+}
+
+/* Unlike the Plan's, the Session's lead is read as a promise, so it isn't muted. */
+.plan-head .session-lead {
+  color: var(--text);
 }
 
 /* No Include all under the card's line, so the button fills it all. */

@@ -532,6 +532,25 @@ fn open_file(app: AppHandle, latest: State<'_, Latest>, path: PathBuf) -> Result
         .map_err(CommandError::new)
 }
 
+/// Opens, in its default app, where the item of the Operation `operation_id`
+/// of a past Session is now. Like `open_file`, it only opens a path the app
+/// knows of: none while the item is in the System Trash or is gone for good.
+#[tauri::command]
+fn open_session_file(app: AppHandle, session_id: String, operation_id: String) -> Result<(), CommandError> {
+    let details = core::session_details(&session_id, &journal_dir(&app)?).map_err(CommandError::new)?;
+    let op = details
+        .operations
+        .into_iter()
+        .find(|op| op.id == operation_id)
+        .ok_or_else(|| CommandError::new("That file isn't part of this Session."))?;
+    let path = op
+        .where_now()
+        .ok_or_else(|| CommandError::new("That file can't be opened from here."))?;
+    app.opener()
+        .open_path(path.to_string_lossy(), None::<&str>)
+        .map_err(CommandError::new)
+}
+
 /// Whether any of the files at `paths` is on a different disk from `folder`.
 #[tauri::command]
 fn on_another_disk(paths: Vec<PathBuf>, folder: PathBuf) -> bool {
@@ -679,6 +698,7 @@ pub fn run() {
             save_reading_pace,
             build_review_plan,
             open_file,
+            open_session_file,
             on_another_disk
         ])
         .run(tauri::generate_context!())

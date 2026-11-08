@@ -190,6 +190,12 @@ export const revealInFileManager = (path) => opener.revealItemInDir(path);
 /** Opens `path`, a file of the latest scan, in its default app. */
 export const openFile = (path) => invoke("open_file", { path });
 
+/** Opens, in its default app, where the item of the Operation `operationId` of the Session `sessionId` is now. */
+export const openSessionFile = (sessionId, operationId) => invoke("open_session_file", { sessionId, operationId });
+
+/** Asks `question` in a native dialog with `okLabel` and Cancel; resolves to whether OK was clicked. */
+export const askToConfirm = (question, okLabel) => dialog.ask(question, { okLabel, cancelLabel: "Cancel", kind: "info" });
+
 /** A command error as one line, with its config position when it has one. */
 export function describeError(error) {
   if (typeof error === "string") return error;

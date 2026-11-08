@@ -87,6 +87,18 @@ pub struct SessionOperation {
     pub note: Option<String>,
 }
 
+impl SessionOperation {
+    /// Where the item is now, for opening it: `None` while it's in the
+    /// System Trash, which is the OS's to show, or once it's gone for good.
+    pub fn where_now(&self) -> Option<&Path> {
+        match self.state {
+            OperationState::Done if !self.in_system_trash => self.destination.as_deref(),
+            OperationState::Done | OperationState::Unrecoverable => None,
+            _ => Some(&self.source),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum OperationState {

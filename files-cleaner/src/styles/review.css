@@ -91,6 +91,12 @@
   color: var(--error);
 }
 
+/* Every file of the folder goes to the System Trash. */
+.folder-sidebar-item.trashed .folder-sidebar-name,
+.folder-sidebar-item.trashed .icon {
+  color: var(--muted);
+}
+
 .folder-sidebar-rename {
   flex: 1;
   min-width: 0;
@@ -117,6 +123,19 @@
   margin: var(--space-1) 0;
   border: 0;
   border-top: 1px solid var(--border);
+}
+
+.folder-pane {
+  position: relative;
+}
+
+/* The rectangle drawn while drag-selecting. */
+.marquee {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .folder-pane h2 {
@@ -258,11 +277,11 @@
   color: var(--muted);
 }
 
-.folder-file[draggable="true"] {
+.folder-file-name[draggable="true"] {
   cursor: grab;
 }
 
-.folder-file.selected {
+.folder-pane [data-path].selected {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
@@ -347,6 +366,7 @@
 }
 
 .duplicate-copy {
+  user-select: none;
   display: flex;
   align-items: center;
   gap: var(--space-3);

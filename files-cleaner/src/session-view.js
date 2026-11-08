@@ -16,11 +16,17 @@ const GROUP_OF = {
   started: "attention",
 };
 
-const GROUPS = ["moved", "putBack", "attention"];
+const GROUPS = ["moved", "trashed", "putBack", "attention"];
+
+/** Whether `op` sent its file to the System Trash; an older Session's Trash went to a folder, so it counts as moved. */
+const toSystemTrash = (op) => op.kind === "trash" && op.inSystemTrash;
+
+/** The group of `op`: a carried-out Operation is under Moved, or Trashed when its file went to the System Trash. */
+const groupOf = (op) => (GROUP_OF[op.state] === "moved" && toSystemTrash(op) ? "trashed" : GROUP_OF[op.state]);
 
 /** `[{ group, operations }]`, one per group that has any Operations, in a fixed order. */
 export function groupByState(operations) {
-  return GROUPS.map((group) => ({ group, operations: operations.filter((op) => GROUP_OF[op.state] === group) })).filter(
+  return GROUPS.map((group) => ({ group, operations: operations.filter((op) => groupOf(op) === group) })).filter(
     (g) => g.operations.length > 0,
   );
 }
@@ -34,9 +40,8 @@ export function sessionLead(operations, separator) {
 /**
  * What the Session did, as things are now, given its Operations and its status. Counts the
  * Operations that were carried out; one that stopped part-way counts every Operation it started.
- * `separator` is the OS's path separator.
  */
-export function sessionHeading(operations, status, separator) {
+export function sessionHeading(operations, status) {
   const carriedOut = operations.filter((op) => ["done", "undone", "unrecoverable"].includes(op.state)).length;
   const putBack = operations.filter((op) => op.state === "undone").length;
   const files = (n) => plural(n, "file");
@@ -49,10 +54,11 @@ export function sessionHeading(operations, status, separator) {
       return `Stopped after ${count(carriedOut)} of ${files(operations.length)}`;
     default: {
       const done = operations.filter((op) => ["done", "undone", "unrecoverable"].includes(op.state));
-      if (done.every((op) => op.inSystemTrash)) return `${files(carriedOut)} moved to ${trashPlace(separator)}`;
+      const trashed = done.filter(toSystemTrash).length;
       const folders = done.filter((op) => op.kind === "createFolder").length;
-      const moved = `${files(carriedOut - folders)} moved`;
-      return folders ? `${moved}, ${plural(folders, "folder")} created` : moved;
+      const moved = carriedOut - trashed - folders;
+      const parts = [moved && `${count(moved)} moved`, trashed && `${count(trashed)} trashed`, folders && `${plural(folders, "folder")} created`];
+      return parts.filter(Boolean).join(", ") || "Nothing done";
     }
   }
 }

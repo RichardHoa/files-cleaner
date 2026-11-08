@@ -2,7 +2,6 @@
 import { pathSeparator, undo } from "./api.js";
 import { el } from "./dom.js";
 import { count, formatDate, formatSize, splitPath } from "./format.js";
-import { kindIcon, kindLabel } from "./kinds.js";
 import { busy } from "./status.js";
 
 const STATUS_LABELS = {
@@ -40,9 +39,9 @@ function sessionRow(session, open, undone) {
     if (result) undone(result);
   });
 
-  const kinds = Object.entries(session.kindCounts).map(([kind, n]) =>
-    el("span", { className: "kind-count", title: `${kindLabel(kind)}: ${count(n)}` }, kindIcon(kind), count(n)),
-  );
+  // Folders created along the way are left out: what matters is where the files went.
+  const { move = 0, trash = 0 } = session.kindCounts;
+  const done = [move && `${count(move)} moved`, trash && `${count(trash)} trashed`].filter(Boolean).join(" · ");
   const item = el(
     "li",
     { className: "session", tabIndex: 0, title: `Open this Session\n${session.scanRoot}` },
@@ -52,7 +51,7 @@ function sessionRow(session, open, undone) {
       el("span", { className: "session-date" }, formatDate(session.startedAt)),
       el("span", { className: "session-root" }, splitPath(session.scanRoot, pathSeparator).name),
       statusPill(session.status),
-      el("span", { className: "kind-counts" }, ...(kinds.length > 0 ? kinds : [el("span", { className: "muted" }, "Nothing done")])),
+      el("span", { className: `kind-counts${done ? "" : " muted"}` }, done || "Nothing done"),
       el("span", { className: "session-size" }, session.done > 0 ? formatSize(session.totalSize) : ""),
       button,
     ),

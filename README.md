@@ -68,20 +68,3 @@ cargo build --release -p files-cleaner-core --bin bench-scan
 ```
 
 ## things to improve
-
-fix the falling action with the latest commit
-
-in the review screen right click to show in folder, add more open to open the file, by default (the os decides)
-
-user can choose multiple files in the review screen and perform actions on that, they can drag and select files just like every os
-
-after we trash the files, the count on the file folder reduces, if we trash all the file then the folder would become gray, to mark the folder as trashed
-
-in the summary screen after the actions, split the files into group that remain and group that go into trash, display all the files move and the total size only, 322 MB -> where the Session put them is a bit useless, remove it. 
-
-5 Nov 2026 at 11:22 · Downloads
-Nothing was deleted. You can put back any file, or all of them, until you empty the Trash.
-
-Mark these text as black, no grey
-
-On the landing page the icon in each session is not clear, make it clearer how many files we move to different locations, and how many files we trash
