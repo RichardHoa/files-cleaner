@@ -42,8 +42,8 @@ pub use scanner::{
     scan, scan_root_warning, scan_with_progress, ScanEntry, ScanError, ScanProgress, ScanResult,
 };
 pub use sessions::{
-    list_sessions, session_details, OperationState, SessionDetails, SessionInfo, SessionOperation,
-    SessionPage, SessionStatus,
+    delete_all_sessions, list_sessions, session_details, OperationState, SessionDetails,
+    SessionInfo, SessionOperation, SessionPage, SessionStatus,
 };
 pub use suggested_folders::{
     build_review_plan, build_suggested_folders_plan, DuplicateChoice, FileChoice, FolderChoice,

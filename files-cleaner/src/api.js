@@ -82,6 +82,9 @@ export const sessionDetails = (sessionId) => invoke("session_details", { session
  */
 export const listSessions = (offset, limit) => invoke("list_sessions", { offset, limit });
 
+/** Deletes every past Session, clearing History but changing no file; resolves to how many there were. Refused during a Run, Undo or Redo. */
+export const deleteAllSessions = () => invoke("delete_all_sessions");
+
 /** The Recent Scan Roots, newest first: `[{ path, lastScanned, exists }]`. Scanning a folder adds it. */
 export const recentScanRoots = () => invoke("recent_scan_roots");
 

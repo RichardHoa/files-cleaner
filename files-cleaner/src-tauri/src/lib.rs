@@ -331,6 +331,13 @@ fn list_sessions(app: AppHandle, offset: usize, limit: usize) -> Result<SessionP
     core::list_sessions(&journal_dir(&app)?, offset, limit).map_err(CommandError::new)
 }
 
+/// Deletes every past Session's Journal, clearing History and changing no
+/// file of the user's. Refused as Busy during a Run, Undo or Redo.
+#[tauri::command]
+fn delete_all_sessions(app: AppHandle) -> Result<usize, CommandError> {
+    core::delete_all_sessions(&journal_dir(&app)?).map_err(CommandError::new)
+}
+
 /// Where the Recent Scan Roots live: a file in the app data folder.
 fn recent_store(app: &AppHandle) -> Result<PathBuf, CommandError> {
     app_data_path(app, RECENT_FILE_NAME)
@@ -682,6 +689,7 @@ pub fn run() {
             redo_operations,
             session_details,
             list_sessions,
+            delete_all_sessions,
             recent_scan_roots,
             remove_recent_scan_root,
             grouping_models_status,

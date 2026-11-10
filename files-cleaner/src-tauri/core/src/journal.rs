@@ -257,6 +257,14 @@ pub fn session_ids(journal_dir: &Path) -> io::Result<Vec<String>> {
     Ok(ids)
 }
 
+/// Deletes Session `id`'s Journal; one already gone is fine.
+pub fn remove(journal_dir: &Path, id: &str) -> io::Result<()> {
+    match fs::remove_file(path(journal_dir, id)) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
+}
+
 /// Waits until a new file's name in `folder` is on disk, not just its
 /// contents. Windows can't open a folder to sync it, and doesn't need to.
 fn sync_folder(folder: &Path) -> io::Result<()> {

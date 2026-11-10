@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::executor::{exists, Outcome};
-use crate::journal::{self, OutcomeKind, Phase, Record, SessionError, SessionHeader};
+use crate::journal::{
+    self, lock_sessions, OutcomeKind, Phase, Record, SessionError, SessionHeader,
+};
 use crate::os_trash::TRASH_PLACE;
 use crate::planner::{names_below, OperationKind, SourceState};
 
@@ -396,4 +398,17 @@ pub fn session_details(
         info: session.info(),
         operations,
     })
+}
+
+/// Deletes every Session's Journal in `journal_dir`, interrupted or
+/// damaged ones too, and returns how many there were. Nothing else is
+/// touched: not a Scan Root, the System Trash, or anything a Journal
+/// names. Fails with `SessionError::Busy` during a Run, Undo or Redo.
+pub fn delete_all_sessions(journal_dir: &Path) -> Result<usize, SessionError> {
+    let _lock = lock_sessions(journal_dir)?;
+    let ids = journal::session_ids(journal_dir)?;
+    for id in &ids {
+        journal::remove(journal_dir, id)?;
+    }
+    Ok(ids.len())
 }

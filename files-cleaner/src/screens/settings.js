@@ -1,12 +1,14 @@
 // Settings: the Never-Touch Paths, the Default Copy Rule, how files are grouped,
-// notifications, and the Grouping Models.
+// notifications, the Grouping Models, and deleting all Sessions.
 // This is the only way settings change: the config file behind them is never edited by hand. Each change
 // is saved as soon as it's made; an invalid value says why beside it and isn't saved. Grouping changes
 // apply the next time files are grouped.
 import {
   changeSetting,
   clearGroupingCards,
+  deleteAllSessions,
   describeError,
+  listSessions,
   loadConfig,
   pathSeparator,
   pickFolder,
@@ -15,7 +17,7 @@ import {
   revealInFileManager,
 } from "../api.js";
 import { el } from "../dom.js";
-import { formatSize, splitPath } from "../format.js";
+import { formatSize, plural, splitPath, trashPlace } from "../format.js";
 import { groupingModelsControls, modelsButton, watchGroupingModels } from "../models-panel.js";
 import { progressBar } from "../progress-bar.js";
 import { showStatus } from "../status.js";
@@ -59,6 +61,7 @@ export function render(root, nav) {
     configSections,
     readAgainSection(),
     modelsSection(),
+    sessionsSection(),
   );
   showConfigSections(configSections);
 }
@@ -370,5 +373,53 @@ function modelList(models, error) {
         reveal,
       );
     }),
+  );
+}
+
+/** "Delete all Sessions…", which asks first with how many; unavailable with none. It clears History and the Journals, never a file. */
+function sessionsSection() {
+  const actions = el("div", { className: "actions" });
+  const status = el("p", { className: "status" });
+  const ask = el("button", { type: "button", disabled: true }, "Delete all Sessions…");
+  const cancel = el("button", { type: "button" }, "Cancel");
+  const confirm = el("button", { type: "button", className: "primary" }, "Delete");
+  let total = 0;
+
+  const refresh = async () => {
+    try {
+      ({ total } = await listSessions(0, 0));
+    } catch (error) {
+      showStatus(status, describeError(error), true);
+    }
+    ask.disabled = total === 0;
+    actions.replaceChildren(ask);
+  };
+  ask.addEventListener("click", () => {
+    showStatus(status, "");
+    confirm.disabled = false;
+    actions.replaceChildren(
+      el("span", {}, `Delete ${total === 1 ? "the 1 Session" : `all ${plural(total, "Session")}`}? You won't be able to undo them from the app. Your files won't change.`),
+      confirm,
+      cancel,
+    );
+  });
+  cancel.addEventListener("click", refresh);
+  confirm.addEventListener("click", async () => {
+    confirm.disabled = true;
+    try {
+      const deleted = await deleteAllSessions();
+      showStatus(status, `Deleted ${plural(deleted, "Session")}.`);
+    } catch (error) {
+      showStatus(status, describeError(error), true);
+    }
+    refresh();
+  });
+  refresh();
+
+  return section(
+    "Sessions",
+    el("p", { className: "note" }, `Deleting the Sessions clears History. Your files stay where they are, and anything in the ${trashPlace(pathSeparator)} can still be put back from there.`),
+    actions,
+    status,
   );
 }

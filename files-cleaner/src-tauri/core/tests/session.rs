@@ -10,8 +10,8 @@ use common::{
     scan_root, undo, undo_operations, write,
 };
 use files_cleaner_core::{
-    list_sessions, lock_sessions, scan, session_details, OperationKind, OperationState, Plan,
-    SessionError, SessionInfo, SessionStatus,
+    delete_all_sessions, list_sessions, lock_sessions, scan, session_details, OperationKind,
+    OperationState, Plan, SessionError, SessionInfo, SessionStatus,
 };
 use tempfile::TempDir;
 
@@ -354,6 +354,22 @@ fn only_one_session_runs_at_a_time() {
         undo(&summary.session_id, journal.path()),
         Err(SessionError::Busy)
     ));
+}
+
+#[test]
+fn deleting_all_sessions_empties_the_list_and_leaves_the_files_where_they_are() {
+    let dir = messy_folder();
+    let journal = journal_dir();
+    let plan = plan_for(dir.path());
+    let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
+    let trashed = landed(journal.path(), &summary.session_id, "b/c/copy.txt");
+    let before = snapshot(dir.path());
+
+    assert_eq!(delete_all_sessions(journal.path()).unwrap(), 1);
+
+    assert!(all_sessions(journal.path()).is_empty());
+    assert_eq!(snapshot(dir.path()), before);
+    assert_eq!(fs::read_to_string(trashed).unwrap(), "same contents");
 }
 
 #[test]
