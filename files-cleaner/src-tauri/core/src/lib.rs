@@ -11,7 +11,6 @@ mod os_trash;
 mod planner;
 mod protection;
 mod recent;
-mod rules;
 mod scanner;
 mod session_id;
 mod sessions;
@@ -20,20 +19,20 @@ mod volume;
 
 pub use config::{
     load_config, reset_config, save_config, Config, ConfigError, DefaultCopyRule, GroupingSettings,
-    Rule, RuleOperation, RuleTarget, SettingChange, EXAMPLE_CONFIG,
+    SettingChange, EXAMPLE_CONFIG,
 };
 pub use duplicates::{
     duplicate_groups, DuplicateCopy, DuplicateGroup, DuplicatePhase, DuplicateProgress,
 };
 pub use executor::{
-    redo_operations, run, run_with_progress, undo, undo_operations, Outcome, RunProgress, Summary,
+    redo_operations, retry_operations, run, run_with_progress, undo, undo_operations, Outcome,
+    RunProgress, Summary,
 };
 pub use folder_name::safe_folder_name;
 pub use journal::{lock_sessions, SessionError, SessionLock};
 pub use os_trash::{OsTrash, SystemTrash};
 pub use planner::{
-    build_plan, build_plan_with_progress, build_rule_plan, Operation, OperationKind, Plan, Reason,
-    SourceState,
+    build_plan, build_plan_with_progress, Operation, OperationKind, Plan, Reason, SourceState,
 };
 pub use recent::{
     recent_scan_roots, record_recent_scan_root, remove_recent_scan_root, RecentScanRoot,

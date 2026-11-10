@@ -26,7 +26,7 @@ export function count(n) {
   return numberFormat.format(n);
 }
 
-/** `plural(3, "Rule")` → "3 Rules"; `plural(1, "Rule")` → "1 Rule". */
+/** `plural(3, "file")` → "3 files"; `plural(1, "file")` → "1 file". */
 export function plural(n, word) {
   return `${count(n)} ${n === 1 ? word : `${word}s`}`;
 }

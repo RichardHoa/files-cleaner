@@ -266,7 +266,7 @@ fn journal_dir(app: &AppHandle) -> Result<PathBuf, CommandError> {
 /// Runs the approved Operations of the latest Plan as a new Session, off
 /// the UI thread, sending progress to `on_progress` as it goes. The Plan
 /// is kept, so a run refused as Busy can be retried; running it again
-/// after it ran starts a new Session whose Operations are all skipped.
+/// after it ran does nothing, so it keeps no Session.
 #[tauri::command]
 async fn run_plan(
     app: AppHandle,
@@ -316,6 +316,19 @@ async fn redo_operations(
 ) -> Result<Summary, CommandError> {
     let journal_dir = journal_dir(&app)?;
     blocking(move || core::redo_operations(&session_id, &operation_ids, &journal_dir, &SystemTrash))
+        .await
+}
+
+/// Runs again the chosen skipped or failed Operations of a past Session, in
+/// that Session.
+#[tauri::command]
+async fn retry_operations(
+    app: AppHandle,
+    session_id: String,
+    operation_ids: Vec<String>,
+) -> Result<Summary, CommandError> {
+    let journal_dir = journal_dir(&app)?;
+    blocking(move || core::retry_operations(&session_id, &operation_ids, &journal_dir, &SystemTrash))
         .await
 }
 
@@ -687,6 +700,7 @@ pub fn run() {
             run_plan,
             undo,
             redo_operations,
+            retry_operations,
             session_details,
             list_sessions,
             delete_all_sessions,

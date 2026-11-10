@@ -233,7 +233,8 @@ pub fn analyse(
     let mut to_read: Vec<&ScanEntry> = Vec::new();
     let mut inside: BTreeMap<&str, Vec<&ScanEntry>> = BTreeMap::new();
     for entry in &scan.entries {
-        if entry.is_package {
+        // A file without an extension is never a Loose File nor a sample.
+        if entry.is_package || entry.extension.is_empty() {
             continue;
         }
         let fixed_kind = kinds::fixed_kind(&entry.extension.to_lowercase());

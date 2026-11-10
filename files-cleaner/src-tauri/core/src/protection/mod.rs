@@ -144,8 +144,8 @@ impl Protection {
     }
 
     /// Why `root` is protected as a whole, if it is: it, or a folder above
-    /// it, is protected or a Package. A Rule target that is gets refused; a
-    /// Scan Root that is gets a warning, and can still be scanned. Also
+    /// it, is protected or a Package. A Scan Root that is gets a warning,
+    /// and can still be scanned. Also
     /// checks where `root` leads once symlinks are resolved (`/tmp` is
     /// really `/private/tmp` on macOS). The folders above a Disk Root don't
     /// count: a disk mounted under `/run/media` isn't inside `/run`.

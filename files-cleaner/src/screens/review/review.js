@@ -38,7 +38,7 @@ import { count, formatDate, formatSize, plural, splitPath, trashPlace } from "..
 import { icon } from "../../shared/icons.js";
 import { marqueeSelect } from "./marquee.js";
 import { groupingModelsPanel } from "../../shared/grouping-models/models-panel.js";
-import { describeRunProgress, describeSummary } from "../../shared/outcomes.js";
+import { describeNothingDone, describeRunProgress, describeSummary } from "../../shared/outcomes.js";
 import { tickState, toggleAll } from "../../shared/plan/plan-selection.js";
 import { progressBar } from "../../shared/progress-bar.js";
 import { describeEstimate, readingEstimate, updatedAverage } from "./reading-estimate.js";
@@ -83,8 +83,11 @@ const COMPUTER = /Mac/.test(navigator.userAgent) ? "Mac" : "computer";
 /** The file or folder's own name, from its full `path`. */
 const fileName = (path) => splitPath(path, pathSeparator).name;
 
-/** Whether a Run is given `op`: it's ticked, or it's a Trash blocked up front, which stays in place and is listed under Needs attention. */
-const runsOrIsListed = (op) => op.ticked || (op.kind === "trash" && Boolean(op.error));
+/**
+ * Whether a Run is given `op`: it's ticked, or it's a Trash or a Suggested Folder's Move blocked up front, which
+ * the Run skips, leaving it in place and listed under Needs attention.
+ */
+const runsOrIsListed = (op) => op.ticked || (Boolean(op.error) && (op.kind === "trash" || op.reason.type === "suggestedFolder"));
 
 /**
  * The analysis's `{ finished, total, current, phase }` progress as "Reading 12 of 85 files…", or what comes
@@ -165,6 +168,16 @@ function waitNote() {
     // The config can't be read: no question, and nothing is sent.
     .catch(() => {});
   return [text, ask];
+}
+
+/** What the scan `result` left out, as one muted line, or none when nothing was. Information only. */
+function leftOut(result) {
+  const { noExtension, unreadable } = result;
+  const parts = [
+    noExtension && `${plural(noExtension, "file")} without an extension ${noExtension === 1 ? "wasn't" : "weren't"} sorted into folders`,
+    unreadable.length && `${plural(unreadable.length, "item")} couldn't be read`,
+  ].filter(Boolean);
+  return parts.length ? [el("p", { className: "muted" }, parts.join(" · "))] : [];
 }
 
 export async function render(root, nav, result, duplicateGroups) {
@@ -282,7 +295,6 @@ export async function render(root, nav, result, duplicateGroups) {
   };
   /** Where the selected files can go from the pane: every folder but the one listed, or back where they are. */
   const destinations = () => [...(current === "left" ? [] : [null]), ...choices.filter((choice) => choice !== current)];
-  const destinationLabel = (to) => (to ? `Move to ${displayName(to)}` : "Leave where it is");
 
   const heading = el("h1", {});
   const run = el("button", { type: "button", className: "primary" });
@@ -315,13 +327,6 @@ export async function render(root, nav, result, duplicateGroups) {
     running = true;
     const session = await busy(status, [run, cancel], "Planning…", async () => {
       const plan = await buildReviewPlan(doneDuplicates(), planChoices(choices, left));
-      const blocked = plan.operations.filter((op) => op.error && op.kind !== "trash" && op.reason.type === "suggestedFolder");
-      if (blocked.length > 0) {
-        const { reason, error } = blocked[0];
-        throw new Error(
-          `${plural(blocked.length, "file")} can't be moved into “${reason.folder}”: ${error}. Choose another place for that folder, or remove it.`,
-        );
-      }
       // The trashed copies are only there to work out the Emptied Folders: they were run already.
       const approved = plan.operations
         .filter((op) => (op.reason.type === "emptiedFolder" ? emptiedTicked.has(op.id) && !op.error : runsOrIsListed(op) && op.reason.type !== "duplicate"))
@@ -329,8 +334,10 @@ export async function render(root, nav, result, duplicateGroups) {
       return runPlan(approved, (progress) => showStatus(status, describeRunProgress(progress)));
     });
     running = false;
-    if (session) nav.session(session.sessionId, null, describeSummary(session, "moved"));
-    else drawHeader();
+    if (session?.sessionId) return nav.session(session.sessionId, null, describeSummary(session, "moved"));
+    // A Run that did nothing keeps no Session: the review stays, saying why.
+    if (session) showStatus(status, describeNothingDone(session, "moved", pathSeparator), true);
+    drawHeader();
   });
 
   /** Trashes the copies marked Trash as a Session of their own, leaving the rest of the Plan to review. */
@@ -342,9 +349,11 @@ export async function render(root, nav, result, duplicateGroups) {
       return runPlan(approved, (progress) => showStatus(status, describeRunProgress(progress)));
     });
     running = false;
-    if (summary) {
+    if (summary?.sessionId) {
       duplicatesDone = summary;
       showStatus(status, "");
+    } else if (summary) {
+      showStatus(status, describeNothingDone(summary, "trashed", pathSeparator), true);
     }
     if (current === "duplicates") drawPane();
     else changed();
@@ -387,6 +396,7 @@ export async function render(root, nav, result, duplicateGroups) {
           { className: "lead" },
           `${plural(result.entries.length, "item")} · ${formatSize(totalSize)} scanned. Nothing is deleted, and you can undo it all from History.`,
         ),
+        ...leftOut(result),
       ),
       el("div", { className: "actions" }, cancel, run),
     ),
@@ -661,8 +671,9 @@ export async function render(root, nav, result, duplicateGroups) {
 
   /**
    * Makes `row`, listing the file at `path`, selectable as in Finder, opened by double-clicking it, with a
-   * right-click menu for the selection, and, when `movable`, draggable by its name onto a folder in the
-   * sidebar, taking the whole selection when it is in it. A copy isn't movable: its fate moves it.
+   * right-click menu to open the selection or show it in its folder, and, when `movable`, draggable by its
+   * name onto a folder in the sidebar, taking the whole selection when it is in it. A copy isn't movable: its
+   * fate moves it.
    */
   function selectable(row, path, { movable = true } = {}) {
     row.dataset.path = path;
@@ -691,10 +702,7 @@ export async function render(root, nav, result, duplicateGroups) {
       event.preventDefault();
       if (!selection.has(path)) select({ toggle: false, range: false });
       const paths = [...selection];
-      const moves = movable
-        ? [...destinations().map((to) => ({ label: destinationLabel(to), action: () => move(paths, to) })), { label: "Move to other folder…", action: () => moveToOther(paths) }]
-        : [];
-      menu.open(paths, row, event, [...fileActions(paths), ...moves], () => openFiles(paths));
+      menu.open(paths, row, event, [], () => openFiles(paths));
     });
     row.addEventListener("dragstart", (event) => {
       dragged = selection.has(path) ? [...selection] : [path];
@@ -737,6 +745,13 @@ export async function render(root, nav, result, duplicateGroups) {
     });
   }
 
+  /** A link to Session `sessionId`'s screen, where what it did can be checked or undone. */
+  function sessionLink(sessionId) {
+    const link = el("button", { type: "button", className: "link" }, "Open this Session");
+    link.addEventListener("click", () => nav.session(sessionId));
+    return el("p", {}, link);
+  }
+
   /**
    * The Duplicate Groups, each with its name, how many copies and the space going to the System Trash,
    * then every copy, with a button trashing the copies marked Trash and menus setting every copy in a
@@ -748,7 +763,7 @@ export async function render(root, nav, result, duplicateGroups) {
       return [
         el("h2", {}, "Duplicates"),
         el("p", {}, describeSummary(duplicatesDone, "trashed")),
-        el("p", { className: "note" }, "You can undo it from History."),
+        sessionLink(duplicatesDone.sessionId),
       ];
     }
     const trashed = duplicates.reduce((n, duplicate) => n + trashedCopies(duplicate), 0);

@@ -52,9 +52,9 @@ export function findDuplicates(onProgress) {
   return invoke("find_duplicates", { onProgress: channel });
 }
 
-// Running, undoing and redoing resolve to a summary: `{ sessionId, done, skipped, failed, unrecoverable }`,
+// Running, undoing, redoing and retrying resolve to a summary: `{ sessionId, done, skipped, failed, unrecoverable }`,
 // each a list of `{ operationId, kind, source, destination, note }`, the note saying why it wasn't done,
-// `destination` null for a Trash that didn't land.
+// `destination` null for a Trash that didn't land. `sessionId` is null after a Run that did nothing: no Session is kept.
 
 /** Runs the ticked Operations of the latest Plan as a new Session, calling `onProgress({ finished, total, current })` as it goes. */
 export function runPlan(approved, onProgress) {
@@ -68,6 +68,9 @@ export const undo = (sessionId, operationIds) => invoke("undo", { sessionId, ope
 
 /** Carries out again the undone `operationIds` of Session `sessionId`. */
 export const redoOperations = (sessionId, operationIds) => invoke("redo_operations", { sessionId, operationIds });
+
+/** Runs again the skipped or failed `operationIds` of Session `sessionId`, in that Session. */
+export const retryOperations = (sessionId, operationIds) => invoke("retry_operations", { sessionId, operationIds });
 
 /**
  * Session `sessionId` and its Operations: `{ info, operations }`, each Operation

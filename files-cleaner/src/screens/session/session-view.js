@@ -24,6 +24,21 @@ const toSystemTrash = (op) => op.kind === "trash" && op.inSystemTrash;
 /** The group of `op`: a carried-out Operation is under Moved, or Trashed when its file went to the System Trash. */
 const groupOf = (op) => (GROUP_OF[op.state] === "moved" && toSystemTrash(op) ? "trashed" : GROUP_OF[op.state]);
 
+/**
+ * What can be done to `op`'s file from the Session screen: "undo" (Put back) once it was carried out, "redo"
+ * (Move again) once it was put back, "retry" (Try again) if it was skipped or failed, or null. One stopped part-way has none: the Journal
+ * can't say whether its file moved.
+ */
+export function actionFor(op) {
+  return { done: "undo", undone: "redo", skipped: "retry", failed: "retry" }[op.state] ?? null;
+}
+
+/** Where `op`'s file is now, for Show in folder: null once it is gone for good, or while it's in the System Trash, which is the OS's to show. */
+export function whereNow(op) {
+  if (op.state === "done") return op.inSystemTrash ? null : op.destination;
+  return op.state === "unrecoverable" ? null : op.source;
+}
+
 /** `[{ group, operations }]`, one per group that has any Operations, in a fixed order. */
 export function groupByState(operations) {
   return GROUPS.map((group) => ({ group, operations: operations.filter((op) => groupOf(op) === group) })).filter(

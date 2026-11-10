@@ -243,7 +243,7 @@ impl SessionJournal {
                 destination,
                 planned,
             } => {
-                self.operations.push(JournaledOperation {
+                let op = JournaledOperation {
                     id: operation_id.clone(),
                     kind: *kind,
                     source: source.clone(),
@@ -253,7 +253,12 @@ impl SessionJournal {
                     state: OperationState::Started,
                     note: None,
                     interrupted: Some(Phase::Run),
-                });
+                };
+                // A retry runs an Operation of the Session again, in its place.
+                match self.operation(operation_id) {
+                    Some(existing) => *existing = op,
+                    None => self.operations.push(op),
+                }
             }
             Record::Intent {
                 operation_id,

@@ -220,7 +220,7 @@ fn skips_never_touch_paths_from_the_config() {
     write(home.path(), "Downloads/Tax/2025.pdf", "pdf");
     let tax = fs::canonicalize(home.path()).unwrap().join("Downloads/Tax");
     let text = format!(
-        r#"{{ "neverTouch": ["~/Downloads/Keep", {}], "rules": [] }}"#,
+        r#"{{ "neverTouch": ["~/Downloads/Keep", {}] }}"#,
         serde_json::to_string(&tax).unwrap()
     );
 
@@ -296,10 +296,7 @@ fn warns_about_protected_folders_and_anything_inside_them_as_the_scan_root() {
 fn warns_about_a_never_touch_path_as_the_scan_root_but_scans_it() {
     let home = scan_root();
     write(home.path(), "Downloads/Keep/a.txt", "a");
-    let config = config(
-        r#"{ "neverTouch": ["~/Downloads/Keep"], "rules": [] }"#,
-        home.path(),
-    );
+    let config = config(r#"{ "neverTouch": ["~/Downloads/Keep"] }"#, home.path());
     let keep = home.path().join("Downloads/Keep");
 
     let reason = scan_root_warning(&keep, &config).unwrap();
@@ -345,7 +342,7 @@ fn protected_paths_further_inside_a_warned_scan_root_are_still_skipped() {
     write(&drive, "project/node_modules/left-pad/index.js", "js");
     write(&drive, "Photos.photoslibrary/database/Photos.sqlite", "db");
     let config = config(
-        r#"{ "neverTouch": ["~/Library/CloudStorage/OneDrive-Personal/Private"], "rules": [] }"#,
+        r#"{ "neverTouch": ["~/Library/CloudStorage/OneDrive-Personal/Private"] }"#,
         home.path(),
     );
     write(&drive, "Private/secret.txt", "s");

@@ -4,8 +4,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use files_cleaner_core::{
-    self as core, load_config, Config, DuplicateChoice, DuplicateProgress, OsTrash, Plan,
-    RunProgress, ScanResult, SessionError, SuggestedFolderChoice, SuggestedFolderError, Summary,
+    self as core, load_config, scan, Config, DuplicateChoice, DuplicateProgress, FileChoice,
+    FolderChoice, OsTrash, Plan, RunProgress, ScanResult, SessionError, SuggestedFolderChoice,
+    SuggestedFolderError, Summary,
 };
 use tempfile::TempDir;
 
@@ -53,7 +54,7 @@ pub fn config(text: &str, home: &Path) -> Config {
 }
 
 pub fn empty_config(home: &Path) -> Config {
-    config(r#"{ "rules": [] }"#, home)
+    config("{}", home)
 }
 
 /// Makes `link` a symlink to `target`. On Windows this needs Developer
@@ -177,6 +178,14 @@ pub fn redo_operations(
     core::redo_operations(session_id, operation_ids, journal, &FakeTrash::new(journal))
 }
 
+pub fn retry_operations(
+    session_id: &str,
+    operation_ids: &[String],
+    journal: &Path,
+) -> Result<Summary, SessionError> {
+    core::retry_operations(session_id, operation_ids, journal, &FakeTrash::new(journal))
+}
+
 pub fn build_plan(scan: &ScanResult, config: &Config) -> Plan {
     core::build_plan(scan, config, &no_trash())
 }
@@ -189,8 +198,19 @@ pub fn build_plan_with_progress(
     core::build_plan_with_progress(scan, config, &no_trash(), on_progress)
 }
 
-pub fn build_rule_plan(scan: &ScanResult, config: &Config) -> Plan {
-    core::build_rule_plan(scan, config, &no_trash())
+/// Scans `root` and plans the Suggested Folder `name`, sending it where
+/// `choice` says with the files at `files`, relative to `root`.
+pub fn folder_plan(root: &Path, name: &str, choice: FolderChoice, files: &[&str]) -> Plan {
+    let scanned = scan(root, &empty_config(root)).unwrap();
+    let folder = SuggestedFolderChoice {
+        name: name.to_string(),
+        choice,
+        files: files
+            .iter()
+            .map(|file| (real_path(&root.join(file)), FileChoice::InFolder))
+            .collect(),
+    };
+    build_suggested_folders_plan(&scanned, &[folder]).unwrap()
 }
 
 pub fn build_review_plan(

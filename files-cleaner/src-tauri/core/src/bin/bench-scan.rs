@@ -21,7 +21,7 @@ fn main() -> ExitCode {
     };
     let runs: usize = args.next().and_then(|n| n.parse().ok()).unwrap_or(2);
     let home = PathBuf::from(env::var_os("HOME").unwrap_or_default());
-    let config = load_config(r#"{ "rules": [] }"#, &home).expect("the empty config is valid");
+    let config = load_config("{}", &home).expect("the empty config is valid");
 
     if let Some(warning) = scan_root_warning(&root, &config) {
         println!("warning: {warning} (scanning anyway)");

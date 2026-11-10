@@ -60,10 +60,14 @@ fn undo_puts_a_trashed_file_back_from_where_it_landed() {
 
     assert_eq!(summary.done.len(), 2);
     assert!(!dir.path().join("a/copy.txt").exists());
-    let landing = landed(journal.path(), &summary.session_id, "a/copy.txt");
+    let landing = landed(
+        journal.path(),
+        summary.session_id.as_deref().unwrap(),
+        "a/copy.txt",
+    );
     assert_eq!(fs::read_to_string(&landing).unwrap(), "same contents");
 
-    let undone = undo(&summary.session_id, journal.path()).unwrap();
+    let undone = undo(summary.session_id.as_deref().unwrap(), journal.path()).unwrap();
 
     assert_eq!(undone.done.len(), 2);
     assert!(!landing.exists());
@@ -80,9 +84,14 @@ fn a_file_emptied_from_the_trash_is_unrecoverable_and_the_rest_still_undoes() {
     folder_with_copies(dir.path());
     let plan = plan_for(dir.path());
     let summary = run(&plan, &ticked(&plan), journal.path()).unwrap();
-    fs::remove_file(landed(journal.path(), &summary.session_id, "a/copy.txt")).unwrap();
+    fs::remove_file(landed(
+        journal.path(),
+        summary.session_id.as_deref().unwrap(),
+        "a/copy.txt",
+    ))
+    .unwrap();
 
-    let undone = undo(&summary.session_id, journal.path()).unwrap();
+    let undone = undo(summary.session_id.as_deref().unwrap(), journal.path()).unwrap();
 
     assert_eq!(undone.unrecoverable.len(), 1);
     let note = undone.unrecoverable[0].note.as_deref().unwrap();
@@ -99,11 +108,15 @@ fn another_file_landing_under_the_same_name_is_never_restored_in_its_place() {
     let plan = plan_for(dir.path());
     let summary = run(&plan, &ticked(&plan), journal.path()).unwrap();
     // The Trash was emptied, and a later Trash reused the name.
-    let landing = landed(journal.path(), &summary.session_id, "a/copy.txt");
+    let landing = landed(
+        journal.path(),
+        summary.session_id.as_deref().unwrap(),
+        "a/copy.txt",
+    );
     fs::remove_file(&landing).unwrap();
     fs::write(&landing, "another file altogether").unwrap();
 
-    let undone = undo(&summary.session_id, journal.path()).unwrap();
+    let undone = undo(summary.session_id.as_deref().unwrap(), journal.path()).unwrap();
 
     assert_eq!(undone.unrecoverable.len(), 1, "{undone:?}");
     assert!(!dir.path().join("a/copy.txt").exists());
@@ -172,7 +185,9 @@ fn a_crash_before_the_landing_was_recorded_says_to_restore_it_by_hand() {
     let plan = plan_for(dir.path());
     let summary = run(&plan, &ticked(&plan), journal.path()).unwrap();
     // The Journal as the crash left it: intents, and no outcome after them.
-    let path = journal.path().join(format!("{}.jsonl", summary.session_id));
+    let path = journal
+        .path()
+        .join(format!("{}.jsonl", summary.session_id.as_deref().unwrap()));
     let text = fs::read_to_string(&path).unwrap();
     let kept: Vec<&str> = text
         .lines()
@@ -180,7 +195,7 @@ fn a_crash_before_the_landing_was_recorded_says_to_restore_it_by_hand() {
         .collect();
     fs::write(&path, format!("{}\n", kept.join("\n"))).unwrap();
 
-    let details = session_details(&summary.session_id, journal.path()).unwrap();
+    let details = session_details(summary.session_id.as_deref().unwrap(), journal.path()).unwrap();
 
     let op = &details.operations[0];
     assert_eq!(op.state, OperationState::Unrecoverable);
@@ -190,7 +205,7 @@ fn a_crash_before_the_landing_was_recorded_says_to_restore_it_by_hand() {
         "{note}"
     );
 
-    let undone = undo(&summary.session_id, journal.path()).unwrap();
+    let undone = undo(summary.session_id.as_deref().unwrap(), journal.path()).unwrap();
     assert!(undone.done.is_empty(), "the app never guesses: {undone:?}");
 }
 

@@ -9,12 +9,12 @@ use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
 
 use common::{
-    build_plan, build_rule_plan, config, empty_config, journal_dir, run, scan_root, undo,
-    undo_operations, write,
+    build_plan, build_suggested_folders_plan, empty_config, folder_plan, journal_dir, real_path,
+    run, scan_root, undo, undo_operations, write,
 };
 use files_cleaner_core::{
-    list_sessions, scan, session_details, OperationKind, OperationState, Plan, Reason,
-    SessionStatus,
+    list_sessions, scan, session_details, FileChoice, FolderChoice, OperationKind, OperationState,
+    Plan, Reason, SessionStatus, SuggestedFolderChoice,
 };
 
 fn set_modified(path: &Path, secs: u64) {
@@ -144,19 +144,28 @@ fn os_metadata_files_dont_keep_a_folder_but_anything_else_does() {
 }
 
 #[test]
-fn a_folder_a_rule_moves_files_into_is_not_emptied() {
+fn a_folder_files_move_into_is_not_emptied() {
     let dir = scan_root();
-    write(dir.path(), "Slides/old.key.pdf", "x");
-    write(dir.path(), "inbox/talk.pptx", "talk");
-    let config = config(
-        r#"{ "rules": [
-            { "name": "Slides", "match": { "extensions": ["pptx"] }, "then": { "moveTo": "inbox/sorted" } },
-            { "name": "PDFs", "match": { "extensions": ["pdf"] }, "then": { "moveTo": "Papers" } }
-        ] }"#,
-        dir.path(),
-    );
+    let old = write(dir.path(), "Slides/old.key.pdf", "x");
+    let talk = write(dir.path(), "inbox/talk.pptx", "talk");
+    let config = empty_config(dir.path());
+    let folder = |name: &str, choice, file| SuggestedFolderChoice {
+        name: name.to_string(),
+        choice,
+        files: vec![(real_path(file), FileChoice::InFolder)],
+    };
+    let sorted = FolderChoice::CreateIn {
+        folder: real_path(&dir.path().join("inbox")),
+    };
 
-    let plan = build_rule_plan(&scan(dir.path(), &config).unwrap(), &config);
+    let plan = build_suggested_folders_plan(
+        &scan(dir.path(), &config).unwrap(),
+        &[
+            folder("sorted", sorted, &talk),
+            folder("Papers", FolderChoice::CreateHere, &old),
+        ],
+    )
+    .unwrap();
 
     assert_eq!(
         emptied(&plan),
@@ -178,7 +187,7 @@ fn trashing_an_emptied_folder_takes_its_metadata_along_and_undo_restores_it_exac
 
     assert_eq!(summary.done.len(), 3, "{summary:?}");
     assert!(!dir.path().join("old").exists());
-    let details = session_details(&summary.session_id, journal.path()).unwrap();
+    let details = session_details(summary.session_id.as_deref().unwrap(), journal.path()).unwrap();
     let folder = details.operations.last().unwrap();
     assert_eq!(folder.relative_path, ["old"]);
     let folder = folder.destination.as_ref().unwrap();
@@ -188,7 +197,7 @@ fn trashing_an_emptied_folder_takes_its_metadata_along_and_undo_restores_it_exac
         "it goes to the Trash as one item"
     );
 
-    let undone = undo(&summary.session_id, journal.path()).unwrap();
+    let undone = undo(summary.session_id.as_deref().unwrap(), journal.path()).unwrap();
 
     assert_eq!(undone.done.len(), 3, "{undone:?}");
     assert_eq!(snapshot(dir.path()), before);
@@ -250,8 +259,13 @@ fn undoing_the_files_first_then_the_emptied_folder_merges_it_back() {
         .unwrap();
 
     // Restoring the file alone makes `old` again.
-    undo_operations(&summary.session_id, &[copy.id.clone()], journal.path()).unwrap();
-    let undone = undo(&summary.session_id, journal.path()).unwrap();
+    undo_operations(
+        summary.session_id.as_deref().unwrap(),
+        &[copy.id.clone()],
+        journal.path(),
+    )
+    .unwrap();
+    let undone = undo(summary.session_id.as_deref().unwrap(), journal.path()).unwrap();
 
     assert_eq!(undone.done.len(), 1, "{undone:?}");
     assert_eq!(snapshot(dir.path()), before);
@@ -293,11 +307,6 @@ fn moves_across_disks_are_errors_that_are_never_run() {
     };
     write(dir.path(), "usb/talk.pptx", "talk");
     write(dir.path(), "here/intro.pptx", "intro");
-    let config = config(
-        r#"{ "rules": [{ "name": "Slides", "match": { "extensions": ["pptx"] }, "then": { "moveTo": "Slides" } }] }"#,
-        dir.path(),
-    );
-    let scanned = scan(dir.path(), &config).unwrap();
     let errors = |plan: &Plan| -> BTreeMap<String, String> {
         plan.operations
             .iter()
@@ -305,7 +314,12 @@ fn moves_across_disks_are_errors_that_are_never_run() {
             .collect()
     };
 
-    let plan = build_rule_plan(&scanned, &config);
+    let plan = folder_plan(
+        dir.path(),
+        "Slides",
+        FolderChoice::CreateHere,
+        &["usb/talk.pptx", "here/intro.pptx"],
+    );
     let moves = errors(&plan);
     assert_eq!(moves.keys().collect::<Vec<_>>(), ["usb/talk.pptx"]);
     assert!(
@@ -338,11 +352,6 @@ fn moves_across_disks_are_errors_that_are_never_run() {
     );
 }
 
-fn rules(text: &str, root: &Path) -> Plan {
-    let config = config(&format!(r#"{{ "rules": [{text}] }}"#), root);
-    build_rule_plan(&scan(root, &config).unwrap(), &config)
-}
-
 #[test]
 fn undoing_an_older_session_skips_what_a_newer_one_moved_on_and_undoes_the_rest() {
     let dir = scan_root();
@@ -350,12 +359,18 @@ fn undoing_an_older_session_skips_what_a_newer_one_moved_on_and_undoes_the_rest(
     write(dir.path(), "intro.pptx", "intro");
     let journal = journal_dir();
     let before = snapshot(dir.path());
-    let to_study = r#"{ "name": "Slides", "match": { "extensions": ["pptx"] }, "then": { "moveTo": "Study" } }"#;
-    let plan = rules(to_study, dir.path());
-    let older = run(&plan, &ticked(&plan), journal.path()).unwrap();
-    let plan = rules(
-        r#"{ "name": "Old talks", "match": { "nameGlob": "talk*" }, "then": { "trash": true } }"#,
+    let plan = folder_plan(
         dir.path(),
+        "Study",
+        FolderChoice::CreateHere,
+        &["talk.pptx", "intro.pptx"],
+    );
+    let older = run(&plan, &ticked(&plan), journal.path()).unwrap();
+    let plan = folder_plan(
+        dir.path(),
+        "Old talks",
+        FolderChoice::TrashAll,
+        &["Study/talk.pptx"],
     );
     let newer = run(&plan, &ticked(&plan), journal.path()).unwrap();
     assert_eq!(
@@ -364,7 +379,7 @@ fn undoing_an_older_session_skips_what_a_newer_one_moved_on_and_undoes_the_rest(
         "the newer Session trashed Study/talk.pptx"
     );
 
-    let undone = undo(&older.session_id, journal.path()).unwrap();
+    let undone = undo(older.session_id.as_deref().unwrap(), journal.path()).unwrap();
 
     assert_eq!(
         fs::read_to_string(dir.path().join("intro.pptx")).unwrap(),
@@ -382,14 +397,14 @@ fn undoing_an_older_session_skips_what_a_newer_one_moved_on_and_undoes_the_rest(
         .collect();
     assert_eq!(notes.len(), 2, "{undone:?}");
     assert!(
-        notes["talk.pptx"].contains(&newer.session_id)
+        notes["talk.pptx"].contains(newer.session_id.as_deref().unwrap())
             && notes["talk.pptx"].contains("undo that Session first")
     );
     assert!(
         notes["Study"].contains("aren't back yet"),
         "the folder waits for talk.pptx: {notes:?}"
     );
-    let details = session_details(&older.session_id, journal.path()).unwrap();
+    let details = session_details(older.session_id.as_deref().unwrap(), journal.path()).unwrap();
     assert_eq!(details.info.status, SessionStatus::PartlyUndone);
     let talk = details
         .operations
@@ -399,8 +414,8 @@ fn undoing_an_older_session_skips_what_a_newer_one_moved_on_and_undoes_the_rest(
     assert_eq!(talk.state, OperationState::Done);
 
     // Once the newer Session is undone, the older one can finish.
-    undo(&newer.session_id, journal.path()).unwrap();
-    let undone = undo(&older.session_id, journal.path()).unwrap();
+    undo(newer.session_id.as_deref().unwrap(), journal.path()).unwrap();
+    let undone = undo(older.session_id.as_deref().unwrap(), journal.path()).unwrap();
 
     assert_eq!(
         undone.done.len(),
@@ -422,13 +437,19 @@ fn undoing_an_older_session_skips_a_place_a_newer_one_filled() {
     let dir = scan_root();
     write(dir.path(), "inbox/report.pdf", "first");
     let journal = journal_dir();
-    let to_papers = r#"{ "name": "Papers", "match": { "extensions": ["pdf"] }, "then": { "moveTo": "Papers" } }"#;
-    let plan = rules(to_papers, dir.path());
+    let plan = folder_plan(
+        dir.path(),
+        "Papers",
+        FolderChoice::CreateHere,
+        &["inbox/report.pdf"],
+    );
     let older = run(&plan, &ticked(&plan), journal.path()).unwrap();
     // A newer Session puts a new download where the old one was.
-    write(dir.path(), "downloads/new-report.pdf", "second");
-    let to_inbox = r#"{ "name": "Inbox", "match": { "nameGlob": "new-*" }, "then": { "moveTo": "inbox", "rename": "report" } }"#;
-    let plan = rules(to_inbox, dir.path());
+    write(dir.path(), "downloads/report.pdf", "second");
+    let inbox = FolderChoice::AddTo {
+        folder: real_path(&dir.path().join("inbox")),
+    };
+    let plan = folder_plan(dir.path(), "Inbox", inbox, &["downloads/report.pdf"]);
     let newer = run(&plan, &ticked(&plan), journal.path()).unwrap();
     assert!(
         newer.done.iter().any(|o| o
@@ -439,11 +460,11 @@ fn undoing_an_older_session_skips_a_place_a_newer_one_filled() {
         "{newer:?}"
     );
 
-    let undone = undo(&older.session_id, journal.path()).unwrap();
+    let undone = undo(older.session_id.as_deref().unwrap(), journal.path()).unwrap();
 
     let note = undone.skipped.iter().find_map(|o| o.note.clone()).unwrap();
     assert!(
-        note.contains(&newer.session_id) && note.contains("put another item"),
+        note.contains(newer.session_id.as_deref().unwrap()) && note.contains("put another item"),
         "{note}"
     );
     assert_eq!(

@@ -4,9 +4,6 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::protection::Protection;
-use crate::rules::PLACEHOLDERS;
-
 /// The config written on first launch, as a working starting point.
 pub const EXAMPLE_CONFIG: &str = r#"{
   "neverTouch": ["~/Downloads/Keep"]
@@ -21,9 +18,6 @@ pub struct Config {
     pub home: PathBuf,
     pub never_touch: Vec<PathBuf>,
     pub default_copy_rule: DefaultCopyRule,
-    /// In file order: the first matching Rule wins. Rules are frozen: they
-    /// are still checked, but no Plan the app builds uses them.
-    pub rules: Vec<Rule>,
     pub grouping: GroupingSettings,
     /// Whether the user wants a notification when the folders are ready:
     /// `None` until they're asked, which is only once.
@@ -77,36 +71,6 @@ pub enum DefaultCopyRule {
     ShortestPath,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Rule {
-    pub name: String,
-    /// Lowercase, without the dot. Empty means "any extension".
-    pub extensions: Vec<String>,
-    pub name_glob: Option<String>,
-    pub operation: RuleOperation,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum RuleOperation {
-    Trash,
-    MoveTo {
-        folder: RuleTarget,
-        rename: Option<String>,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum RuleTarget {
-    /// Written as an absolute or `~/` path.
-    Absolute(PathBuf),
-    /// Written as a relative path; resolved against the Scan Root when
-    /// planning.
-    RelativeToScanRoot(PathBuf),
-}
-
 /// Why a config couldn't be loaded, with where in the file when known.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ConfigError {
@@ -145,8 +109,9 @@ struct RawConfig {
     never_touch: Vec<String>,
     #[serde(default)]
     default_copy_rule: DefaultCopyRule,
-    #[serde(default)]
-    rules: Vec<RawRule>,
+    /// The old Rules (ADR 0008): any value is ignored.
+    #[serde(default, rename = "rules")]
+    _rules: serde::de::IgnoredAny,
     #[serde(default)]
     grouping: RawGrouping,
     notifications: Option<bool>,
@@ -158,31 +123,6 @@ struct RawGrouping {
     folder_threshold: Option<f32>,
     existing_folder_threshold: Option<f32>,
     smallest_folder: Option<usize>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawRule {
-    name: String,
-    #[serde(rename = "match")]
-    matcher: RawMatch,
-    then: RawThen,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RawMatch {
-    #[serde(default)]
-    extensions: Vec<String>,
-    name_glob: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RawThen {
-    trash: Option<bool>,
-    move_to: Option<String>,
-    rename: Option<String>,
 }
 
 /// Parses and validates the config JSON. `home` expands `~/` paths.
@@ -204,26 +144,13 @@ pub fn load_config(text: &str, home: &Path) -> Result<Config, ConfigError> {
     }
 
     let grouping = validate_grouping(&raw.grouping, text)?;
-    let mut config = Config {
+    Ok(Config {
         home: home.to_path_buf(),
         never_touch,
         default_copy_rule: raw.default_copy_rule,
-        rules: Vec::new(),
         grouping,
         notifications: raw.notifications,
-    };
-    let protection = Protection::new(&config);
-    // Rules are in file order, so searching onwards from the previous
-    // Rule's name finds each Rule's own text, not an earlier copy of it.
-    let mut cursor = text.find("\"rules\"").unwrap_or(0);
-    for rule in raw.rules {
-        let start = find(text, cursor, &rule.name).unwrap_or(cursor);
-        config
-            .rules
-            .push(validate_rule(rule, text, start, home, &protection)?);
-        cursor = start + 1;
-    }
-    Ok(config)
+    })
 }
 
 /// The grouping settings, with the defaults for keys left out. An
@@ -265,10 +192,10 @@ fn validate_grouping(raw: &RawGrouping, text: &str) -> Result<GroupingSettings, 
 }
 
 /// Makes `change` to the config file at `path` and returns the config it
-/// now holds. Every key the change doesn't touch, the frozen Rules
-/// included, is kept as written. A change that would make the config
-/// invalid is refused and nothing is written; otherwise the file is
-/// replaced atomically, through a temporary file and a rename.
+/// now holds. Every key the change doesn't touch is kept as written. A
+/// change that would make the config invalid is refused and nothing is
+/// written; otherwise the file is replaced atomically, through a temporary
+/// file and a rename.
 pub fn save_config(
     path: &Path,
     change: &SettingChange,
@@ -392,92 +319,6 @@ fn set_grouping(
             object.remove("grouping");
         }
     }
-}
-
-/// Checks a Rule's shape and target. Errors point at the Rule's name, or at
-/// its target when that is the problem.
-fn validate_rule(
-    raw: RawRule,
-    text: &str,
-    start: usize,
-    home: &Path,
-    protection: &Protection,
-) -> Result<Rule, ConfigError> {
-    let name = raw.name;
-    let fail = |at: &str, problem: String| {
-        Err(error_at(
-            text,
-            start,
-            at,
-            format!("Rule \"{name}\": {problem}"),
-        ))
-    };
-    if raw.matcher.extensions.is_empty() && raw.matcher.name_glob.is_none() {
-        return fail(&name, "match needs extensions or nameGlob".into());
-    }
-    let operation = match raw.then {
-        RawThen { trash: Some(true), move_to: None, rename: None } => RuleOperation::Trash,
-        RawThen { trash: None, move_to: Some(written), rename } => {
-            let folder = match expand_home(&written, home) {
-                Some(path) => match protection.refusal(&path) {
-                    Some(reason) => return fail(&written, format!("moveTo {reason}")),
-                    None => RuleTarget::Absolute(path),
-                },
-                None => RuleTarget::RelativeToScanRoot(PathBuf::from(written)),
-            };
-            if let Some(template) = &rename {
-                if let Some(problem) = rename_problem(template) {
-                    return fail(template, problem);
-                }
-            }
-            RuleOperation::MoveTo { folder, rename }
-        }
-        _ => {
-            return fail(
-                &name,
-                "then must be either { \"trash\": true } or { \"moveTo\": \"folder\" } with an optional rename".into(),
-            )
-        }
-    };
-    let extensions = raw
-        .matcher
-        .extensions
-        .iter()
-        .map(|e| e.trim_start_matches('.').to_lowercase())
-        .collect();
-    Ok(Rule {
-        name,
-        extensions,
-        name_glob: raw.matcher.name_glob,
-        operation,
-    })
-}
-
-/// What is wrong with a rename template, if anything: it must give a
-/// non-empty name, with no folders, using only the known placeholders.
-fn rename_problem(template: &str) -> Option<String> {
-    if template.trim().is_empty() {
-        return Some("rename is empty".into());
-    }
-    if let Some(separator) = template.chars().find(|c| matches!(c, '/' | '\\')) {
-        return Some(format!(
-            "rename can't contain {separator}: it gives a name, not a folder"
-        ));
-    }
-    let mut rest = template;
-    while let Some(open) = rest.find('{') {
-        let placeholder = rest[open..]
-            .find('}')
-            .map_or(&rest[open..], |close| &rest[open..=open + close]);
-        if !PLACEHOLDERS.contains(&placeholder) {
-            return Some(format!(
-                "rename has {placeholder}, but only {} can be used",
-                PLACEHOLDERS.join(", ")
-            ));
-        }
-        rest = &rest[open + placeholder.len()..];
-    }
-    None
 }
 
 /// The absolute path `written` names, or `None` if it is relative. `~`

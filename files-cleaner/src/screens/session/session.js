@@ -1,15 +1,16 @@
 // Session: what one past Session did and where its files are now. One card per group (Moved,
 // Trashed, Put back, Needs attention) picks which files are listed; the selected file is shown beside
-// the list. Files can be put back, or moved again, all at once, ticked, or one at a time, and a file
-// not in the System Trash can be opened, by double-clicking it or from its right-click menu.
-import { describeError, openSessionFile, pathSeparator, redoOperations, revealInFileManager, sessionDetails, undo } from "../../shared/api.js";
+// the list. Files can be put back, moved again, or tried again if skipped or failed, all at once,
+// ticked, or one at a time, and a file not in the System Trash can be opened, by double-clicking it or
+// from its right-click menu.
+import { describeError, openSessionFile, pathSeparator, redoOperations, retryOperations, revealInFileManager, sessionDetails, undo } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";
 import { drawMore, revealMenu } from "../../shared/plan/file-list.js";
 import { count, formatDate, formatSize, plural, splitPath } from "../../shared/format.js";
 import { describeSummary } from "../../shared/outcomes.js";
 import { tickState, toggleAll } from "../../shared/plan/plan-selection.js";
 import { PAGE_SIZE, fileName, folderLabel, paging, selectedFile, visibleFiles } from "../../shared/plan/plan-view.js";
-import { groupByState, paneSentence, sessionHeading, sessionLead } from "./session-view.js";
+import { actionFor, groupByState, paneSentence, sessionHeading, sessionLead, whereNow } from "./session-view.js";
 import { showStatus } from "../../shared/status.js";
 
 /** "3 moved": how many files a group has, as its card and list heading say it. */
@@ -20,19 +21,17 @@ const GROUP_COUNTS = {
   attention: (n) => `${count(n)} ${n === 1 ? "needs" : "need"} attention`,
 };
 
-/** What can be done to a group's files, and how it is worded. Needs attention has no action. */
-const PUT_BACK = {
-  bulk: (n) => `Put back ${plural(n, "file")}`,
-  single: "Put back",
-  tickLabel: (name) => `Put back ${name}`,
-  busy: "Putting back…",
-  done: "put back",
-  call: (sessionId, ids) => undo(sessionId, ids),
-};
+/** Each action `actionFor` names, and how it is worded. */
 const ACTIONS = {
-  moved: PUT_BACK,
-  trashed: PUT_BACK,
-  putBack: {
+  undo: {
+    bulk: (n) => `Put back ${plural(n, "file")}`,
+    single: "Put back",
+    tickLabel: (name) => `Put back ${name}`,
+    busy: "Putting back…",
+    done: "put back",
+    call: (sessionId, ids) => undo(sessionId, ids),
+  },
+  redo: {
     bulk: (n) => `Move ${plural(n, "file")} again`,
     single: "Move again",
     tickLabel: (name) => `Move ${name} again`,
@@ -40,15 +39,23 @@ const ACTIONS = {
     done: "moved again",
     call: (sessionId, ids) => redoOperations(sessionId, ids),
   },
+  retry: {
+    bulk: (n) => `Try ${plural(n, "file")} again`,
+    single: "Try again",
+    tickLabel: (name) => `Try ${name} again`,
+    busy: "Trying again…",
+    done: "done",
+    call: (sessionId, ids) => retryOperations(sessionId, ids),
+  },
 };
 
-const SORT_NAMES = { size: "biggest first", name: "by name", folder: "by folder" };
+/** The action for `op`'s file, if it has one. */
+const actionOf = (op) => ACTIONS[actionFor(op)] ?? null;
 
-/** Where the file is now, for Show in folder: null once it is gone for good, or while it's in the System Trash, which is the OS's to show. */
-function whereNow(op) {
-  if (op.state === "done") return op.inSystemTrash ? null : op.destination;
-  return op.state === "unrecoverable" ? null : op.source;
-}
+/** The action for a group's files: every file in a group that has one has the same. Under Needs attention, a file stopped part-way has none. */
+const groupAction = (group) => group.operations.map(actionOf).find(Boolean) ?? null;
+
+const SORT_NAMES = { size: "biggest first", name: "by name", folder: "by folder" };
 
 export function render(root, nav, sessionId, from, message) {
   const fromHistory = from?.page != null;
@@ -187,10 +194,7 @@ export function render(root, nav, sessionId, from, message) {
     }
     const selectAll = el("input", { type: "checkbox", ariaLabel: "Select every file" });
     selectAll.addEventListener("change", () => {
-      ticked = toggleAll(
-        files.map((op) => op.id),
-        ticked,
-      );
+      ticked = toggleAll(tickable(), ticked);
       drawTicks();
     });
     const selectAllLabel = el("label", { className: "plan-include" }, selectAll, "Select all");
@@ -200,7 +204,7 @@ export function render(root, nav, sessionId, from, message) {
     const more = el("div", { className: "plan-more" });
     const bulk = el("button", { type: "button" });
     bulk.addEventListener("click", () => {
-      const action = ACTIONS[group.group];
+      const action = groupAction(group);
       const ids = [...ticked];
       act(action.busy, () => action.call(sessionId, ids), action.done);
     });
@@ -208,6 +212,7 @@ export function render(root, nav, sessionId, from, message) {
     const pane = el("aside", { className: "plan-pane", ariaLabel: "Selected file" });
     const menu = revealMenu();
     let files = []; // the group's files that match the search
+    const tickable = () => files.filter(actionOf).map((op) => op.id);
     let rows = []; // [{ op, row, box, target }] for the files on screen; `target` takes focus
 
     const select = (op) => {
@@ -221,13 +226,14 @@ export function render(root, nav, sessionId, from, message) {
     };
 
     function fileRow(op, index) {
-      const action = ACTIONS[group.group];
+      const action = actionOf(op);
       const box = action ? el("input", { type: "checkbox", ariaLabel: action.tickLabel(fileName(op)) }) : null;
       const folder = folderLabel(op, rootName);
       const row = el(
         "li",
         { className: "plan-file" },
-        box ?? "",
+        // A file with no tick box in a list that has them keeps its place in the box's column.
+        box ?? (groupAction(group) ? el("span") : ""),
         el("span", { className: "plan-file-name", title: fileName(op) }, fileName(op)),
         // Wrapped in left-to-right marks so the right-to-left box keeps the folder's end, not its slashes.
         el(
@@ -237,7 +243,7 @@ export function render(root, nav, sessionId, from, message) {
         ),
         el("span", { className: "plan-file-size", id: `session-size-${index}` }, formatSize(op.size)),
       );
-      // Under Needs attention there is no tick box, so the row itself takes focus.
+      // A file with no tick box, such as one stopped part-way, takes focus itself.
       const target = box ?? row;
       if (box) {
         // Read after the name when the box gets focus, which is how a row is selected from the keyboard.
@@ -278,7 +284,7 @@ export function render(root, nav, sessionId, from, message) {
     });
 
     function drawList() {
-      const action = ACTIONS[group.group];
+      const action = groupAction(group);
       listHeading.textContent = `${GROUP_COUNTS[group.group](group.operations.length)}, ${SORT_NAMES[view.sort]}`;
       files = visibleFiles(group.operations, view);
       const { shown } = paging(files.length, view.limit);
@@ -306,21 +312,19 @@ export function render(root, nav, sessionId, from, message) {
     /** Brings the tick boxes, Select all and the action for the ticked files in step with `ticked`. */
     function drawTicks() {
       for (const { op, box } of rows) if (box) box.checked = ticked.has(op.id);
-      const state = tickState(
-        files.map((op) => op.id),
-        ticked,
-      );
-      selectAll.checked = files.length > 0 && state === "all";
+      const ids = tickable();
+      const state = tickState(ids, ticked);
+      selectAll.checked = ids.length > 0 && state === "all";
       selectAll.indeterminate = state === "some";
-      selectAll.disabled = files.length === 0;
-      const action = ACTIONS[group.group];
+      selectAll.disabled = ids.length === 0;
+      const action = groupAction(group);
       if (!action) return;
       bulk.textContent = ticked.size ? action.bulk(ticked.size) : "Nothing ticked";
       bulk.disabled = ticked.size === 0;
     }
 
     function drawPane(op) {
-      const action = ACTIONS[group.group];
+      const action = actionOf(op);
       const path = whereNow(op);
       const buttons = [];
       if (path) {

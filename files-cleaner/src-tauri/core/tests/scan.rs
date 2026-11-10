@@ -73,7 +73,7 @@ fn reports_name_extension_size_and_dates() {
 }
 
 #[test]
-fn leaves_out_files_with_no_extension_and_counts_them() {
+fn lists_files_with_no_extension_and_counts_them() {
     let dir = scan_root();
     write(dir.path(), "notes.txt", "n");
     write(dir.path(), "Makefile", "all:");
@@ -82,7 +82,16 @@ fn leaves_out_files_with_no_extension_and_counts_them() {
 
     let result = scan(dir.path(), &empty_config(dir.path())).unwrap();
 
-    assert_eq!(relative_paths(&result, dir.path()), ["notes.txt"]);
+    assert_eq!(
+        relative_paths(&result, dir.path()),
+        ["Makefile", "bin/tool", "notes.txt", "trailing."]
+    );
+    let makefile = result
+        .entries
+        .iter()
+        .find(|e| e.name == "Makefile")
+        .unwrap();
+    assert_eq!(makefile.extension, "");
     assert_eq!(
         result.no_extension, 3,
         "a name ending in a dot has no extension either"

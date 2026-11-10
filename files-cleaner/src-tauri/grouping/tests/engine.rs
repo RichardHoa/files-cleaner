@@ -74,7 +74,7 @@ fn three_files_on_one_topic_make_one_suggested_folder() {
     )
     .unwrap();
     let store_dir = tempfile::tempdir().unwrap();
-    let config = load_config(r#"{ "rules": [] }"#, root).unwrap();
+    let config = load_config("{}", root).unwrap();
     let scan = scan(root, &config).unwrap();
     let store = CardStore::open(store_dir.path());
 
@@ -107,6 +107,47 @@ fn three_files_on_one_topic_make_one_suggested_folder() {
     assert_eq!(names, ["T1T2-2706.txt", "notes.md", "week 2.txt"]);
     assert_eq!(folder.existing, None);
     assert_eq!(grouping.ungrouped, [scan.root.join("recipe.txt")]);
+}
+
+#[test]
+fn a_file_without_an_extension_is_never_a_loose_file() {
+    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("test-tmp");
+    fs::create_dir_all(&base).unwrap();
+    let dir = tempfile::Builder::new()
+        .prefix("scan-")
+        .tempdir_in(&base)
+        .unwrap();
+    let root = dir.path();
+    let text = "Week one lecture on algorithms, sorting and searching with worked examples.";
+    for name in ["T1T2-2706.txt", "week 2.txt", "README"] {
+        fs::write(root.join(name), format!("{name}: {text}")).unwrap();
+    }
+    let store_dir = tempfile::tempdir().unwrap();
+    let config = load_config("{}", root).unwrap();
+    let scan = scan(root, &config).unwrap();
+    let store = CardStore::open(store_dir.path());
+
+    let input = Input {
+        scan: &scan,
+        settings: Settings::default(),
+        store: &store,
+        pdfium: None,
+        tessdata: None,
+    };
+    let analysis = analyse(
+        &input,
+        &mut FakeModels,
+        &AtomicBool::new(false),
+        &AtomicBool::new(false),
+        |_| {},
+    )
+    .unwrap();
+
+    let readme = scan.root.join("README");
+    let grouping = &analysis.grouping;
+    assert_eq!(grouping.folders.len(), 1);
+    assert!(!grouping.folders[0].files.contains(&readme));
+    assert!(!grouping.ungrouped.contains(&readme));
 }
 
 /// Each file's topic is what it says before `|`; every vector points its own
@@ -191,7 +232,7 @@ fn topics_sharing_a_mark_group_and_a_named_archive_joins_them() {
     fs::write(root.join("Lab5_StudentID.zip"), "not a real archive").unwrap();
     fs::write(root.join("recipe.txt"), "Banh mi | recipe").unwrap();
     let store_dir = tempfile::tempdir().unwrap();
-    let config = load_config(r#"{ "rules": [] }"#, root).unwrap();
+    let config = load_config("{}", root).unwrap();
     let scan = scan(root, &config).unwrap();
     let store = CardStore::open(store_dir.path());
 
@@ -249,7 +290,7 @@ fn a_cleared_store_reads_every_file_again() {
     )
     .unwrap();
     let store_dir = tempfile::tempdir().unwrap();
-    let config = load_config(r#"{ "rules": [] }"#, root).unwrap();
+    let config = load_config("{}", root).unwrap();
     let scan = scan(root, &config).unwrap();
     let store = CardStore::open(store_dir.path());
     let input = Input {
@@ -300,7 +341,7 @@ fn a_file_left_out_goes_where_the_model_places_it_and_stays_there_on_regroup() {
     .unwrap();
     fs::write(root.join("recipe.txt"), "Banh mi | recipe").unwrap();
     let store_dir = tempfile::tempdir().unwrap();
-    let config = load_config(r#"{ "rules": [] }"#, root).unwrap();
+    let config = load_config("{}", root).unwrap();
     let scan = scan(root, &config).unwrap();
     let store = CardStore::open(store_dir.path());
 
@@ -387,7 +428,7 @@ fn stopping_groups_the_files_read_so_far_and_leaves_the_rest_where_they_are() {
         fs::write(root.join(name), format!("{name}: a lecture on sorting")).unwrap();
     }
     let store_dir = tempfile::tempdir().unwrap();
-    let config = load_config(r#"{ "rules": [] }"#, root).unwrap();
+    let config = load_config("{}", root).unwrap();
     let scan = scan(root, &config).unwrap();
     let store = CardStore::open(store_dir.path());
     let input = Input {

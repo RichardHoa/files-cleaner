@@ -37,7 +37,8 @@ pub struct ScanResult {
     pub root: PathBuf,
     /// How many Protected Paths were met and left alone.
     pub skipped: usize,
-    /// How many files were left out because they have no extension.
+    /// How many of `entries` are files with no extension: they are checked
+    /// for duplicates but never sorted into Suggested Folders.
     pub no_extension: usize,
     /// Files and folders that couldn't be read, so weren't scanned.
     pub unreadable: Vec<PathBuf>,
@@ -89,9 +90,8 @@ pub fn scan_root_warning(scan_root: &Path, config: &Config) -> Option<String> {
 }
 
 /// Walks `scan_root` recursively and lists every file and Package under it,
-/// skipping hidden entries, symlinks, Protected Paths inside it and files with
-/// no extension. Protected Paths covering `scan_root` itself are waived: see
-/// `scan_root_warning`.
+/// skipping hidden entries, symlinks and Protected Paths inside it. Protected
+/// Paths covering `scan_root` itself are waived: see `scan_root_warning`.
 pub fn scan(scan_root: &Path, config: &Config) -> Result<ScanResult, ScanError> {
     scan_with_progress(scan_root, config, |_| {})
 }
@@ -161,7 +161,6 @@ pub fn scan_with_progress(
             }
             if kind.is_file() && path.extension().is_none_or(|e| e.is_empty()) {
                 result.no_extension += 1;
-                continue;
             }
             if kind.is_dir() && !is_package(&path) {
                 folders.push(path);

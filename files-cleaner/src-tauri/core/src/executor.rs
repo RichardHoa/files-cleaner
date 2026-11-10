@@ -1,6 +1,6 @@
 //! Changes the disk, journaling every step before it happens: runs the
-//! approved Operations of a Plan as a new Session, and undoes or redoes the
-//! Operations of a past one.
+//! approved Operations of a Plan as a new Session, and undoes, redoes or
+//! retries the Operations of a past one.
 
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
@@ -19,11 +19,12 @@ use crate::protection::is_os_metadata_file;
 use crate::scanner::{millis, total_size};
 use crate::sessions::{restore_by_hand_note, JournaledOperation, OperationState, SessionJournal};
 
-/// What happened to each Operation in one Run, Undo or Redo.
+/// What happened to each Operation in one Run, Undo, Redo or retry.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Summary {
-    pub session_id: String,
+    /// `None` after a Run that did nothing, which keeps no Session.
+    pub session_id: Option<String>,
     /// Moved: trashed by a Run or a Redo, restored by an Undo.
     pub done: Vec<Outcome>,
     /// Not moved, but could be later: the item changed, or something is in
@@ -39,7 +40,7 @@ pub struct Summary {
 impl Summary {
     fn new(session_id: String) -> Self {
         Summary {
-            session_id,
+            session_id: Some(session_id),
             done: Vec::new(),
             skipped: Vec::new(),
             failed: Vec::new(),
@@ -79,7 +80,9 @@ type NotDone = (OutcomeKind, String);
 /// can't go stays in place, skipped with a Note. A Move whose destination
 /// was taken since planning gets a new Clash Suffix, worked out just before
 /// it is journaled. An Operation the Plan marks as an error is never run,
-/// even if approved: a Trash is journaled as skipped, so it is listed.
+/// even if approved: it is journaled as skipped, with the error as its
+/// Note, so it is listed. If no Operation is done, no Session is kept: its
+/// Journal is removed, and the Summary has no Session ID.
 pub fn run(
     plan: &Plan,
     approved: &[String],
@@ -113,7 +116,8 @@ pub fn run_with_progress(
     let _lock = lock_sessions(journal_dir)?;
     let approved: HashSet<&str> = approved.iter().map(String::as_str).collect();
     let runs = |op: &&Operation| {
-        approved.contains(op.id.as_str()) && (op.error.is_none() || op.kind == OperationKind::Trash)
+        approved.contains(op.id.as_str())
+            && (op.error.is_none() || op.kind != OperationKind::CreateFolder)
     };
     let total = plan.operations.iter().filter(runs).count();
     let (header, mut journal) = Journal::create(journal_dir, plan.root.clone())?;
@@ -125,57 +129,83 @@ pub fn run_with_progress(
 
     // Lazy, so each destination is checked once the Operations before it
     // have run.
-    let operations = plan
-        .operations
-        .iter()
-        .filter(runs)
-        .map(|op| JournaledOperation {
-            id: op.id.clone(),
-            kind: op.kind,
-            source: op.source.clone(),
-            destination: match op.kind {
-                OperationKind::Move => op.destination_path.as_deref().map(free_destination),
-                OperationKind::Trash | OperationKind::CreateFolder => op.destination_path.clone(),
-            },
-            in_system_trash: false,
-            planned: op.planned,
-            state: OperationState::Started,
-            note: None,
-            interrupted: None,
-        });
+    let operations = plan.operations.iter().filter(runs).map(|op| {
+        to_run(
+            &op.id,
+            op.kind,
+            &op.source,
+            op.destination_path.as_deref(),
+            op.planned,
+        )
+    });
 
-    let mut summary = Summary::new(header.id);
+    let mut summary = Summary::new(header.id.clone());
     let mut progress = Progress::new(total, on_progress);
     let operations = operations.inspect(|op| progress.starting(&op.source));
-    apply_each(
-        &mut journal,
-        &mut summary,
-        Phase::Run,
-        operations,
-        |op| match op.kind {
-            OperationKind::CreateFolder => create_folder(recorded(op)?).map(|()| None),
-            OperationKind::Trash => {
-                if let Some(note) = blocked.get(op.id.as_str()) {
-                    return Err((OutcomeKind::Skipped, note.to_string()));
-                }
-                ready_to_go(op, "since the Plan was made")
-                    .map_err(|r| (OutcomeKind::Skipped, r))?;
-                send_to_trash(trash, op).map(Some)
-            }
-            OperationKind::Move => {
-                let destination = recorded(op)?;
-                ready_to_go(op, "since the Plan was made")
-                    .and_then(|()| folder_exists(op))
-                    .map_err(|r| (OutcomeKind::Skipped, r))?;
-                move_without_overwriting(&op.source, destination)
-                    .map(|()| None)
-                    .map_err(|r| (OutcomeKind::Failed, r))
-            }
-        },
-    )?;
+    apply_each(&mut journal, &mut summary, Phase::Run, operations, |op| {
+        if let Some(note) = blocked.get(op.id.as_str()) {
+            return Err((OutcomeKind::Skipped, note.to_string()));
+        }
+        run_one(op, trash)
+    })?;
     journal.append(&Record::Finished)?;
+    drop(journal);
+    if summary.done.is_empty() {
+        journal::remove(journal_dir, &header.id)?;
+        summary.session_id = None;
+    }
     progress.finish(&plan.root);
     Ok(summary)
+}
+
+/// An Operation about to be run, or retried, going from `source` to
+/// `destination`. A Move whose destination is taken gets a new Clash
+/// Suffix, so this is worked out just before it is journaled.
+fn to_run(
+    id: &str,
+    kind: OperationKind,
+    source: &Path,
+    destination: Option<&Path>,
+    planned: SourceState,
+) -> JournaledOperation {
+    JournaledOperation {
+        id: id.to_string(),
+        kind,
+        source: source.to_path_buf(),
+        destination: match kind {
+            OperationKind::Move => destination.map(free_destination),
+            OperationKind::Trash | OperationKind::CreateFolder => {
+                destination.map(Path::to_path_buf)
+            }
+        },
+        in_system_trash: false,
+        planned,
+        state: OperationState::Started,
+        note: None,
+        interrupted: None,
+    }
+}
+
+/// Carries out `op` for a Run or a retry: its item must be as planned, a
+/// Move's folder must exist and its destination be free, and a Trash goes
+/// to `trash`.
+fn run_one(op: &JournaledOperation, trash: &dyn OsTrash) -> Result<Option<PathBuf>, NotDone> {
+    match op.kind {
+        OperationKind::CreateFolder => create_folder(recorded(op)?).map(|()| None),
+        OperationKind::Trash => {
+            ready_to_go(op, "since the Plan was made").map_err(|r| (OutcomeKind::Skipped, r))?;
+            send_to_trash(trash, op).map(Some)
+        }
+        OperationKind::Move => {
+            let destination = recorded(op)?;
+            ready_to_go(op, "since the Plan was made")
+                .and_then(|()| folder_exists(op))
+                .map_err(|r| (OutcomeKind::Skipped, r))?;
+            move_without_overwriting(&op.source, destination)
+                .map(|()| None)
+                .map_err(|r| (OutcomeKind::Failed, r))
+        }
+    }
 }
 
 /// The longest a Run waits between progress reports.
@@ -462,6 +492,46 @@ pub fn redo_operations(
             }
         },
     )?;
+    Ok(summary)
+}
+
+/// Runs again the skipped or failed Operations of Session `session_id` that
+/// are in `operation_ids`, in the order they first ran, with the same checks
+/// as the Run: the item must still be as planned, a Move's folder must
+/// exist, a Move never overwrites (its destination gets a new Clash Suffix
+/// if taken), and a Trash goes to `trash`. Each is journaled as another Run
+/// pass of the same Session, so one Undo still reverses it all; Operations
+/// in any other state are left alone.
+pub fn retry_operations(
+    session_id: &str,
+    operation_ids: &[String],
+    journal_dir: &Path,
+    trash: &dyn OsTrash,
+) -> Result<Summary, SessionError> {
+    let _lock = lock_sessions(journal_dir)?;
+    let (session, mut journal) = reopen(journal_dir, session_id, trash)?;
+    let only: HashSet<&str> = operation_ids.iter().map(String::as_str).collect();
+
+    let operations = session
+        .operations
+        .iter()
+        .filter(|op| {
+            matches!(op.state, OperationState::Skipped | OperationState::Failed)
+                && only.contains(op.id.as_str())
+        })
+        .map(|op| {
+            to_run(
+                &op.id,
+                op.kind,
+                &op.source,
+                op.destination.as_deref(),
+                op.planned,
+            )
+        });
+    let mut summary = Summary::new(session.header.id.clone());
+    apply_each(&mut journal, &mut summary, Phase::Run, operations, |op| {
+        run_one(op, trash)
+    })?;
     Ok(summary)
 }
 

@@ -1,6 +1,6 @@
-// What a Run, Undo or Redo did, from its `{ done, skipped, failed, unrecoverable }` summary.
+// What a Run, Undo, Redo or retry did, from its `{ done, skipped, failed, unrecoverable }` summary.
 import { el } from "./dom.js";
-import { count, plural } from "./format.js";
+import { count, plural, splitPath } from "./format.js";
 
 /** "2 files restored · 1 skipped": `done` says what was done; failed and unrecoverable show only if any. */
 export function describeSummary(summary, done) {
@@ -8,6 +8,16 @@ export function describeSummary(summary, done) {
   if (summary.failed.length > 0) parts.push(`${summary.failed.length} failed`);
   if (summary.unrecoverable.length > 0) parts.push(`${summary.unrecoverable.length} unrecoverable`);
   return parts.join(" · ");
+}
+
+/**
+ * Why a Run kept no Session, from its summary: "Nothing was moved. a.pdf: It no longer exists", from the first
+ * Note. `done` is as for `describeSummary`, and `separator` is the OS's path separator.
+ */
+export function describeNothingDone(summary, done, separator) {
+  const first = [...summary.skipped, ...summary.failed, ...summary.unrecoverable][0];
+  const why = first ? ` ${splitPath(first.source, separator).name}: ${first.note}` : "";
+  return `Nothing was ${done}.${why}`;
 }
 
 /** "Moving 120 of 3,000 files…" from a Run's `{ finished, total }` progress, then the item it is on. */

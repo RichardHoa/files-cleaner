@@ -6,14 +6,13 @@ use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::clash;
-use crate::config::{Config, Rule, RuleOperation, RuleTarget};
+use crate::config::Config;
+use crate::duplicates;
 use crate::duplicates::DuplicateProgress;
 use crate::os_trash::OsTrash;
-use crate::protection::{is_os_metadata_file, is_package, is_within, same_path, Protection};
+use crate::protection::is_os_metadata_file;
 use crate::scanner::{ScanEntry, ScanResult};
 use crate::volume::different_disks;
-use crate::{duplicates, rules};
 
 /// The proposed Operations for one Scan Root.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,8 +83,7 @@ pub struct SourceState {
 #[serde(rename_all = "camelCase")]
 pub enum OperationKind {
     Trash,
-    /// To another folder, under a new name if its Rule renames it or its
-    /// name was taken there.
+    /// To another folder, under a new name if its name was taken there.
     Move,
     CreateFolder,
 }
@@ -97,9 +95,6 @@ pub enum Reason {
     /// The item is a copy of `kept`, the names from the Scan Root down to a
     /// Kept Copy of its Duplicate Group, or `None` if no copy is kept.
     Duplicate { kept: Option<Vec<String>> },
-    /// The Rule named `rule` matched the item, or, for Create Folder, needs
-    /// the folder.
-    Rule { rule: String },
     /// Every item in the folder leaves it, so the folder would be left
     /// empty.
     EmptiedFolder,
@@ -138,57 +133,6 @@ pub fn build_plan_with_progress(
         }
     }
     finish(root, os_trash, operations, Vec::new())
-}
-
-/// Rules are frozen: no Plan the app builds uses them, but the code stays
-/// for if they come back. This proposes what the first Rule each scanned
-/// item matches says, treating duplicate copies like any other file. Rules
-/// move items into folders, which are created if missing, and never over
-/// anything: a taken name gets a Clash Suffix. An item already in its
-/// Rule's folder stays put. Emptied folders and Operations that can't happen
-/// are handled as in `build_plan`.
-pub fn build_rule_plan(scan: &ScanResult, config: &Config, os_trash: &dyn OsTrash) -> Plan {
-    let root = &scan.root;
-    let protection = Protection::new(config);
-    let mut operations = Vec::new();
-    let mut folders = Folders::default();
-    for entry in &scan.entries {
-        let Some(rule) = rules::first_match(&config.rules, entry) else {
-            continue;
-        };
-        let reason = Reason::Rule {
-            rule: rule.name.clone(),
-        };
-        match &rule.operation {
-            RuleOperation::Trash => operations.push(trash(entry, reason)),
-            RuleOperation::MoveTo { folder, rename } => {
-                let folder = match folder {
-                    RuleTarget::Absolute(folder) => folder.clone(),
-                    RuleTarget::RelativeToScanRoot(folder) => {
-                        let folder = root.join(folder);
-                        if protected_below(&protection, &folder, root) {
-                            continue;
-                        }
-                        folder
-                    }
-                };
-                if entry
-                    .path
-                    .parent()
-                    .is_some_and(|parent| same_path(parent, &folder))
-                {
-                    continue;
-                }
-                let name = match rename {
-                    Some(template) => rules::rename(template, entry),
-                    None => entry.name.clone(),
-                };
-                let name = folders.claim(&folder, &name, rule);
-                operations.push(move_to(root, entry, folder.join(name), reason));
-            }
-        }
-    }
-    finish(root, os_trash, operations, folders.created)
 }
 
 /// Makes a Plan of `operations` and of creating the folders in `created`,
@@ -330,50 +274,6 @@ fn empties(
         });
     known.insert(folder.to_path_buf(), answer);
     answer
-}
-
-/// The folders Rules move items into: the names taken in each, and the
-/// missing ones to create, with the first Rule that needs each.
-#[derive(Default)]
-struct Folders {
-    taken: HashMap<PathBuf, HashSet<String>>,
-    created: Vec<(PathBuf, Reason)>,
-}
-
-impl Folders {
-    /// Takes a free name in `folder` for `name`, a file `rule` moves there,
-    /// and notes the folders to create on the way.
-    fn claim(&mut self, folder: &Path, name: &str, rule: &Rule) -> String {
-        if !self.taken.contains_key(folder) {
-            for missing in folder.ancestors().take_while(|f| !f.exists()) {
-                if !self.created.iter().any(|(f, _)| f == missing) {
-                    self.created.push((
-                        missing.to_path_buf(),
-                        Reason::Rule {
-                            rule: rule.name.clone(),
-                        },
-                    ));
-                }
-            }
-        }
-        let taken = self
-            .taken
-            .entry(folder.to_path_buf())
-            .or_insert_with(|| clash::names_in(folder));
-        let name = clash::free_name(name, taken);
-        taken.insert(name.to_lowercase());
-        name
-    }
-}
-
-/// True if `folder`, or a folder between it and the Scan Root `root`, is a
-/// Protected Path or a Package. The Scan Root and the folders above it
-/// don't count: the user chose to scan it.
-fn protected_below(protection: &Protection, folder: &Path, root: &Path) -> bool {
-    folder
-        .ancestors()
-        .take_while(|f| is_within(f, root) && !same_path(f, root))
-        .any(|f| protection.reason(f, true).is_some() || is_package(f))
 }
 
 /// Sends `entry` to the System Trash.
