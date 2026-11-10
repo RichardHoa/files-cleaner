@@ -7,8 +7,12 @@ A desktop tool that tidies a messy folder (such as Downloads) by removing duplic
 ### Scanning
 
 **Scan Root**:
-The folder the user picks to clean; everything under it (recursively) is in scope unless protected.
+The folder the user picks to clean; everything under it (recursively) is in scope, except Protected Paths, hidden files and symlinks, which are never scanned. Files without an extension are checked for duplicates but never sorted into Suggested Folders. What was left out (files without an extension, items that couldn't be read) is told to the user.
 _Avoid_: target dir, source folder
+
+**Loose File**:
+A file with an extension sitting directly in the Scan Root, not inside any of its subfolders. Only Loose Files are gathered into Suggested Folders; files deeper down are still checked for duplicates, and a few are read to describe their subfolder as a place files could go.
+_Avoid_: top-level file, root file
 
 **Recent Scan Root**:
 One of the last three folders the user started a scan of (most recent first, no repeats), offered so they can scan it again without picking. Picking a folder and then cancelling at the protected-path warning doesn't make it recent.
@@ -58,20 +62,16 @@ _Avoid_: keeper rule, preference
 
 ### Planning
 
-**Rule**:
-A user-written instruction that matches files and says what Operation to apply to them.
-_Avoid_: filter, policy
-
 **Plan**:
 The full list of proposed Operations for one Scan Root, shown grouped by Reason, one line per Operation, with the selected Operation's Reason beside it, for the user to approve, untick, or cancel.
 _Avoid_: preview, proposal
 
 **Operation**:
-One atomic file-system change: Move (possibly under a new name, when a Rule renames), Trash, or Create Folder. A rename is never an Operation of its own. The tool never edits file contents and never deletes permanently.
+One atomic file-system change: Move (possibly under a new name), Trash, or Create Folder. A rename is never an Operation of its own. The tool never edits file contents and never deletes permanently.
 _Avoid_: action, step, task
 
 **Reason**:
-Why the Plan proposes an Operation: a **Duplicate** (naming a Kept Copy it leaves in place, if any), a **Suggested Folder** (naming that folder), a **Rule** (naming that Rule) or an **Emptied Folder** (every item in it leaves, so the folder itself is offered for Trash, unticked). The Plan is grouped by Reason. Why an Operation was skipped or failed is not a Reason: that is its Note.
+Why the Plan proposes an Operation: a **Duplicate** (naming a Kept Copy it leaves in place, if any), a **Suggested Folder** (naming that folder) or an **Emptied Folder** (every item in it leaves, so the folder itself is offered for Trash, unticked). The Plan is grouped by Reason. Why an Operation was skipped or failed is not a Reason: that is its Note.
 _Avoid_: cause, source, explanation
 
 **Note**:
@@ -93,7 +93,7 @@ _Avoid_: Finder-style suffix, copy suffix
 ### Grouping
 
 **Suggested Folder**:
-A folder the Plan gathers files into: proposed by the tool from similar files, or added by the user. It goes into the existing folder it matched or the user picked, a new folder in the Scan Root (the default) or somewhere else the user picks, or all its files are trashed. The user can merge one into another, or remove it, which leaves its files where they are. A Suggested Folder always has a name: leaving the name empty never means "trash".
+A folder the Plan gathers Loose Files into: proposed by the tool from similar files, or added by the user. It goes into the existing folder it matched or the user picked, a new folder in the Scan Root (the default) or somewhere else the user picks on the same disk, or all its files are trashed. The user can merge one into another, or remove it, which leaves its files where they are. A Suggested Folder always has a name: leaving the name empty never means "trash".
 _Avoid_: cluster, group, category, proposed folder
 
 **Grouping Models**:
@@ -103,7 +103,7 @@ _Avoid_: AI, smart features, LLM
 ### History
 
 **Session**:
-One approved Plan being carried out, from the first Operation to the last; the unit that Undo reverses.
+One approved Plan being carried out, from the first Operation to the last; the unit that Undo reverses. Every Operation that can happen does: one that can't is skipped with a Note and the rest carry on. Any approved Plan that changes something on disk is a Session, even if some of its Operations were skipped; one where nothing happened is not. Trying a skipped or failed Operation again later adds it to the same Session.
 _Avoid_: run, job, cleanup
 
 **Journal**:
