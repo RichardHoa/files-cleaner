@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { describeRunProgress } from "../src/outcomes.js";
+import { describeRunProgress } from "../src/shared/outcomes.js";
 
 test("Run progress says how many items are done of how many, then the one it is on", () => {
   assert.equal(

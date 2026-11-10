@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { relativeTime } from "../src/format.js";
+import { relativeTime } from "../src/shared/format.js";
 
 const now = Date.UTC(2026, 9, 14, 12, 0, 0);
 const MINUTE = 60_000;

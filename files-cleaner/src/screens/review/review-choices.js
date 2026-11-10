@@ -5,7 +5,7 @@
 // or "trashAll"; each of its files is "inFolder" (goes wherever the folder's choice sends it), "trash" or
 // "takeOut". The user can also add a folder, merge one into another, or remove one. The files left where they
 // are stay there, unless the user trashes one or moves it to a folder, suggested or any other on disk.
-import { plural, splitPath } from "./format.js";
+import { plural, splitPath } from "../../shared/format.js";
 
 /** What the Plan calls the files trashed from those left where they are. */
 const LEFT_NAME = "Left where they are";

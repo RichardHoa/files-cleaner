@@ -1,7 +1,7 @@
 // Selecting rows by dragging a rectangle over them, as in Finder's list view: a drag that starts on a
 // row's blank part or on empty space draws the rectangle, and the rows it touches become the selection.
 // The page scrolls on its own while the pointer is near the top or bottom of the window.
-import { el } from "./dom.js";
+import { el } from "../../shared/dom.js";
 
 /** How far the pointer moves before a press becomes a drag, so a click stays a click. */
 const DRAG_THRESHOLD = 4;

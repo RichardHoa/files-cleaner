@@ -9,11 +9,11 @@ import {
   pathSeparator,
   pauseGroupingModels,
   removeGroupingModels,
-} from "./api.js";
-import { el } from "./dom.js";
-import { formatSize } from "./format.js";
-import { progressBar } from "./progress-bar.js";
-import { showStatus } from "./status.js";
+} from "../api.js";
+import { el } from "../dom.js";
+import { formatSize } from "../format.js";
+import { progressBar } from "../progress-bar.js";
+import { showStatus } from "../status.js";
 
 /** "Mac", "PC" or "computer": what the user calls this machine, for "nothing leaves your Mac". */
 function thisComputer() {

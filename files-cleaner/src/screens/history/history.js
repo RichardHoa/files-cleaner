@@ -1,10 +1,10 @@
 // History: every Session, newest first, ten to a page with numbered page links.
-import { describeError, listSessions } from "../api.js";
-import { el } from "../dom.js";
-import { count, plural } from "../format.js";
-import { pageCount, pageNumbers } from "../paging.js";
-import { noSessions, sessionList } from "../session-row.js";
-import { undoSections } from "../outcomes.js";
+import { describeError, listSessions } from "../../shared/api.js";
+import { el } from "../../shared/dom.js";
+import { count, plural } from "../../shared/format.js";
+import { pageCount, pageNumbers } from "./paging.js";
+import { noSessions, sessionList } from "../../shared/session-list/session-row.js";
+import { undoSections } from "../../shared/outcomes.js";
 
 const PER_PAGE = 10;
 

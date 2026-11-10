@@ -31,17 +31,17 @@ import {
   runPlan,
   saveReadingPace,
   stopReading,
-} from "../api.js";
-import { el } from "../dom.js";
-import { drawMore, openEach, revealMenu } from "../file-list.js";
-import { count, formatDate, formatSize, plural, splitPath, trashPlace } from "../format.js";
-import { icon } from "../icons.js";
-import { marqueeSelect } from "../marquee.js";
-import { groupingModelsPanel } from "../models-panel.js";
-import { describeRunProgress, describeSummary } from "../outcomes.js";
-import { tickState, toggleAll } from "../plan-selection.js";
-import { progressBar } from "../progress-bar.js";
-import { describeEstimate, readingEstimate, updatedAverage } from "../reading-estimate.js";
+} from "../../shared/api.js";
+import { el } from "../../shared/dom.js";
+import { drawMore, openEach, revealMenu } from "../../shared/plan/file-list.js";
+import { count, formatDate, formatSize, plural, splitPath, trashPlace } from "../../shared/format.js";
+import { icon } from "../../shared/icons.js";
+import { marqueeSelect } from "./marquee.js";
+import { groupingModelsPanel } from "../../shared/grouping-models/models-panel.js";
+import { describeRunProgress, describeSummary } from "../../shared/outcomes.js";
+import { tickState, toggleAll } from "../../shared/plan/plan-selection.js";
+import { progressBar } from "../../shared/progress-bar.js";
+import { describeEstimate, readingEstimate, updatedAverage } from "./reading-estimate.js";
 import {
   addFolder,
   byKindNewestFirst,
@@ -66,9 +66,9 @@ import {
   setCopy,
   totals,
   trashedCopies,
-} from "../review-choices.js";
-import { clickSelection } from "../row-selection.js";
-import { busy, showStatus } from "../status.js";
+} from "./review-choices.js";
+import { clickSelection } from "./row-selection.js";
+import { busy, showStatus } from "../../shared/status.js";
 
 /** How many of a card's files, or Duplicate Groups, are listed before "Show more". */
 const FILES_SHOWN = 50;

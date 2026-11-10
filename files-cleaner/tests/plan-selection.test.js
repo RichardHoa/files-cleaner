@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { tickState, toggleAll } from "../src/plan-selection.js";
+import { tickState, toggleAll } from "../src/shared/plan/plan-selection.js";
 
 const operations = [
   { id: "trash:a.txt", kind: "trash", size: 100 },

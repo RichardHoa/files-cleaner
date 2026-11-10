@@ -3,8 +3,8 @@
 // `relativePath` as names from the Scan Root down. Searching, sorting and paging a group's files
 // are the Plan view's functions.
 
-import { count, plural, splitPath, trashPlace } from "./format.js";
-import { folderLabel } from "./plan-view.js";
+import { count, plural, splitPath, trashPlace } from "../../shared/format.js";
+import { folderLabel } from "../../shared/plan/plan-view.js";
 
 /** Which group each Operation state is in. */
 const GROUP_OF = {

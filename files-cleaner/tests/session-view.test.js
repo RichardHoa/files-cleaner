@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { PAGE_SIZE, paging, selectedFile, visibleFiles } from "../src/plan-view.js";
-import { groupByState, paneSentence, sessionHeading, sessionLead } from "../src/session-view.js";
+import { PAGE_SIZE, paging, selectedFile, visibleFiles } from "../src/shared/plan/plan-view.js";
+import { groupByState, paneSentence, sessionHeading, sessionLead } from "../src/screens/session/session-view.js";
 
 /** A Session's Trash Operation for the `/`-separated `path`, in `state`. */
 function op(path, state = "done", { size = 0, note = null } = {}) {

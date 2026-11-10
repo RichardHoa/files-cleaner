@@ -15,12 +15,12 @@ import {
   removeGroupingModels,
   resetSettings,
   revealInFileManager,
-} from "../api.js";
-import { el } from "../dom.js";
-import { formatSize, plural, splitPath, trashPlace } from "../format.js";
-import { groupingModelsControls, modelsButton, watchGroupingModels } from "../models-panel.js";
-import { progressBar } from "../progress-bar.js";
-import { showStatus } from "../status.js";
+} from "../../shared/api.js";
+import { el } from "../../shared/dom.js";
+import { formatSize, plural, splitPath, trashPlace } from "../../shared/format.js";
+import { groupingModelsControls, modelsButton, watchGroupingModels } from "../../shared/grouping-models/models-panel.js";
+import { progressBar } from "../../shared/progress-bar.js";
+import { showStatus } from "../../shared/status.js";
 
 /** What this OS calls its file manager, for "Show in Finder". */
 const FILE_MANAGER = pathSeparator === "\\" ? "Explorer" : /Mac/.test(navigator.userAgent) ? "Finder" : "File Manager";

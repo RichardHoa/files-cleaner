@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fitTail } from "../src/format.js";
+import { fitTail } from "../src/shared/format.js";
 
 const upTo = (n) => (text) => text.length <= n;
 

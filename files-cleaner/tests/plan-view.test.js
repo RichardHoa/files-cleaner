@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { PAGE_SIZE, folderLabel, paging, selectedFile, visibleFiles } from "../src/plan-view.js";
+import { PAGE_SIZE, folderLabel, paging, selectedFile, visibleFiles } from "../src/shared/plan/plan-view.js";
 
 /** A duplicate's Trash Operation for the `/`-separated `path`, a copy of `kept`. */
 function dup(path, size = 0, kept = "keep.txt") {

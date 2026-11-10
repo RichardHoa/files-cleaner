@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { splitPath } from "../src/format.js";
+import { splitPath } from "../src/shared/format.js";
 
 test("a folder's name and the path of the folder holding it", () => {
   assert.deepEqual(splitPath("/Users/me/Downloads", "/"), { name: "Downloads", parent: "/Users/me" });

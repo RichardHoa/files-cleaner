@@ -1,12 +1,12 @@
 // Shows one screen at a time. Each screen module exports `render(root, nav, ...args)`
 // and builds its own DOM inside `root`.
-import * as history from "./screens/history.js";
-import * as home from "./screens/home.js";
-import * as review from "./screens/review.js";
-import * as session from "./screens/session.js";
-import * as settings from "./screens/settings.js";
-import { findDuplicates, scan } from "./api.js";
-import { offerGroupingModelsOnce } from "./models-offer.js";
+import * as history from "./screens/history/history.js";
+import * as home from "./screens/home/home.js";
+import * as review from "./screens/review/review.js";
+import * as session from "./screens/session/session.js";
+import * as settings from "./screens/settings/settings.js";
+import { findDuplicates, scan } from "./shared/api.js";
+import { offerGroupingModelsOnce } from "./shared/grouping-models/models-offer.js";
 import { stepFlow } from "./steps.js";
 
 const root = document.querySelector("#app");

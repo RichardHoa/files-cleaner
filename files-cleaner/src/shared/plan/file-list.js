@@ -1,8 +1,8 @@
-// Pieces shared by the Plan and Session screens' file lists: the "Show more" links under a
+// Pieces shared by the review and Session screens' file lists: the "Show more" links under a
 // list, the menu a right-click on a file opens, and opening files in their default apps.
-import { askToConfirm, describeError, revealInFileManager } from "./api.js";
-import { count } from "./format.js";
-import { el } from "./dom.js";
+import { askToConfirm, describeError, revealInFileManager } from "../api.js";
+import { count } from "../format.js";
+import { el } from "../dom.js";
 import { PAGE_SIZE } from "./plan-view.js";
 
 /**

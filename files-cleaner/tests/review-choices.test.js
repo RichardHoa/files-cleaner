@@ -17,7 +17,7 @@ import {
   setCopiesIn,
   setCopy,
   totals,
-} from "../src/review-choices.js";
+} from "../src/screens/review/review-choices.js";
 
 test("a file dragged to another folder leaves the first, and an emptied folder isn't planned", () => {
   const choices = initialChoices([

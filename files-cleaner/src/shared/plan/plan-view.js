@@ -1,4 +1,5 @@
 // How the Session screen lists a group of its Operations: searched, sorted, filtered and paged.
+// Its PAGE_SIZE also sets how many more files "Show more" adds on the review screen.
 // Each Operation has `relativePath`, the names from the Scan Root down to its item.
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });

@@ -5,10 +5,10 @@
 @import url("tokens.css") layer(tokens);
 @import url("base.css") layer(base);
 @import url("components.css") layer(components);
-@import url("plan.css") layer(screens);
-@import url("session.css") layer(screens);
-@import url("home.css") layer(screens);
-@import url("sessions.css") layer(screens);
-@import url("history.css") layer(screens);
-@import url("review.css") layer(screens);
-@import url("settings.css") layer(screens);
+@import url("../shared/plan/plan.css") layer(screens);
+@import url("../screens/session/session.css") layer(screens);
+@import url("../screens/home/home.css") layer(screens);
+@import url("../shared/session-list/sessions.css") layer(screens);
+@import url("../screens/history/history.css") layer(screens);
+@import url("../screens/review/review.css") layer(screens);
+@import url("../screens/settings/settings.css") layer(screens);

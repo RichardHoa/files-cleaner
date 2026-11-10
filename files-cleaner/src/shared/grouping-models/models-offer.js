@@ -6,10 +6,10 @@ import {
   downloadGroupingModels,
   groupingModelsOfferPending,
   groupingModelsStatus,
-} from "./api.js";
-import { el } from "./dom.js";
+} from "../api.js";
+import { el } from "../dom.js";
 import { groupingModelsPitch } from "./models-panel.js";
-import { showStatus } from "./status.js";
+import { showStatus } from "../status.js";
 
 /** Shows the offer if it hasn't been answered yet. */
 export async function offerGroupingModelsOnce() {

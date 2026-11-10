@@ -1,8 +1,8 @@
 // The Session rows shared by Home and History: date, Scan Root, status, what was done, Undo.
-import { pathSeparator, undo } from "./api.js";
-import { el } from "./dom.js";
-import { count, formatDate, formatSize, splitPath } from "./format.js";
-import { busy } from "./status.js";
+import { pathSeparator, undo } from "../api.js";
+import { el } from "../dom.js";
+import { count, formatDate, formatSize, splitPath } from "../format.js";
+import { busy } from "../status.js";
 
 const STATUS_LABELS = {
   completed: "Completed",

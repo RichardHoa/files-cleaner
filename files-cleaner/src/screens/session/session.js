@@ -2,15 +2,15 @@
 // Trashed, Put back, Needs attention) picks which files are listed; the selected file is shown beside
 // the list. Files can be put back, or moved again, all at once, ticked, or one at a time, and a file
 // not in the System Trash can be opened, by double-clicking it or from its right-click menu.
-import { describeError, openSessionFile, pathSeparator, redoOperations, revealInFileManager, sessionDetails, undo } from "../api.js";
-import { el } from "../dom.js";
-import { drawMore, revealMenu } from "../file-list.js";
-import { count, formatDate, formatSize, plural, splitPath } from "../format.js";
-import { describeSummary } from "../outcomes.js";
-import { tickState, toggleAll } from "../plan-selection.js";
-import { PAGE_SIZE, fileName, folderLabel, paging, selectedFile, visibleFiles } from "../plan-view.js";
-import { groupByState, paneSentence, sessionHeading, sessionLead } from "../session-view.js";
-import { showStatus } from "../status.js";
+import { describeError, openSessionFile, pathSeparator, redoOperations, revealInFileManager, sessionDetails, undo } from "../../shared/api.js";
+import { el } from "../../shared/dom.js";
+import { drawMore, revealMenu } from "../../shared/plan/file-list.js";
+import { count, formatDate, formatSize, plural, splitPath } from "../../shared/format.js";
+import { describeSummary } from "../../shared/outcomes.js";
+import { tickState, toggleAll } from "../../shared/plan/plan-selection.js";
+import { PAGE_SIZE, fileName, folderLabel, paging, selectedFile, visibleFiles } from "../../shared/plan/plan-view.js";
+import { groupByState, paneSentence, sessionHeading, sessionLead } from "./session-view.js";
+import { showStatus } from "../../shared/status.js";
 
 /** "3 moved": how many files a group has, as its card and list heading say it. */
 const GROUP_COUNTS = {

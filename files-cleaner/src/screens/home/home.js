@@ -8,13 +8,13 @@ import {
   recentScanRoots,
   removeRecentScanRoot,
   scanRootWarning,
-} from "../api.js";
-import { el } from "../dom.js";
-import { count, relativeTime, splitPath } from "../format.js";
-import { icon } from "../icons.js";
-import { noSessions, sessionList } from "../session-row.js";
-import { undoSections } from "../outcomes.js";
-import { showStatus } from "../status.js";
+} from "../../shared/api.js";
+import { el } from "../../shared/dom.js";
+import { count, relativeTime, splitPath } from "../../shared/format.js";
+import { icon } from "../../shared/icons.js";
+import { noSessions, sessionList } from "../../shared/session-list/session-row.js";
+import { undoSections } from "../../shared/outcomes.js";
+import { showStatus } from "../../shared/status.js";
 
 const LATEST_SESSIONS = 3;
 
