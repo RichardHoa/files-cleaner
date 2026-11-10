@@ -82,9 +82,14 @@ fn lists_files_with_no_extension_and_counts_them() {
 
     let result = scan(dir.path(), &empty_config(dir.path())).unwrap();
 
+    // Windows drops a trailing dot from a file name when it creates the file.
+    #[cfg(not(windows))]
+    let trailing = "trailing.";
+    #[cfg(windows)]
+    let trailing = "trailing";
     assert_eq!(
         relative_paths(&result, dir.path()),
-        ["Makefile", "bin/tool", "notes.txt", "trailing."]
+        ["Makefile", "bin/tool", "notes.txt", trailing]
     );
     let makefile = result
         .entries

@@ -1,14 +1,12 @@
 # Builds, tests and packages the app on each OS it ships for, with the
 # grouping engine's llama.cpp on Metal (macOS) or Vulkan (Windows, Linux).
-# Pushing a version tag (v0.1.0) also publishes the installers as a GitHub
-# Release, once every OS has built.
+# Runs only for a pushed version tag (v0.1.0), which also publishes the
+# installers as a GitHub Release once every OS has built.
 name: Platforms
 
 on:
   push:
-    branches: [main]
     tags: ["v*"]
-  pull_request:
   workflow_dispatch:
 
 concurrency:
