@@ -1,6 +1,6 @@
 # Trash always goes to the System Trash; NSFileManager on macOS, not the `trash` crate
 
-Status: Accepted (2026-11-05), replacing the earlier deferral. The Holding Folder stays live until a test of trash and restore passes on macOS, Windows and Linux (issue #5); then all three switch together and the Holding Folder is removed. If an OS can't restore reliably, this decision is reopened.
+Status: Accepted (2026-11-05), replacing the earlier deferral. A test of trash and restore passed on macOS, Windows and Linux (issue #5), and all three switched together; the Holding Folder is removed (issue #6).
 
 Trash has one behaviour, with no setting: files go to the OS's own trash, so the user gets their space back by emptying it, as they do for everything else. The Holding Folder kept files inside the folder being cleaned and nothing ever emptied it, so the app could never finish its job. Each OS has a backend that reports where each trashed item lands, and that location is recorded in the Journal for Undo. If the user empties the System Trash, those Operations are reported as unrecoverable on Undo.
 
