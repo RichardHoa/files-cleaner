@@ -10,6 +10,7 @@ import {
   describeError,
   listSessions,
   loadConfig,
+  openWebPage,
   pathSeparator,
   pickFolder,
   removeGroupingModels,
@@ -62,8 +63,16 @@ export function render(root, nav) {
     readAgainSection(),
     modelsSection(),
     sessionsSection(),
+    iconCredit(),
   );
   showConfigSections(configSections);
+}
+
+/** Credits the app icon's author, linking to their page in the default browser. */
+function iconCredit() {
+  const author = el("button", { type: "button", className: "link" }, "juicy_fish");
+  author.addEventListener("click", () => openWebPage("https://www.flaticon.com/authors/juicy-fish"));
+  return el("p", { className: "note" }, "App icon by ", author, " on Flaticon.");
 }
 
 /** The sections kept in the config, or why it can't be read, with "Reset settings" to start again from the defaults. */

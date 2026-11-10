@@ -193,6 +193,9 @@ export const onAnotherDisk = (paths, folder) => invoke("on_another_disk", { path
  */
 export const revealInFileManager = (path) => opener.revealItemInDir(path);
 
+/** Opens the web page at `url` in the default browser. */
+export const openWebPage = (url) => opener.openUrl(url);
+
 /** Opens `path`, a file of the latest scan, in its default app. */
 export const openFile = (path) => invoke("open_file", { path });
 
