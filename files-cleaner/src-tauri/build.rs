@@ -1,7 +1,9 @@
-//! Puts the libraries the app ships with in place before Tauri bundles them:
-//! PDFium for reading PDFs (a pinned prebuilt release), and on Windows the
-//! Vulkan loader, so the app starts on a machine with no Vulkan driver and
-//! groups on the CPU (ADR-0004).
+//! Puts the files the app ships with in place before Tauri bundles them:
+//! PDFium for reading PDFs (a pinned prebuilt release), OCR's language
+//! files (pinned too), and on Windows the Vulkan loader, so the app starts
+//! on a machine with no Vulkan driver and groups on the CPU (ADR-0004).
+//! These downloads happen at build time only, each checked against its
+//! SHA-256; the app itself downloads nothing but the Grouping Models.
 
 use std::env;
 use std::fs;
@@ -44,12 +46,37 @@ fn pdfium_archive(os: &str, arch: &str) -> Option<(&'static str, &'static str)> 
     })
 }
 
+/// One OCR language file from tessdata_fast, Tesseract's fast LSTM models.
+struct Language {
+    file_name: &'static str,
+    sha256: &'static str,
+}
+
+/// The tessdata_fast commit the language files are pinned at.
+const TESSDATA_REVISION: &str = "87416418657359cb625c412a48b6e1d6d41c29bd";
+
+/// OCR reads every one of them at once, English tried first. Each added
+/// language makes OCR slower.
+const LANGUAGES: [Language; 2] = [
+    Language {
+        file_name: "eng.traineddata",
+        sha256: "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2",
+    },
+    Language {
+        file_name: "vie.traineddata",
+        sha256: "79df64caf7bcfb2a27df5042ecb6121e196eada34da774956995747636d5bfa1",
+    },
+];
+
 fn main() {
     let os = env::var("CARGO_CFG_TARGET_OS").unwrap();
     let arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     if let Err(e) = fetch_pdfium(&manifest.join("pdfium"), &os, &arch) {
         panic!("couldn't put PDFium in place: {e}");
+    }
+    if let Err(e) = fetch_tessdata(&manifest.join("tessdata")) {
+        panic!("couldn't put OCR's language files in place: {e}");
     }
     if os == "windows" {
         if let Err(e) = copy_vulkan_loader(&manifest.join("vulkan")) {
@@ -58,6 +85,7 @@ fn main() {
     }
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=pdfium");
+    println!("cargo:rerun-if-changed=tessdata");
     println!("cargo:rerun-if-changed=vulkan");
     tauri_build::build()
 }
@@ -77,19 +105,7 @@ fn fetch_pdfium(folder: &Path, os: &str, arch: &str) -> Result<(), String> {
         pdfium_archive(os, arch).ok_or_else(|| format!("no prebuilt PDFium for {os} {arch}"))?;
     let url =
         format!("https://github.com/bblanchon/pdfium-binaries/releases/download/{PDFIUM_RELEASE}/pdfium-{name}.tgz");
-    let bytes = ureq::get(&url)
-        .call()
-        .and_then(|mut r| r.body_mut().read_to_vec())
-        .map_err(|e| format!("{url}: {e}"))?;
-    let actual: String = Sha256::digest(&bytes)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
-    if actual != sha256 {
-        return Err(format!(
-            "{url} has SHA-256 {actual}, not the pinned {sha256}"
-        ));
-    }
+    let bytes = download_pinned(&url, sha256)?;
     let unpacked = PathBuf::from(env::var("OUT_DIR").unwrap()).join("pdfium");
     let _ = fs::remove_dir_all(&unpacked);
     fs::create_dir_all(&unpacked).map_err(|e| e.to_string())?;
@@ -113,6 +129,43 @@ fn fetch_pdfium(folder: &Path, os: &str, arch: &str) -> Result<(), String> {
     fs::copy(unpacked.join("LICENSE"), folder.join("PDFium LICENSE")).map_err(|e| e.to_string())?;
     fs::copy(&from, folder.join(library)).map_err(|e| format!("{}: {e}", from.display()))?;
     Ok(())
+}
+
+/// Downloads OCR's language files into `folder`, each checked against its
+/// pinned SHA-256, unless they're there already.
+fn fetch_tessdata(folder: &Path) -> Result<(), String> {
+    fs::create_dir_all(folder).map_err(|e| e.to_string())?;
+    for language in &LANGUAGES {
+        let to = folder.join(language.file_name);
+        if to.exists() {
+            continue;
+        }
+        let url = format!(
+            "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/{TESSDATA_REVISION}/{}",
+            language.file_name
+        );
+        let bytes = download_pinned(&url, language.sha256)?;
+        fs::write(&to, bytes).map_err(|e| format!("{}: {e}", to.display()))?;
+    }
+    Ok(())
+}
+
+/// The file at `url`, once its SHA-256 is checked to be `sha256`.
+fn download_pinned(url: &str, sha256: &str) -> Result<Vec<u8>, String> {
+    let bytes = ureq::get(url)
+        .call()
+        .and_then(|mut r| r.body_mut().read_to_vec())
+        .map_err(|e| format!("{url}: {e}"))?;
+    let actual: String = Sha256::digest(&bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    if actual != sha256 {
+        return Err(format!(
+            "{url} has SHA-256 {actual}, not the pinned {sha256}"
+        ));
+    }
+    Ok(bytes)
 }
 
 /// Copies `vulkan-1.dll` from the build machine into `folder`, to be

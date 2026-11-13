@@ -3,6 +3,7 @@
 
 mod clash;
 mod config;
+mod download_hosts;
 mod duplicates;
 mod executor;
 mod folder_name;
@@ -22,6 +23,7 @@ pub use config::{
     load_config, reset_config, save_config, Config, ConfigError, DefaultCopyRule, GroupingSettings,
     SettingChange, EXAMPLE_CONFIG,
 };
+pub use download_hosts::{check_download, follow_redirect, Hop};
 pub use duplicates::{
     duplicate_groups, DuplicateCopy, DuplicateGroup, DuplicatePhase, DuplicateProgress,
 };

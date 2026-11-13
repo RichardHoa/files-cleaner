@@ -918,14 +918,9 @@ fn a_redo_cut_short_after_the_trash_says_to_restore_it_by_hand() {
 #[test]
 fn a_move_cut_short_after_it_happened_can_still_be_undone() {
     let dir = scan_root();
-    write(dir.path(), "talk.pptx", "talk");
-    write(dir.path(), "Slides/other.txt", "other");
     let journal = journal_dir();
+    let plan = talk_into_slides(dir.path());
     let before = snapshot(dir.path());
-    let slides = FolderChoice::AddTo {
-        folder: real_path(&dir.path().join("Slides")),
-    };
-    let plan = common::folder_plan(dir.path(), "Slides", slides, &["talk.pptx"]);
     let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
     // Rewrite the Journal as if the app crashed right after the move.
     let path = journal
@@ -1060,4 +1055,91 @@ fn retrying_a_move_skipped_for_its_missing_folder_does_it_in_the_same_session() 
         .all(|(_, state)| *state == OperationState::Done));
     undo(&id, journal.path()).unwrap();
     assert!(dir.path().join("lecture.pdf").exists() && dir.path().join("invoice.pdf").exists());
+}
+
+/// A Scan Root with `talk.pptx` and a `Slides` folder, and the Plan that
+/// moves `talk.pptx` into `Slides`.
+fn talk_into_slides(root: &Path) -> Plan {
+    write(root, "talk.pptx", "talk");
+    write(root, "Slides/other.txt", "other");
+    let slides = FolderChoice::AddTo {
+        folder: real_path(&root.join("Slides")),
+    };
+    common::folder_plan(root, "Slides", slides, &["talk.pptx"])
+}
+
+#[test]
+fn a_name_taken_since_planning_gets_a_clash_suffix_and_nothing_is_overwritten() {
+    let dir = scan_root();
+    let journal = journal_dir();
+    let plan = talk_into_slides(dir.path());
+    write(dir.path(), "Slides/Talk.pptx", "someone else's");
+
+    let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
+
+    assert_eq!(summary.done.len(), 1);
+    assert_eq!(
+        fs::read_to_string(dir.path().join("Slides/Talk.pptx")).unwrap(),
+        "someone else's"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("Slides/talk (1).pptx")).unwrap(),
+        "talk"
+    );
+    undo(summary.session_id.as_deref().unwrap(), journal.path()).unwrap();
+    assert_eq!(
+        fs::read_to_string(dir.path().join("talk.pptx")).unwrap(),
+        "talk"
+    );
+    assert!(dir.path().join("Slides/Talk.pptx").exists());
+}
+
+#[test]
+fn undo_leaves_a_file_the_user_moved_again_where_they_put_it() {
+    let dir = scan_root();
+    let journal = journal_dir();
+    let plan = talk_into_slides(dir.path());
+    let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
+    write(dir.path(), "Elsewhere/keep.txt", "");
+    fs::rename(
+        dir.path().join("Slides/talk.pptx"),
+        dir.path().join("Elsewhere/talk.pptx"),
+    )
+    .unwrap();
+
+    let undone = undo(summary.session_id.as_deref().unwrap(), journal.path()).unwrap();
+
+    assert_eq!(undone.unrecoverable.len(), 1);
+    assert!(undone.unrecoverable[0]
+        .note
+        .as_deref()
+        .unwrap()
+        .contains("is gone"));
+    assert!(dir.path().join("Elsewhere/talk.pptx").exists());
+    assert!(!dir.path().join("talk.pptx").exists());
+}
+
+#[test]
+fn a_session_whose_journal_ends_in_a_half_written_line_still_undoes_and_stays_readable() {
+    let dir = messy_folder();
+    let journal = journal_dir();
+    let before = snapshot(dir.path());
+    let plan = plan_for(dir.path());
+    let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
+    let id = summary.session_id.unwrap();
+    // A crash in the middle of writing a record.
+    let path = journal.path().join(format!("{id}.jsonl"));
+    let mut text = fs::read_to_string(&path).unwrap();
+    text.push_str(r#"{"record":"intent","operationId":"#);
+    fs::write(&path, text).unwrap();
+
+    let undone = undo(&id, journal.path()).unwrap();
+
+    assert_eq!(undone.done.len(), 2);
+    assert_eq!(snapshot(dir.path()), before);
+    assert_eq!(
+        all_sessions(journal.path())[0].status,
+        SessionStatus::Undone
+    );
+    assert!(session_details(&id, journal.path()).is_ok());
 }

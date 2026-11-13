@@ -1,7 +1,7 @@
 //! Reading the text in a picture of a page, for PDFs with no text layer
 //! (scans) or a garbled one, with Tesseract, built into the app on every
-//! OS. Its language files are downloaded by the app into one folder
-//! (`OcrLanguages` in the app crate). Runs in the PDF child process
+//! OS. Its language files are bundled with the app, in one folder put in
+//! place by the app crate's build script. Runs in the PDF child process
 //! (`read::pdf_child_main`).
 
 use std::path::Path;

@@ -99,7 +99,7 @@ A folder the Plan gathers Loose Files into: proposed by the tool from similar fi
 _Avoid_: cluster, group, category, proposed folder
 
 **Grouping Models**:
-The two models the app downloads once, with the user's consent, to read inside files and suggest folders from what they're about. Without them, Suggested Folders come from file kind, name and date only. The user may swap the model that describes each file for one they pick; the model that compares the descriptions is always the app's own.
+The two models the app downloads once, with the user's consent, to read inside files and suggest folders from what they're about. They are the only thing the app ever downloads. Without them, Suggested Folders come from file kind, name and date only. The user may swap the model that describes each file for one they pick; the model that compares the descriptions is always the app's own.
 _Avoid_: AI, smart features, LLM
 
 ### History

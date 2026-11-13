@@ -4,6 +4,8 @@
 
 use serde::Serialize;
 
+use crate::download_hosts::DOWNLOAD_HOST;
+
 /// A link to one GGUF file on Hugging Face, as the app downloads it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -20,16 +22,17 @@ const NOT_ONE_FILE: &str = "Paste the link to one .gguf file.";
 /// link to one `.gguf` file, or why it can't be used.
 pub fn describing_model_link(link: &str) -> Result<ModelLink, String> {
     let link = link.trim();
-    let rest = [
-        "https://huggingface.co/",
-        "https://www.huggingface.co/",
-        "https://hf.co/",
-    ]
-    .iter()
-    .find_map(|host| link.strip_prefix(host))
-    .ok_or_else(|| {
-        "Paste a Hugging Face link, starting with https://huggingface.co/.".to_string()
-    })?;
+    // A pasted link may name Hugging Face's other hosts; the download link always names `DOWNLOAD_HOST`.
+    let rest = link
+        .strip_prefix("https://")
+        .and_then(|rest| {
+            [DOWNLOAD_HOST, "www.huggingface.co", "hf.co"]
+                .iter()
+                .find_map(|host| rest.strip_prefix(host)?.strip_prefix('/'))
+        })
+        .ok_or_else(|| {
+            "Paste a Hugging Face link, starting with https://huggingface.co/.".to_string()
+        })?;
     // `?download=true` and the like change nothing about which file it is.
     let path = rest.split(['?', '#']).next().unwrap_or("");
     let parts: Vec<&str> = path.split('/').collect();
@@ -53,7 +56,7 @@ pub fn describing_model_link(link: &str) -> Result<ModelLink, String> {
     }
     Ok(ModelLink {
         url: format!(
-            "https://huggingface.co/{owner}/{repo}/resolve/{revision}/{}",
+            "https://{DOWNLOAD_HOST}/{owner}/{repo}/resolve/{revision}/{}",
             file.join("/")
         ),
         file_name: file_name.to_string(),

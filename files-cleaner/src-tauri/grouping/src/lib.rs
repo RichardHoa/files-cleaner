@@ -84,7 +84,7 @@ pub struct Input<'a> {
     /// The PDFium library bundled with the app; without it, PDFs are read
     /// by name.
     pub pdfium: Option<&'a Path>,
-    /// The folder of OCR's language files, once downloaded; without it,
+    /// The folder of OCR's language files bundled with the app; without it,
     /// scanned PDFs are read by name.
     pub tessdata: Option<&'a Path>,
 }
