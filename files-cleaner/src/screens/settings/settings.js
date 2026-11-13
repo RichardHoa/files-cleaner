@@ -1,5 +1,6 @@
 // Settings: the Never-Touch Paths, the Default Copy Rule, how files are grouped,
-// notifications, the Grouping Models, and deleting all Sessions.
+// notifications, the Grouping Models, deleting all Sessions, and help. The headings say these in plain
+// words ("Folders to leave alone"); the glossary and the code keep the exact terms.
 // This is the only way settings change: the config file behind them is never edited by hand. Each change
 // is saved as soon as it's made; an invalid value says why beside it and isn't saved. Grouping changes
 // apply the next time files are grouped.
@@ -8,20 +9,28 @@ import {
   clearGroupingCards,
   deleteAllSessions,
   describeError,
+  downloadDescribingModel,
   listSessions,
   loadConfig,
   openWebPage,
   pathSeparator,
+  pauseDescribingModel,
   pickFolder,
+  removeDescribingModel,
   removeGroupingModels,
   resetSettings,
   revealInFileManager,
+  useDescribingModel,
 } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";
 import { formatSize, plural, splitPath, trashPlace } from "../../shared/format.js";
+import { showAllGuidesAgain } from "../../shared/onboarding/guide-card.js";
+import { showIntroduction } from "../../shared/onboarding/introduction.js";
 import { groupingModelsControls, modelsButton, watchGroupingModels } from "../../shared/grouping-models/models-panel.js";
+import { warningBlock } from "../../shared/outcomes.js";
 import { progressBar } from "../../shared/progress-bar.js";
 import { showStatus } from "../../shared/status.js";
+import { EXISTING_FOLDER_LEVELS, FOLDER_LEVELS, nearestLevel, onLevel } from "./grouping-levels.js";
 
 /** What this OS calls its file manager, for "Show in Finder". */
 const FILE_MANAGER = pathSeparator === "\\" ? "Explorer" : /Mac/.test(navigator.userAgent) ? "Finder" : "File Manager";
@@ -33,23 +42,6 @@ const COPY_RULES = [
   { value: "shortestPath", label: "Shortest path", detail: "the copy with the shortest folder and file name" },
 ];
 
-/** The two grouping thresholds: what each slider's ends mean, and one line on what it changes. */
-const THRESHOLDS = [
-  {
-    key: "folderThreshold",
-    label: "Files share a folder",
-    looser: "Looser: fewer, bigger folders",
-    stricter: "Stricter: more, smaller folders",
-    explain: "How closely files must match to be suggested one folder.",
-  },
-  {
-    key: "existingFolderThreshold",
-    label: "Files go into an existing folder",
-    looser: "Looser: your folders are reused more often",
-    stricter: "Stricter: more new folders",
-    explain: "How closely a suggested folder must match one already in the scanned folder to go into it.",
-  },
-];
 
 export function render(root, nav) {
   const home = el("button", { type: "button" }, "Home");
@@ -63,9 +55,23 @@ export function render(root, nav) {
     readAgainSection(),
     modelsSection(),
     sessionsSection(),
+    helpSection(),
     iconCredit(),
   );
   showConfigSections(configSections);
+}
+
+/** Replays the introduction, or brings back the guide cards the user dismissed. */
+function helpSection() {
+  const status = el("p", { className: "status" });
+  const replay = el("button", { type: "button" }, "Replay introduction");
+  replay.addEventListener("click", () => showIntroduction());
+  const guides = el("button", { type: "button" }, "Show all guides again");
+  guides.addEventListener("click", async () => {
+    await showAllGuidesAgain();
+    showStatus(status, "Each screen shows its guide again the next time you open it.");
+  });
+  return section("Help", el("div", { className: "actions" }, replay, guides), status);
 }
 
 /** Credits the app icon's author, linking to their page in the default browser. */
@@ -127,7 +133,7 @@ function duplicatesSection(initial) {
   const choices = el(
     "fieldset",
     { className: "settings-choices" },
-    el("legend", { className: "note" }, "Keep by default. Every other copy starts out trashed."),
+    el("legend", { className: "note" }, "Every other copy starts out trashed."),
     ...COPY_RULES.map(({ value, label, detail }) => choice("default-copy-rule", label, detail, { value, checked: value === initial })),
   );
   let rule = initial;
@@ -140,7 +146,7 @@ function duplicatesSection(initial) {
       showStatus(status, describeError(error), true);
     }
   });
-  return section("Duplicates", choices, el("p", { className: "note" }, "Changes apply the next time a folder is scanned."), status);
+  return section("When files are identical, keep…", choices, el("p", { className: "note" }, "Changes apply the next time a folder is scanned."), status);
 }
 
 function neverTouchSection(initial) {
@@ -179,7 +185,7 @@ function neverTouchSection(initial) {
   }
   draw();
   return section(
-    "Never-Touch Paths",
+    "Folders to leave alone",
     el("p", { className: "note" }, "Folders the app leaves alone, everything inside them included. System and app folders are left alone already."),
     list,
     el("div", { className: "actions" }, add),
@@ -189,9 +195,10 @@ function neverTouchSection(initial) {
 
 function groupingSection(grouping) {
   return section(
-    "Grouping",
+    "Folder suggestions",
     el("p", { className: "note" }, "Changes apply the next time files are grouped."),
-    ...THRESHOLDS.map((threshold) => thresholdSetting(threshold, grouping[threshold.key])),
+    folderLevelSetting(grouping.folderThreshold),
+    existingFolderSetting(grouping.existingFolderThreshold),
     smallestFolderSetting(grouping.smallestFolder),
   );
 }
@@ -208,79 +215,107 @@ async function saveGrouping(key, value, error) {
   }
 }
 
-/** A threshold: a slider and the exact number, kept in step, with "Reset to default". */
-function thresholdSetting({ key, label, looser, stricter, explain }, initial) {
-  const slider = el("input", { type: "range", min: 0, max: 1, step: 0.01, ariaLabel: label });
-  const number = el("input", { type: "number", min: 0, max: 1, step: 0.01, className: "settings-number", ariaLabel: `${label}, exact` });
+/**
+ * The grouping threshold `key` as one of `levels`, shown by `show(index)`; returns `save(threshold)`, null
+ * for the default, which shows the level saved, or puts the last one back if saving fails. A stored value
+ * between levels is snapped to the nearest one and saved, without a word.
+ */
+function levelSetting(key, levels, initial, show, error) {
+  let level = nearestLevel(levels, initial);
+  const save = async (threshold) => {
+    const saved = await saveGrouping(key, threshold, error);
+    if (saved !== undefined) level = nearestLevel(levels, saved);
+    show(level);
+  };
+  show(level);
+  if (!onLevel(levels, initial)) save(levels[level].threshold);
+  return save;
+}
+
+/** How many Suggested Folders: five levels on a slider, from a few broad folders to many specific ones. */
+function folderLevelSetting(initial) {
+  const slider = el("input", { type: "range", min: 0, max: FOLDER_LEVELS.length - 1, step: 1, ariaLabel: "How many folders" });
+  const current = el("span", { className: "muted" });
   const reset = el("button", { type: "button", className: "link" }, "Reset to default");
   const error = el("p", { className: "status" });
-  const show = (value) => {
-    slider.value = value;
-    number.value = value.toFixed(2);
-    number.ariaInvalid = "false";
+  const show = (index) => {
+    slider.value = index;
+    current.textContent = FOLDER_LEVELS[index].label;
+    slider.ariaValueText = FOLDER_LEVELS[index].label;
   };
-  const save = async (value) => {
-    const saved = await saveGrouping(key, value, error);
-    if (saved !== undefined) show(saved);
-  };
-
-  slider.addEventListener("input", () => (number.value = Number(slider.value).toFixed(2)));
-  slider.addEventListener("change", () => save(Number(slider.value)));
-  number.addEventListener("input", () => {
-    const value = number.valueAsNumber;
-    if (value >= 0 && value <= 1) slider.value = value;
-  });
-  number.addEventListener("change", () => {
-    const value = number.valueAsNumber;
-    if (!(value >= 0 && value <= 1)) {
-      number.ariaInvalid = "true";
-      showStatus(error, "Enter a number from 0 to 1.", true);
-      return;
-    }
-    save(Math.round(value * 100) / 100);
-  });
+  const save = levelSetting("folderThreshold", FOLDER_LEVELS, initial, show, error);
+  slider.addEventListener("input", () => show(Number(slider.value)));
+  slider.addEventListener("change", () => save(FOLDER_LEVELS[Number(slider.value)].threshold));
   reset.addEventListener("click", () => save(null));
-  show(initial);
 
+  const [fewest, most] = [FOLDER_LEVELS[0], FOLDER_LEVELS.at(-1)];
   return el(
     "div",
     { className: "settings-setting" },
-    el("div", { className: "settings-setting-head" }, el("strong", {}, label), reset),
-    el("p", { className: "note" }, explain),
+    el("div", { className: "settings-setting-head" }, el("strong", {}, "How many folders"), current, reset),
     el(
       "div",
       { className: "settings-slider" },
-      el("span", { className: "muted" }, looser),
+      el("span", { className: "muted" }, fewest.label),
       slider,
-      el("span", { className: "muted" }, stricter),
-      number,
+      el("span", { className: "muted" }, most.label),
     ),
     error,
   );
 }
 
-/** The fewest files a Suggested Folder holds, 2–10. */
-function smallestFolderSetting(initial) {
-  const number = el("input", { type: "number", min: 2, max: 10, step: 1, value: initial, className: "settings-number" });
+/** How often a Suggested Folder goes into a folder already in the scanned folder: Often, Sometimes or Rarely. */
+function existingFolderSetting(initial) {
+  const reset = el("button", { type: "button", className: "link" }, "Reset to default");
   const error = el("p", { className: "status" });
-  number.addEventListener("change", async () => {
+  const choices = el(
+    "fieldset",
+    { className: "settings-choices" },
+    ...EXISTING_FOLDER_LEVELS.map(({ label }, index) =>
+      el("label", { className: "settings-choice" }, el("input", { type: "radio", name: "existing-folders", value: index }), el("span", {}, label)),
+    ),
+  );
+  const show = (index) => (choices.querySelector(`input[value="${index}"]`).checked = true);
+  const save = levelSetting("existingFolderThreshold", EXISTING_FOLDER_LEVELS, initial, show, error);
+  choices.addEventListener("change", ({ target }) => save(EXISTING_FOLDER_LEVELS[Number(target.value)].threshold));
+  reset.addEventListener("click", () => save(null));
+
+  return el(
+    "div",
+    { className: "settings-setting" },
+    el("div", { className: "settings-setting-head" }, el("strong", {}, "Use your existing folders"), reset),
+    el("p", { className: "note" }, "How often a suggested folder goes into a folder already in the scanned folder, rather than a new one."),
+    choices,
+    error,
+  );
+}
+
+/** The fewest files a Suggested Folder holds, 2–10, as a sentence with a stepper. */
+function smallestFolderSetting(initial) {
+  const number = el("input", { type: "number", min: 2, max: 10, step: 1, value: initial, className: "settings-number", ariaLabel: "Fewest files in a folder" });
+  const reset = el("button", { type: "button", className: "link" }, "Reset to default");
+  const error = el("p", { className: "status" });
+  const save = async (value) => {
+    const saved = await saveGrouping("smallestFolder", value, error);
+    if (saved !== undefined) {
+      number.value = saved;
+      number.ariaInvalid = "false";
+    }
+  };
+  number.addEventListener("change", () => {
     const value = number.valueAsNumber;
     if (!(Number.isInteger(value) && value >= 2 && value <= 10)) {
       number.ariaInvalid = "true";
       showStatus(error, "Enter a whole number from 2 to 10.", true);
       return;
     }
-    const saved = await saveGrouping("smallestFolder", value, error);
-    if (saved !== undefined) {
-      number.value = saved;
-      number.ariaInvalid = "false";
-    }
+    save(value);
   });
+  reset.addEventListener("click", () => save(null));
   return el(
     "div",
     { className: "settings-setting" },
-    el("label", { className: "settings-setting-head" }, el("strong", {}, "Smallest folder"), number, el("span", { className: "muted" }, "files")),
-    el("p", { className: "note" }, "Fewer files than this alike aren't suggested a folder of their own."),
+    el("div", { className: "settings-setting-head" }, el("label", {}, "Only suggest a folder for at least ", number, " files"), reset),
     error,
   );
 }
@@ -329,13 +364,15 @@ function readAgainSection() {
   );
 }
 
-/** The Grouping Models: their status and controls, and each model's name, size on disk and folder. */
+/** The Grouping Models: their status and controls, each model's name, size on disk and folder, and "Advanced". */
 function modelsSection() {
   const body = el("div");
   const error = el("p", { className: "status error" });
-  const node = section("Grouping Models", body, error);
+  const advanced = describingModelSetting();
+  const node = section("Reading inside files", body, error, advanced.node);
   const bar = progressBar();
   watchGroupingModels(node, error, (status) => {
+    advanced.show(status);
     const onDisk = status.models.filter((model) => model.path);
     const total = onDisk.reduce((sum, model) => sum + model.size, 0);
     const installed = status.state === "installed";
@@ -344,9 +381,119 @@ function modelsSection() {
       ...(onDisk.length ? [modelList(onDisk, error), el("p", { className: "muted" }, `Total: ${formatSize(total)}`)] : []),
       installed ? removeModels(status.total, error) : "",
     );
-    showStatus(error, status.error ?? "", status.error != null);
+    // A failed download says why in the orange warning, in place of its text.
+    showStatus(error, "");
   });
   return node;
+}
+
+/**
+ * "Advanced": a box for a Hugging Face link to one `.gguf` file, to describe files with that model instead of
+ * the default (ADR 0009), and the picked model's download, check or switch. Built once and fed each status,
+ * so what's typed in the box stays; shown only once the Grouping Models are installed.
+ */
+function describingModelSetting() {
+  const link = el("input", {
+    type: "url",
+    className: "settings-link",
+    placeholder: "https://huggingface.co/…/blob/main/model.gguf",
+    ariaLabel: "Hugging Face link to one .gguf file",
+  });
+  const download = el("button", { type: "button" }, "Download");
+  const current = el("div");
+  const error = el("p", { className: "status error" });
+  const bar = progressBar();
+  const node = el(
+    "details",
+    { className: "settings-setting" },
+    el("summary", {}, "Advanced"),
+    el(
+      "p",
+      { className: "note" },
+      "Describe your files with another model from Hugging Face: paste the link to one .gguf file of a chat model. " +
+        "It's tried on a sample file before it's used. The model that compares the descriptions stays the same.",
+    ),
+    current,
+    el("div", { className: "actions" }, link, download),
+    error,
+  );
+
+  download.addEventListener("click", async () => {
+    if (!link.value.trim()) return;
+    download.disabled = true;
+    showStatus(error, "");
+    try {
+      await downloadDescribingModel(link.value);
+      link.value = "";
+    } catch (e) {
+      showStatus(error, describeError(e), true);
+      download.disabled = false;
+    }
+  });
+  link.addEventListener("keydown", (event) => event.key === "Enter" && download.click());
+
+  return {
+    node,
+    show(status) {
+      node.hidden = status.state !== "installed";
+      const running = status.custom != null && status.custom.state !== "installed";
+      link.disabled = download.disabled = running;
+      current.replaceChildren(...describingModelControls(status, error, bar));
+    },
+  };
+}
+
+/**
+ * What describes files now, or the picked model's download with its progress in `bar`, or its check. A
+ * download that failed, or a model refused, says why in the orange warning; a failing button says why in `error`.
+ */
+function describingModelControls({ custom, customError, models }, error, bar) {
+  const button = (label, command, primary = false) => modelsButton(label, command, error, primary);
+  const warning = customError ? [warningBlock(customError)] : [];
+  const byDefault = `Your files are described by ${models[0].name}, the default.`;
+  if (custom == null) return [...warning, el("p", {}, byDefault)];
+  const { state, name, downloaded, total, sha256, inUse } = custom;
+  const say = (text) => (customError ? warningBlock(customError) : el("p", {}, text));
+  const progress = () => {
+    bar.set(downloaded, total);
+    return bar.node;
+  };
+  const soFar = `${formatSize(downloaded)} of ${formatSize(total)}`;
+
+  if (state === "downloading") {
+    return [
+      say(`Downloading ${name}… ${soFar}`),
+      progress(),
+      el("div", { className: "actions" }, button("Pause", pauseDescribingModel), button("Cancel", removeDescribingModel)),
+    ];
+  }
+  if (state === "paused") {
+    return [
+      say(`Download of ${name} paused at ${soFar}.`),
+      progress(),
+      el(
+        "div",
+        { className: "actions" },
+        button("Resume", () => downloadDescribingModel(), true),
+        button("Cancel", removeDescribingModel),
+      ),
+    ];
+  }
+  if (state === "checking") {
+    return [say(`Trying ${name} on a sample file…`), el("div", { className: "actions" }, button("Cancel", removeDescribingModel))];
+  }
+  return [
+    ...warning,
+    el("p", {}, name, el("span", { className: "muted" }, ` · ${formatSize(total)}`)),
+    el("p", { className: "note" }, "SHA-256: ", el("span", { className: "path" }, sha256 ?? "")),
+    el("p", {}, inUse ? `Your files are described by ${name}.` : byDefault),
+    el(
+      "div",
+      { className: "actions" },
+      inUse ? button("Use the default", () => useDescribingModel(false)) : button(`Use ${name}`, () => useDescribingModel(true), true),
+      button("Remove", removeDescribingModel),
+    ),
+  ];
 }
 
 /** "Remove", which asks first, as getting the models back means downloading `total` bytes again; a failure says why in `error`. */
@@ -426,7 +573,7 @@ function sessionsSection() {
   refresh();
 
   return section(
-    "Sessions",
+    "History",
     el("p", { className: "note" }, `Deleting the Sessions clears History. Your files stay where they are, and anything in the ${trashPlace(pathSeparator)} can still be put back from there.`),
     actions,
     status,

@@ -4,6 +4,8 @@ A desktop tool that tidies a messy folder (such as Downloads) by removing duplic
 
 ## Language
 
+These are the exact terms for talking about the tool. The app's screens may say the same things in plainer words (for example "Folders to leave alone" for Never-Touch Paths).
+
 ### Scanning
 
 **Scan Root**:
@@ -97,7 +99,7 @@ A folder the Plan gathers Loose Files into: proposed by the tool from similar fi
 _Avoid_: cluster, group, category, proposed folder
 
 **Grouping Models**:
-The two models the app downloads once, with the user's consent, to read inside files and suggest folders from what they're about. Without them, Suggested Folders come from file kind, name and date only.
+The two models the app downloads once, with the user's consent, to read inside files and suggest folders from what they're about. Without them, Suggested Folders come from file kind, name and date only. The user may swap the model that describes each file for one they pick; the model that compares the descriptions is always the app's own.
 _Avoid_: AI, smart features, LLM
 
 ### History

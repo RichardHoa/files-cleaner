@@ -7,6 +7,7 @@ mod duplicates;
 mod executor;
 mod folder_name;
 mod journal;
+mod model_link;
 mod os_trash;
 mod planner;
 mod protection;
@@ -25,11 +26,12 @@ pub use duplicates::{
     duplicate_groups, DuplicateCopy, DuplicateGroup, DuplicatePhase, DuplicateProgress,
 };
 pub use executor::{
-    redo_operations, retry_operations, run, run_with_progress, undo, undo_operations, Outcome,
-    RunProgress, Summary,
+    redo_operations, retry_operations, run, run_with_progress, undo, undo_operations, NoteKind,
+    Outcome, RunProgress, Summary,
 };
 pub use folder_name::safe_folder_name;
 pub use journal::{lock_sessions, SessionError, SessionLock};
+pub use model_link::{describing_model_link, ModelLink};
 pub use os_trash::{OsTrash, SystemTrash};
 pub use planner::{
     build_plan, build_plan_with_progress, Operation, OperationKind, Plan, Reason, SourceState,

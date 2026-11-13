@@ -7,6 +7,12 @@
 //! request after a pause or an interruption, and is moved to `<file>` only
 //! once its SHA-256 matches. So a model is installed exactly when `<file>`
 //! exists, and the state can always be read from the folder.
+//!
+//! The user may also pick a model to describe files in place of the first
+//! (ADR 0009), linked from Hugging Face. It downloads the same way into
+//! `custom/`, beside a `source.json` saying where from, and is moved into
+//! place only once it has described a sample file; its SHA-256 is shown,
+//! never checked. At most one is kept, and the default stays on disk.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -15,7 +21,9 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use files_cleaner_core::{self as core, SettingChange};
+use files_cleaner_grouping as grouping;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter};
 
@@ -58,6 +66,11 @@ const MODELS: [Model; 2] = [
     },
 ];
 
+/// The picked describing model's folder, inside the models folder.
+const CUSTOM_FOLDER: &str = "custom";
+/// Where the picked model comes from, inside its folder.
+const SOURCE_FILE: &str = "source.json";
+
 /// What a running download has been asked to do, checked between reads.
 const RUN: u8 = 0;
 const PAUSE: u8 = 1;
@@ -84,6 +97,62 @@ pub struct Status {
     pub error: Option<String>,
     /// Each model, the file-reading one first.
     pub models: Vec<ModelStatus>,
+    /// The model the user picked to describe files, while it downloads or
+    /// once it's in; `None` when there's none.
+    pub custom: Option<CustomStatus>,
+    /// Why the picked model's download stopped, or why it was refused.
+    pub custom_error: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CustomState {
+    Downloading,
+    Paused,
+    /// Downloaded, and being asked to describe the sample file.
+    Checking,
+    Installed,
+}
+
+/// The model the user picked, as Settings shows it.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomStatus {
+    pub state: CustomState,
+    /// Its file's name.
+    pub name: String,
+    /// The Hugging Face link it was picked by.
+    pub link: String,
+    pub downloaded: u64,
+    pub total: u64,
+    /// Its SHA-256 in hex, once installed.
+    pub sha256: Option<String>,
+    /// Its file, or its partial file while downloading.
+    pub path: Option<PathBuf>,
+    /// Whether it describes files now, rather than the default.
+    pub in_use: bool,
+}
+
+/// Where the picked model comes from, kept in `source.json` beside it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Source {
+    link: String,
+    url: String,
+    file_name: String,
+    size: u64,
+    /// Set once it's checked and moved into place.
+    sha256: Option<String>,
+}
+
+/// One file to download: where from, and where to.
+struct Target<'a> {
+    /// What it does, for error messages.
+    role: &'a str,
+    url: &'a str,
+    size: u64,
+    file: PathBuf,
+    partial: PathBuf,
 }
 
 /// One model as Settings shows it.
@@ -109,6 +178,11 @@ struct Inner {
     /// The running download's instruction (RUN, PAUSE or CANCEL), until its thread ends.
     running: Option<Arc<AtomicU8>>,
     error: Option<String>,
+    /// The same, for the picked describing model's download.
+    custom_running: Option<Arc<AtomicU8>>,
+    /// Whether the picked model is being asked to describe the sample file.
+    checking: bool,
+    custom_error: Option<String>,
 }
 
 /// Why a download stopped before finishing.
@@ -116,6 +190,8 @@ enum Stopped {
     /// Pause or cancel was asked for.
     Asked,
     Failed(String),
+    /// The picked model couldn't describe the sample file, for this reason.
+    Refused(String),
 }
 
 impl GroupingModels {
@@ -133,10 +209,22 @@ impl GroupingModels {
     }
 
     /// The two model files, the card writer's then the embedding model's,
-    /// once both are installed.
-    pub fn files(&self) -> Option<(PathBuf, PathBuf)> {
-        self.installed()
-            .then(|| (self.file(&MODELS[0]), self.file(&MODELS[1])))
+    /// once both are installed. The card writer is the one the user picked,
+    /// `describing_model` being its link, or the default when that's `None`.
+    pub fn files(&self, describing_model: Option<&str>) -> Result<(PathBuf, PathBuf), String> {
+        if !self.installed() {
+            return Err("Download the grouping models first".to_string());
+        }
+        let describing = match describing_model {
+            None => self.file(&MODELS[0]),
+            Some(link) => self
+                .source()
+                .filter(|source| source.link == link)
+                .map(|source| self.custom_file(&source))
+                .filter(|file| file.is_file())
+                .ok_or("The model you picked to describe files isn't downloaded. Pick it again in Settings, or use the default.")?,
+        };
+        Ok((describing, self.file(&MODELS[1])))
     }
 
     pub fn status(&self) -> Status {
@@ -162,6 +250,8 @@ impl GroupingModels {
                     total,
                     error: None,
                     models: Vec::new(),
+                    custom: None,
+                    custom_error: None,
                 }
             }
             None if self.installed() => State::Installed,
@@ -177,7 +267,48 @@ impl GroupingModels {
                 .iter()
                 .map(|model| self.model_status(model))
                 .collect(),
+            custom: self.custom_status(inner),
+            custom_error: inner.custom_error.clone(),
         }
+    }
+
+    fn custom_status(&self, inner: &Inner) -> Option<CustomStatus> {
+        let source = self.source()?;
+        let file = self.custom_file(&source);
+        let partial = partial_of(&file);
+        let installed = file.is_file();
+        let state = match inner
+            .custom_running
+            .as_ref()
+            .map(|asked| asked.load(Ordering::SeqCst))
+        {
+            // Its files go once its thread sees the cancel.
+            Some(CANCEL) => return None,
+            Some(_) if inner.checking => CustomState::Checking,
+            Some(RUN) => CustomState::Downloading,
+            Some(_) => CustomState::Paused,
+            None if installed => CustomState::Installed,
+            None => CustomState::Paused,
+        };
+        let downloaded = if installed {
+            source.size
+        } else {
+            fs::metadata(&partial).map_or(0, |m| m.len().min(source.size))
+        };
+        // Unreadable settings are the default's.
+        let in_use = installed
+            && crate::read_config(&self.app)
+                .is_ok_and(|loaded| loaded.config.describing_model.as_ref() == Some(&source.link));
+        Some(CustomStatus {
+            state,
+            name: source.file_name,
+            link: source.link,
+            downloaded,
+            total: source.size,
+            sha256: source.sha256,
+            path: [file, partial].into_iter().find(|path| path.is_file()),
+            in_use,
+        })
     }
 
     fn model_status(&self, model: &Model) -> ModelStatus {
@@ -231,7 +362,7 @@ impl GroupingModels {
     }
 
     /// Cancels the download, or removes the installed models: either way,
-    /// every model file goes.
+    /// every model file goes, the picked describing model's too.
     pub fn remove(&self) -> Result<Status, String> {
         // All under the lock, so a download can't start, or the running one end, in between.
         let mut inner = self.inner.lock().unwrap();
@@ -240,6 +371,7 @@ impl GroupingModels {
             Some(asked) => asked.store(CANCEL, Ordering::SeqCst),
             None => self.delete_files().map_err(|e| e.to_string())?,
         }
+        self.remove_custom_locked(&mut inner)?;
         let status = self.status_of(&inner);
         drop(inner);
         self.send(&status);
@@ -270,7 +402,7 @@ impl GroupingModels {
         let status = loop {
             let result = MODELS
                 .iter()
-                .try_for_each(|model| self.fetch(model, asked, &mut progress));
+                .try_for_each(|model| self.fetch_default(model, asked, &mut progress));
             // Under the lock, so a resume can't slip in between deciding to stop and stopping.
             let mut inner = self.inner.lock().unwrap();
             match (asked.load(Ordering::SeqCst), result) {
@@ -281,7 +413,9 @@ impl GroupingModels {
                         inner.error = Some(format!("Couldn't delete the downloaded files: {e}"));
                     }
                 }
-                (_, Err(Stopped::Failed(message))) => inner.error = Some(message),
+                (_, Err(Stopped::Failed(message) | Stopped::Refused(message))) => {
+                    inner.error = Some(message)
+                }
                 _ => {}
             }
             inner.running = None;
@@ -292,87 +426,281 @@ impl GroupingModels {
 
     /// Downloads `model` into its partial file, from where that stopped,
     /// then moves it into place if its SHA-256 matches.
-    fn fetch(
+    fn fetch_default(
         &self,
         model: &Model,
         asked: &AtomicU8,
         progress: &mut impl FnMut(),
     ) -> Result<(), Stopped> {
-        let failed = |e: &dyn std::fmt::Display| {
-            Stopped::Failed(format!("Downloading the {} failed: {e}", model.role))
+        let target = Target {
+            role: model.role,
+            url: model.url,
+            size: model.size,
+            file: self.file(model),
+            partial: self.partial(model),
         };
-        let file = self.file(model);
-        if file.is_file() {
+        if target.file.is_file() {
             return Ok(());
         }
-        let partial = self.partial(model);
-        let mut offset = fs::metadata(&partial).map(|m| m.len()).unwrap_or(0);
-        if offset > model.size {
-            fs::remove_file(&partial).map_err(|e| failed(&e))?;
-            offset = 0;
-        }
-        if offset < model.size {
-            let agent: ureq::Agent = ureq::Agent::config_builder()
-                .timeout_connect(Some(READ_TIMEOUT))
-                .timeout_per_read(Some(READ_TIMEOUT))
-                .http_status_as_error(false)
-                .build()
-                .into();
-            let response = agent
-                .get(model.url)
-                .header("Range", format!("bytes={offset}-"))
-                .call()
-                .map_err(|e| failed(&e))?;
-            let resumed = match response.status().as_u16() {
-                206 => {
-                    let range = response
-                        .headers()
-                        .get("content-range")
-                        .and_then(|v| v.to_str().ok());
-                    if !range.is_some_and(|range| range.starts_with(&format!("bytes {offset}-"))) {
-                        return Err(failed(&"the server sent the wrong part of the file"));
-                    }
-                    true
-                }
-                // The server ignored the range: start again.
-                200 => false,
-                code => return Err(failed(&format!("the server answered {code}"))),
-            };
-            let mut out = OpenOptions::new()
-                .create(true)
-                .write(true)
-                .append(resumed)
-                .truncate(!resumed)
-                .open(&partial)
-                .map_err(|e| failed(&e))?;
-            let mut body = response.into_body().into_reader();
-            let mut buffer = vec![0; 256 * 1024];
-            loop {
-                if asked.load(Ordering::SeqCst) != RUN {
-                    return Err(Stopped::Asked);
-                }
-                let read = body.read(&mut buffer).map_err(|e| failed(&e))?;
-                if read == 0 {
-                    break;
-                }
-                out.write_all(&buffer[..read]).map_err(|e| failed(&e))?;
-                progress();
-            }
-            out.sync_all().map_err(|e| failed(&e))?;
-        }
-        if sha256(&partial, asked)
-            .map_err(|e| failed(&e))?
-            .ok_or(Stopped::Asked)?
-            != model.sha256
-        {
+        if fetch(&target, asked, progress)? != model.sha256 {
             // A wrong file is never resumed: the next try starts again.
-            let _ = fs::remove_file(&partial);
+            let _ = fs::remove_file(&target.partial);
             return Err(Stopped::Failed(format!(
                 "The {} downloaded damaged. Try again.",
                 model.role
             )));
         }
-        fs::rename(&partial, &file).map_err(|e| failed(&e))
+        fs::rename(&target.partial, &target.file)
+            .map_err(|e| Stopped::Failed(format!("Downloading the {} failed: {e}", model.role)))
+    }
+
+    /// Starts downloading the describing model at the Hugging Face `link`,
+    /// in place of any picked before, or resumes the one stopped when
+    /// `link` is `None`. A link that isn't to one public `.gguf` file is
+    /// refused, as is one the disk has no room for.
+    pub fn download_custom(self: &Arc<Self>, link: Option<String>) -> Result<Status, String> {
+        let source = match link {
+            Some(link) => {
+                if self.inner.lock().unwrap().custom_running.is_some() {
+                    return Err("Cancel the model being downloaded first.".to_string());
+                }
+                let parsed = core::describing_model_link(&link)?;
+                Source {
+                    size: remote_size(&parsed.url)?,
+                    link: link.trim().to_string(),
+                    url: parsed.url,
+                    file_name: parsed.file_name,
+                    sha256: None,
+                }
+            }
+            None => self
+                .source()
+                .ok_or("There's no model download to resume.")?,
+        };
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(asked) = &inner.custom_running {
+            // Paused, but its thread hasn't noticed yet: it carries on.
+            asked.store(RUN, Ordering::SeqCst);
+        } else {
+            let fresh = self
+                .source()
+                .is_none_or(|old| old.link != source.link || old.sha256.is_some());
+            let partial = partial_of(&self.custom_file(&source));
+            let left = match fresh {
+                true => source.size,
+                false => {
+                    source.size - fs::metadata(&partial).map_or(0, |m| m.len().min(source.size))
+                }
+            };
+            let needed = left + left / 10;
+            let free = fs4::available_space(&self.folder).map_err(|e| e.to_string())?;
+            if free < needed {
+                return Err(format!(
+                    "Not enough free space for {}: it needs {} and this disk has {} free.",
+                    source.file_name,
+                    gigabytes(needed),
+                    gigabytes(free)
+                ));
+            }
+            if fresh {
+                // A new pick replaces the old one, and the default describes files meanwhile.
+                self.remove_custom_locked(&mut inner)?;
+                let folder = self.custom_folder();
+                fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+                let json = serde_json::to_string(&source).map_err(|e| e.to_string())?;
+                fs::write(folder.join(SOURCE_FILE), json).map_err(|e| e.to_string())?;
+            }
+            let asked = Arc::new(AtomicU8::new(RUN));
+            inner.custom_running = Some(Arc::clone(&asked));
+            inner.custom_error = None;
+            let models = Arc::clone(self);
+            std::thread::spawn(move || models.work_custom(&source, &asked));
+        }
+        let status = self.status_of(&inner);
+        drop(inner);
+        self.send(&status);
+        Ok(status)
+    }
+
+    /// Pauses the picked model's download, keeping what's downloaded so far.
+    pub fn pause_custom(&self) -> Status {
+        let inner = self.inner.lock().unwrap();
+        if let Some(asked) = &inner.custom_running {
+            asked.store(PAUSE, Ordering::SeqCst);
+        }
+        let status = self.status_of(&inner);
+        drop(inner);
+        self.send(&status);
+        status
+    }
+
+    /// Cancels the picked model's download, or removes it: the default
+    /// describes files again.
+    pub fn remove_custom(&self) -> Result<Status, String> {
+        let mut inner = self.inner.lock().unwrap();
+        self.remove_custom_locked(&mut inner)?;
+        let status = self.status_of(&inner);
+        drop(inner);
+        self.send(&status);
+        Ok(status)
+    }
+
+    /// Describes files with the picked model, once it's in, or with the
+    /// default when `picked` is false. Nothing is downloaded either way.
+    pub fn use_custom(&self, picked: bool) -> Result<Status, String> {
+        let link = match picked {
+            true => Some(
+                self.source()
+                    .filter(|source| source.sha256.is_some())
+                    .ok_or("The model you picked isn't downloaded.")?
+                    .link,
+            ),
+            false => None,
+        };
+        crate::save_setting(&self.app, &SettingChange::DescribingModel(link))
+            .map_err(|e| e.message)?;
+        let status = self.status();
+        self.send(&status);
+        Ok(status)
+    }
+
+    /// Cancels the picked model's download, or deletes it and goes back to
+    /// the default; `inner` is held, so no download starts in between.
+    fn remove_custom_locked(&self, inner: &mut Inner) -> Result<(), String> {
+        inner.custom_error = None;
+        if let Some(asked) = &inner.custom_running {
+            asked.store(CANCEL, Ordering::SeqCst);
+            return Ok(());
+        }
+        self.use_default_if_custom()?;
+        self.delete_custom().map_err(|e| e.to_string())
+    }
+
+    /// Switches the setting back to the default model, if it names another.
+    fn use_default_if_custom(&self) -> Result<(), String> {
+        // Settings that can't be read can't name the picked model either.
+        let picked = crate::read_config(&self.app)
+            .is_ok_and(|loaded| loaded.config.describing_model.is_some());
+        if picked {
+            crate::save_setting(&self.app, &SettingChange::DescribingModel(None))
+                .map_err(|e| e.message)?;
+        }
+        Ok(())
+    }
+
+    /// The thread downloading the picked model: fetches it, then has it
+    /// describe the sample file, until it's in, refused, or it's paused,
+    /// cancelled or fails.
+    fn work_custom(&self, source: &Source, asked: &AtomicU8) {
+        let mut last_sent = Instant::now();
+        let mut progress = || {
+            if last_sent.elapsed() >= STATUS_EVERY {
+                last_sent = Instant::now();
+                self.send(&self.status());
+            }
+        };
+        let file = self.custom_file(source);
+        let target = Target {
+            role: "model you picked",
+            url: &source.url,
+            size: source.size,
+            partial: partial_of(&file),
+            file,
+        };
+        let status = loop {
+            let result = fetch(&target, asked, &mut progress)
+                .and_then(|sha256| self.accept_custom(source, &target, sha256, asked));
+            // Under the lock, so a resume can't slip in between deciding to stop and stopping.
+            let mut inner = self.inner.lock().unwrap();
+            inner.checking = false;
+            match (asked.load(Ordering::SeqCst), result) {
+                (RUN, Err(Stopped::Asked)) => continue,
+                (CANCEL, _) => {
+                    // A cancel that came in as it was switched to goes back to the default.
+                    let removed = self
+                        .use_default_if_custom()
+                        .and_then(|()| self.delete_custom().map_err(|e| e.to_string()));
+                    if let Err(e) = removed {
+                        inner.custom_error =
+                            Some(format!("Couldn't delete the downloaded file: {e}"));
+                    }
+                }
+                (_, Err(Stopped::Refused(reason))) => {
+                    let _ = self.delete_custom();
+                    inner.custom_error = Some(format!(
+                        "{} can't be used: {reason}. It was deleted, and the default model still describes your files.",
+                        source.file_name
+                    ));
+                }
+                (_, Err(Stopped::Failed(message))) => inner.custom_error = Some(message),
+                _ => {}
+            }
+            inner.custom_running = None;
+            break self.status_of(&inner);
+        };
+        self.send(&status);
+    }
+
+    /// Has the downloaded picked model describe the sample file and, if it
+    /// can, moves it into place with its SHA-256 and switches to it.
+    fn accept_custom(
+        &self,
+        source: &Source,
+        target: &Target,
+        sha256: String,
+        asked: &AtomicU8,
+    ) -> Result<(), Stopped> {
+        self.inner.lock().unwrap().checking = true;
+        self.send(&self.status());
+        grouping::check_describing_model(&target.partial).map_err(Stopped::Refused)?;
+        if asked.load(Ordering::SeqCst) != RUN {
+            return Err(Stopped::Asked);
+        }
+        let failed = |e: &dyn std::fmt::Display| {
+            Stopped::Failed(format!("Couldn't switch to the model you picked: {e}"))
+        };
+        let checked = Source {
+            sha256: Some(sha256),
+            ..source.clone()
+        };
+        let json = serde_json::to_string(&checked).map_err(|e| failed(&e))?;
+        fs::rename(&target.partial, &target.file).map_err(|e| failed(&e))?;
+        fs::write(self.custom_folder().join(SOURCE_FILE), json).map_err(|e| failed(&e))?;
+        crate::save_setting(
+            &self.app,
+            &SettingChange::DescribingModel(Some(source.link.clone())),
+        )
+        .map_err(|e| failed(&e.message))?;
+        Ok(())
+    }
+
+    /// Where the picked model comes from, if there is one.
+    fn source(&self) -> Option<Source> {
+        let bytes = fs::read(self.custom_folder().join(SOURCE_FILE)).ok()?;
+        serde_json::from_slice(&bytes).ok()
+    }
+
+    /// The picked model's file. Its name starts with a hash of where it
+    /// comes from, so the cards it writes, which are stored by its file
+    /// name, are never those of another model with the same name.
+    fn custom_file(&self, source: &Source) -> PathBuf {
+        let from: String = Sha256::digest(source.url.as_bytes())[..4]
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        self.custom_folder()
+            .join(format!("{from}-{}", source.file_name))
+    }
+
+    fn custom_folder(&self) -> PathBuf {
+        self.folder.join(CUSTOM_FOLDER)
+    }
+
+    fn delete_custom(&self) -> io::Result<()> {
+        match fs::remove_dir_all(self.custom_folder()) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        }
     }
 
     /// Bytes of `model` on disk, installed or partial.
@@ -410,6 +738,115 @@ impl GroupingModels {
         // No window to tell is fine: the download goes on.
         let _ = self.app.emit(STATUS_EVENT, status);
     }
+}
+
+/// Downloads `target` into its partial file, from where that stopped, and
+/// returns its SHA-256; moving it into place is the caller's.
+fn fetch(
+    target: &Target,
+    asked: &AtomicU8,
+    progress: &mut impl FnMut(),
+) -> Result<String, Stopped> {
+    let failed = |e: &dyn std::fmt::Display| {
+        Stopped::Failed(format!("Downloading the {} failed: {e}", target.role))
+    };
+    let partial = &target.partial;
+    let mut offset = fs::metadata(partial).map(|m| m.len()).unwrap_or(0);
+    if offset > target.size {
+        fs::remove_file(partial).map_err(|e| failed(&e))?;
+        offset = 0;
+    }
+    if offset < target.size {
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_connect(Some(READ_TIMEOUT))
+            .timeout_per_read(Some(READ_TIMEOUT))
+            .http_status_as_error(false)
+            .build()
+            .into();
+        let response = agent
+            .get(target.url)
+            .header("Range", format!("bytes={offset}-"))
+            .call()
+            .map_err(|e| failed(&e))?;
+        let resumed = match response.status().as_u16() {
+            206 => {
+                let range = response
+                    .headers()
+                    .get("content-range")
+                    .and_then(|v| v.to_str().ok());
+                if !range.is_some_and(|range| range.starts_with(&format!("bytes {offset}-"))) {
+                    return Err(failed(&"the server sent the wrong part of the file"));
+                }
+                true
+            }
+            // The server ignored the range: start again.
+            200 => false,
+            code => return Err(failed(&format!("the server answered {code}"))),
+        };
+        let mut out = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .append(resumed)
+            .truncate(!resumed)
+            .open(partial)
+            .map_err(|e| failed(&e))?;
+        let mut body = response.into_body().into_reader();
+        let mut buffer = vec![0; 256 * 1024];
+        loop {
+            if asked.load(Ordering::SeqCst) != RUN {
+                return Err(Stopped::Asked);
+            }
+            let read = body.read(&mut buffer).map_err(|e| failed(&e))?;
+            if read == 0 {
+                break;
+            }
+            out.write_all(&buffer[..read]).map_err(|e| failed(&e))?;
+            progress();
+        }
+        out.sync_all().map_err(|e| failed(&e))?;
+    }
+    if fs::metadata(partial).map_err(|e| failed(&e))?.len() != target.size {
+        // A wrong file is never resumed: the next try starts again.
+        let _ = fs::remove_file(partial);
+        return Err(failed(&"the file came out the wrong size; try again"));
+    }
+    sha256(partial, asked)
+        .map_err(|e| failed(&e))?
+        .ok_or(Stopped::Asked)
+}
+
+/// The size of the file at the Hugging Face download link `url`, or why it
+/// can't be downloaded without a login.
+fn remote_size(url: &str) -> Result<u64, String> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_connect(Some(READ_TIMEOUT))
+        .timeout_per_read(Some(READ_TIMEOUT))
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let response = agent
+        .head(url)
+        .call()
+        .map_err(|e| format!("Couldn't reach Hugging Face: {e}"))?;
+    match response.status().as_u16() {
+        200 => response
+            .headers()
+            .get("content-length")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse().ok())
+            .ok_or_else(|| "Hugging Face didn't say how big the file is.".to_string()),
+        // Gated and private models, and repos that don't exist, all ask for a login.
+        401 | 403 => Err("This model needs a Hugging Face login; pick a public one.".to_string()),
+        404 => Err("Hugging Face has no file at that link.".to_string()),
+        code => Err(format!("Hugging Face answered {code}.")),
+    }
+}
+
+/// The partial file `file` downloads into.
+fn partial_of(file: &Path) -> PathBuf {
+    let mut name = file.as_os_str().to_owned();
+    name.push(".part");
+    PathBuf::from(name)
 }
 
 /// The file's SHA-256 in lower-case hex, or None if pause or cancel was

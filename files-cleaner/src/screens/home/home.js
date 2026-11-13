@@ -12,9 +12,10 @@ import {
 import { el } from "../../shared/dom.js";
 import { count, relativeTime, splitPath } from "../../shared/format.js";
 import { icon } from "../../shared/icons.js";
+import { guide } from "../../shared/onboarding/guide-card.js";
 import { noSessions, sessionList } from "../../shared/session-list/session-row.js";
 import { undoSections } from "../../shared/outcomes.js";
-import { showStatus } from "../../shared/status.js";
+import { showStatus, showWarning } from "../../shared/status.js";
 
 const LATEST_SESSIONS = 3;
 
@@ -26,9 +27,11 @@ export function render(root, nav) {
   const sessions = el("div");
   const seeAll = el("button", { type: "button", className: "link", hidden: true });
   seeAll.addEventListener("click", () => nav.history(1));
+  const { card, help } = guide("home");
 
   root.append(
-    el("header", { className: "home-header" }, el("h1", {}, "Files Cleaner"), badge),
+    el("header", { className: "home-header" }, el("h1", {}, "Files Cleaner"), el("div", { className: "home-header-actions" }, badge, help)),
+    card,
     configError,
     el("p", { className: "lead" }, "Pick a folder to scan. Nothing changes until you approve a Plan."),
     tiles,
@@ -54,7 +57,8 @@ export function render(root, nav) {
         return;
       }
     } catch (error) {
-      showStatus(status, describeError(error), true);
+      // The scan or the search for duplicates failed as a whole.
+      showWarning(status, describeError(error));
     }
     scanning = false;
     tiles.classList.remove("busy");
@@ -168,7 +172,7 @@ async function showSessions(node, seeAll, nav, undoResult = null) {
           undone: (result) => showSessions(node, seeAll, nav, result),
         })
       : noSessions();
-  node.replaceChildren(...(undoResult ? undoSections(undoResult) : []), list);
+  node.replaceChildren(...(undoResult ? undoSections(undoResult, pathSeparator) : []), list);
 }
 
 /** Shows `warning` in `node` with "Scan anyway" and "Cancel"; resolves to whether to scan. */

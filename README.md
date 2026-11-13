@@ -69,12 +69,29 @@ cargo build --release -p files-cleaner-core --bin bench-scan
 
 ## things to improve
 
-- Warning, if there is a failture, warning, display a medium, oragng wording in the middle of the screen to let the user know sometime has gone wrong, especially with the trash
+- Warning, if there is a failture, warning, display a medium, oragne text in the middle of the screen to let the user know sometime has gone wrong, especially with the trash
 
 - In the setting, simplify the language, especially the "Grouping", let user adjust the level, not the number directly, user does not care about the number. For other heading make it's intuitive and clear 
 
 - Give a nice introduction to user, when they open the app for the first time introduce the app function to them, ask them to download the model, try to visualize instead of just using wall of words
 
-- Testing most important functions with edge cases
+- Have a guide to guide user thorugh every step, what does each section mean and what they can expeect, especially for the first time they come to the app
 
 - have the option for user to pick the model rather than the defauult one (they provide the hugging face url)
+
+
+
+
+- press space to preview the file immediately (just like macos)
+
+- include installation step so user are not scared when seeing warning (do this in readme)
+
+- We are a local app, the only chance we download anything is to download the models, make it clear we only do that, and show it by code, not words
+
+
+
+- Testing most important functions with edge cases
+
+- keep the dependency barebone, delete any dependency we are not using
+
+

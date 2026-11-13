@@ -35,7 +35,7 @@ use serde::Serialize;
 
 pub use card::Card;
 pub use cluster::Vector;
-pub use llama::LlamaModels;
+pub use llama::{check_describing_model, LlamaModels};
 pub use place::{Choice, Question};
 pub use read::{pdf_child_main, Content};
 pub use store::CardStore;

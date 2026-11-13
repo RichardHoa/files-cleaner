@@ -69,10 +69,70 @@ pub struct Outcome {
     pub destination: Option<PathBuf>,
     /// Why it wasn't done.
     pub note: Option<String>,
+    /// What kind of Note it is, when the UI words it apart from the rest.
+    pub note_kind: Option<NoteKind>,
+}
+
+/// The kinds of Note the UI tells apart, in its warning after a Run, Undo,
+/// Redo or retry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NoteKind {
+    /// The System Trash wouldn't take the item, so it stayed where it was.
+    TrashRefused,
+    /// Undo found the item emptied from the System Trash: it is gone.
+    GoneFromTrash,
+    /// Another item with the same name is where it would go.
+    NameTaken,
+    /// The item changed since the Plan was made, or since Undo put it back.
+    Changed,
 }
 
 /// Why an Operation's pass didn't move the item.
-type NotDone = (OutcomeKind, String);
+struct NotDone {
+    outcome: OutcomeKind,
+    note: String,
+    kind: Option<NoteKind>,
+}
+
+impl NotDone {
+    fn new(outcome: OutcomeKind, note: impl Into<String>) -> Self {
+        NotDone {
+            outcome,
+            note: note.into(),
+            kind: None,
+        }
+    }
+
+    fn skipped(note: impl Into<String>) -> Self {
+        NotDone::new(OutcomeKind::Skipped, note)
+    }
+
+    fn failed(note: impl Into<String>) -> Self {
+        NotDone::new(OutcomeKind::Failed, note)
+    }
+
+    fn unrecoverable(note: impl Into<String>) -> Self {
+        NotDone::new(OutcomeKind::Unrecoverable, note)
+    }
+
+    /// The same, with its Note of kind `kind`.
+    fn because(self, kind: NoteKind) -> Self {
+        NotDone {
+            kind: Some(kind),
+            ..self
+        }
+    }
+
+    /// The same, with its Note of kind `kind` if `applies`.
+    fn because_if(self, applies: bool, kind: NoteKind) -> Self {
+        if applies {
+            self.because(kind)
+        } else {
+            self
+        }
+    }
+}
 
 /// Runs the Operations of `plan` whose IDs are in `approved`, in Plan
 /// order, as a new Session journaled in `journal_dir`. Trashed items go to
@@ -144,7 +204,12 @@ pub fn run_with_progress(
     let operations = operations.inspect(|op| progress.starting(&op.source));
     apply_each(&mut journal, &mut summary, Phase::Run, operations, |op| {
         if let Some(note) = blocked.get(op.id.as_str()) {
-            return Err((OutcomeKind::Skipped, note.to_string()));
+            // A Trash is only blocked by the System Trash.
+            let skipped = NotDone::skipped(*note);
+            return Err(match op.kind {
+                OperationKind::Trash => skipped.because(NoteKind::TrashRefused),
+                _ => skipped,
+            });
         }
         run_one(op, trash)
     })?;
@@ -193,17 +258,16 @@ fn run_one(op: &JournaledOperation, trash: &dyn OsTrash) -> Result<Option<PathBu
     match op.kind {
         OperationKind::CreateFolder => create_folder(recorded(op)?).map(|()| None),
         OperationKind::Trash => {
-            ready_to_go(op, "since the Plan was made").map_err(|r| (OutcomeKind::Skipped, r))?;
+            still_as_planned(op, "since the Plan was made")?;
             send_to_trash(trash, op).map(Some)
         }
         OperationKind::Move => {
             let destination = recorded(op)?;
-            ready_to_go(op, "since the Plan was made")
-                .and_then(|()| folder_exists(op))
-                .map_err(|r| (OutcomeKind::Skipped, r))?;
+            still_as_planned(op, "since the Plan was made")?;
+            folder_exists(op).map_err(NotDone::skipped)?;
             move_without_overwriting(&op.source, destination)
                 .map(|()| None)
-                .map_err(|r| (OutcomeKind::Failed, r))
+                .map_err(NotDone::failed)
         }
     }
 }
@@ -298,7 +362,7 @@ fn undo_selected(
         session.in_state(OperationState::Done, only).rev(),
         |op| {
             let result = undo_one(&session, &newer, &settled, op, trash);
-            if !matches!(result, Err((OutcomeKind::Skipped, _))) {
+            if !matches!(&result, Err(not_done) if not_done.outcome == OutcomeKind::Skipped) {
                 settled.insert(op.id.clone());
             }
             result.map(|()| None)
@@ -329,14 +393,13 @@ fn undo_one(
                     .is_some_and(|d| d.starts_with(destination))
         });
         if waiting {
-            return Err((
-                OutcomeKind::Skipped,
-                "Items this Session moved into it aren't back yet, so it was left".into(),
+            return Err(NotDone::skipped(
+                "Items this Session moved into it aren't back yet, so it was left",
             ));
         }
-        return remove_created_folder(destination).map_err(|r| (OutcomeKind::Skipped, r));
+        return remove_created_folder(destination).map_err(NotDone::skipped);
     }
-    newer.conflict(op).map_err(|r| (OutcomeKind::Skipped, r))?;
+    newer.conflict(op).map_err(NotDone::skipped)?;
     let what = match op.kind {
         OperationKind::Trash if op.planned.is_folder => "trashed folder",
         OperationKind::Trash => "trashed copy",
@@ -350,18 +413,24 @@ fn undo_one(
         && fs::symlink_metadata(destination).is_ok()
         && unchanged(destination, &op.planned, "").is_err();
     if !exists(destination) || replaced {
-        let note = if op.in_system_trash {
-            format!("It's no longer in the {TRASH_PLACE}")
+        return Err(if op.in_system_trash {
+            NotDone::unrecoverable(format!("It's no longer in the {TRASH_PLACE}"))
+                .because(NoteKind::GoneFromTrash)
         } else {
-            format!("The {what} at {} is gone", destination.display())
-        };
-        return Err((OutcomeKind::Unrecoverable, note));
+            NotDone::unrecoverable(format!("The {what} at {} is gone", destination.display()))
+        });
     }
+    // Nothing is ever replaced, so an item where it goes back is what stopped it.
     let left = |note: String| {
-        (
-            OutcomeKind::Skipped,
-            format!("{note}; the {what} was left at {}", destination.display()),
-        )
+        let skipped = NotDone::skipped(format!(
+            "{note}; the {what} was left at {}",
+            destination.display()
+        ));
+        if exists(&op.source) {
+            skipped.because(NoteKind::NameTaken)
+        } else {
+            skipped
+        }
     };
     if op.planned.is_folder && op.source.is_dir() {
         // Undoing its files on their own made the folder again.
@@ -477,18 +546,20 @@ pub fn redo_operations(
         |op| match op.kind {
             OperationKind::CreateFolder => create_folder(recorded(op)?)
                 .map(|()| None)
-                .map_err(|(_, r)| (OutcomeKind::Skipped, r)),
+                .map_err(|not_done| NotDone::skipped(not_done.note)),
             OperationKind::Trash => {
-                ready_to_go(op, "since Undo put it back").map_err(|r| (OutcomeKind::Skipped, r))?;
+                still_as_planned(op, "since Undo put it back")?;
                 send_to_trash(trash, op).map(Some)
             }
             OperationKind::Move => {
                 let destination = recorded(op)?;
-                ready_to_go(op, "since Undo put it back")
-                    .and_then(|()| folder_exists(op))
-                    .and_then(|()| move_without_overwriting(&op.source, destination))
+                still_as_planned(op, "since Undo put it back")?;
+                folder_exists(op).map_err(NotDone::skipped)?;
+                move_without_overwriting(&op.source, destination)
                     .map(|()| None)
-                    .map_err(|r| (OutcomeKind::Skipped, r))
+                    .map_err(|note| {
+                        NotDone::skipped(note).because_if(exists(destination), NoteKind::NameTaken)
+                    })
             }
         },
     )?;
@@ -601,12 +672,9 @@ fn settle_interrupted(
 /// Where `op`'s Journal says it goes. Only a Trash that hasn't landed goes
 /// without, so one that needs it and has none is a damaged Journal.
 fn recorded(op: &JournaledOperation) -> Result<&Path, NotDone> {
-    op.destination.as_deref().ok_or_else(|| {
-        (
-            OutcomeKind::Skipped,
-            "The Journal doesn't say where it went".to_string(),
-        )
-    })
+    op.destination
+        .as_deref()
+        .ok_or_else(|| NotDone::skipped("The Journal doesn't say where it went"))
 }
 
 /// Sends `op`'s item to `trash` and returns where it landed. A refusal leaves
@@ -615,9 +683,9 @@ fn recorded(op: &JournaledOperation) -> Result<&Path, NotDone> {
 fn send_to_trash(trash: &dyn OsTrash, op: &JournaledOperation) -> Result<PathBuf, NotDone> {
     trash.trash(&op.source).map_err(|note| {
         if exists(&op.source) {
-            (OutcomeKind::Skipped, note)
+            NotDone::skipped(note).because(NoteKind::TrashRefused)
         } else {
-            (OutcomeKind::Unrecoverable, restore_by_hand_note())
+            NotDone::unrecoverable(restore_by_hand_note())
         }
     })
 }
@@ -634,9 +702,9 @@ fn apply_each<T: Borrow<JournaledOperation>>(
     for op in operations {
         let op = op.borrow();
         journal.append(&op.intent(phase))?;
-        let (outcome, note, landed) = match attempt(op) {
-            Ok(landed) => (OutcomeKind::Done, None, landed),
-            Err((outcome, note)) => (outcome, Some(note), None),
+        let (outcome, note, kind, landed) = match attempt(op) {
+            Ok(landed) => (OutcomeKind::Done, None, None, landed),
+            Err(not_done) => (not_done.outcome, Some(not_done.note), not_done.kind, None),
         };
         journal.append(&Record::Outcome {
             operation_id: op.id.clone(),
@@ -645,7 +713,13 @@ fn apply_each<T: Borrow<JournaledOperation>>(
             reason: note.clone(),
             landed: landed.clone(),
         })?;
-        summary.push(outcome, op.outcome(landed, note));
+        summary.push(
+            outcome,
+            Outcome {
+                note_kind: kind,
+                ..op.outcome(landed, note)
+            },
+        );
     }
     Ok(())
 }
@@ -679,6 +753,13 @@ fn unchanged(path: &Path, expected: &SourceState, since: &str) -> Result<(), Str
         Ok(modified) if millis(modified) == expected.modified => Ok(()),
         _ => Err(format!("It was modified {since}")),
     }
+}
+
+/// Skips `op` if its item isn't as planned (see `ready_to_go`): as changed if
+/// it is still there.
+fn still_as_planned(op: &JournaledOperation, since: &str) -> Result<(), NotDone> {
+    ready_to_go(op, since)
+        .map_err(|note| NotDone::skipped(note).because_if(exists(&op.source), NoteKind::Changed))
 }
 
 /// Fails with a note if `op`'s item isn't as planned: for an emptied folder,
@@ -752,17 +833,13 @@ fn folder_exists(op: &JournaledOperation) -> Result<(), String> {
 /// Creates the folder `path`, whose parent must exist.
 fn create_folder(path: &Path) -> Result<(), NotDone> {
     if exists(path) {
-        return Err((
-            OutcomeKind::Skipped,
-            format!("{} already exists", path.display()),
-        ));
+        return Err(NotDone::skipped(format!(
+            "{} already exists",
+            path.display()
+        )));
     }
-    fs::create_dir(path).map_err(|e| {
-        (
-            OutcomeKind::Failed,
-            format!("Couldn't create {}: {e}", path.display()),
-        )
-    })
+    fs::create_dir(path)
+        .map_err(|e| NotDone::failed(format!("Couldn't create {}: {e}", path.display())))
 }
 
 /// Removes the folder `path` that a Session created, only if it is empty,

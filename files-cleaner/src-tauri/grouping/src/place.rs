@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::card::Card;
+use crate::card::{Card, Chat};
 
 /// What the LLM is asked about one file.
 #[derive(Debug, Clone)]
@@ -46,8 +46,14 @@ pub const MAX_NEW_TOKENS: usize = 24;
 
 const SYSTEM: &str = "You sort files into folders. Reply with one folder name and nothing else.";
 
-/// What the LLM is asked, in Qwen's chat template, written out.
+/// What the LLM is asked, in Qwen's chat template, written out: what
+/// identifies it. The model is given `chat(question)` in its own template.
 pub fn prompt(question: &Question) -> String {
+    chat(question).chatml()
+}
+
+/// The placing prompt as chat messages.
+pub fn chat(question: &Question) -> Chat {
     let card = &question.card;
     // "none" goes last: small models lean towards the first choice.
     let mut folders = String::new();
@@ -89,7 +95,10 @@ pub fn prompt(question: &Question) -> String {
          Reply with the folder name exactly as written above, or \"none\".",
         question.file_name, card.topic, card.kind, card.summary
     );
-    format!("<|im_start|>system\n{SYSTEM}<|im_end|>\n<|im_start|>user\n{user}<|im_end|>\n<|im_start|>assistant\n")
+    Chat {
+        system: SYSTEM,
+        user,
+    }
 }
 
 /// The folder the reply names, by its place in `question.folders`; `None`

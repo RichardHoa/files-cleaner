@@ -77,3 +77,9 @@
 .settings-number[aria-invalid="true"] {
   outline: 2px solid var(--error);
 }
+
+.settings-link {
+  flex: 1 1 320px;
+  max-width: 480px;
+  font: inherit;
+}

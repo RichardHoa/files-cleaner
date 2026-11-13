@@ -12,6 +12,7 @@ import {
 } from "../api.js";
 import { el } from "../dom.js";
 import { formatSize } from "../format.js";
+import { warningBlock } from "../outcomes.js";
 import { progressBar } from "../progress-bar.js";
 import { showStatus } from "../status.js";
 
@@ -21,7 +22,7 @@ function thisComputer() {
   return /Mac/.test(navigator.userAgent) ? "Mac" : "computer";
 }
 
-/** What the Grouping Models are, `total` bytes in all, and that nothing leaves the computer: for the offer and the panel. */
+/** What the Grouping Models are, `total` bytes in all, and that nothing leaves the computer: for the panel and Settings. */
 export function groupingModelsPitch(total) {
   const computer = thisComputer();
   return (
@@ -80,7 +81,7 @@ export function groupingModelsPanel(onInstalled) {
       return false;
     }
     node.replaceChildren(...groupingModelsControls(status, error, bar), error);
-    showStatus(error, status.error ?? "", status.error != null);
+    showStatus(error, "");
   });
   node.append(error);
   return node;
@@ -89,10 +90,12 @@ export function groupingModelsPanel(onInstalled) {
 /**
  * The text, progress and buttons for the models in `status` until they're installed: the offer, or the
  * download with Pause or Resume and Cancel, its progress shown in `bar` (from progress-bar.js), kept by
- * the caller across statuses so it glides from one to the next. A failing button says why in `error`.
+ * the caller across statuses so it glides from one to the next. A download that failed says why in the
+ * orange warning, in place of its text; a failing button says why in `error`.
  */
-export function groupingModelsControls({ state, downloaded, total }, error, bar) {
+export function groupingModelsControls({ state, downloaded, total, error: failed }, error, bar) {
   const button = (label, command, primary = false) => modelsButton(label, command, error, primary);
+  const say = (text) => (failed ? warningBlock(failed) : el("p", {}, text));
   const progress = () => {
     bar.set(downloaded, total);
     return bar.node;
@@ -101,14 +104,14 @@ export function groupingModelsControls({ state, downloaded, total }, error, bar)
 
   if (state === "downloading") {
     return [
-      el("p", {}, `Downloading the grouping models… ${soFar}`),
+      say(`Downloading the grouping models… ${soFar}`),
       progress(),
       el("div", { className: "actions" }, button("Pause", pauseGroupingModels), button("Cancel", removeGroupingModels)),
     ];
   }
   if (state === "paused") {
     return [
-      el("p", {}, `Download paused at ${soFar}.`),
+      say(`Download paused at ${soFar}.`),
       progress(),
       el(
         "div",
@@ -119,7 +122,7 @@ export function groupingModelsControls({ state, downloaded, total }, error, bar)
     ];
   }
   return [
-    el("p", {}, groupingModelsPitch(total)),
+    say(groupingModelsPitch(total)),
     el("div", { className: "actions" }, button("Download", downloadGroupingModels, true)),
   ];
 }

@@ -37,8 +37,9 @@ import { drawMore, openEach, revealMenu } from "../../shared/plan/file-list.js";
 import { count, formatDate, formatSize, plural, splitPath, trashPlace } from "../../shared/format.js";
 import { icon } from "../../shared/icons.js";
 import { marqueeSelect } from "./marquee.js";
+import { guide } from "../../shared/onboarding/guide-card.js";
 import { groupingModelsPanel } from "../../shared/grouping-models/models-panel.js";
-import { describeNothingDone, describeRunProgress, describeSummary } from "../../shared/outcomes.js";
+import { describeNothingDone, describeRunProgress, describeSummary, describeWarning, notDoneSections, warningBlock } from "../../shared/outcomes.js";
 import { tickState, toggleAll } from "../../shared/plan/plan-selection.js";
 import { progressBar } from "../../shared/progress-bar.js";
 import { describeEstimate, readingEstimate, updatedAverage } from "./reading-estimate.js";
@@ -68,7 +69,7 @@ import {
   trashedCopies,
 } from "./review-choices.js";
 import { clickSelection } from "./row-selection.js";
-import { busy, showStatus } from "../../shared/status.js";
+import { busy, showStatus, showWarning } from "../../shared/status.js";
 
 /** How many of a card's files, or Duplicate Groups, are listed before "Show more". */
 const FILES_SHOWN = 50;
@@ -334,9 +335,9 @@ export async function render(root, nav, result, duplicateGroups) {
       return runPlan(approved, (progress) => showStatus(status, describeRunProgress(progress)));
     });
     running = false;
-    if (session?.sessionId) return nav.session(session.sessionId, null, describeSummary(session, "moved"));
+    if (session?.sessionId) return nav.session(session.sessionId, null, { summary: session, action: "run", done: "moved" });
     // A Run that did nothing keeps no Session: the review stays, saying why.
-    if (session) showStatus(status, describeNothingDone(session, "moved", pathSeparator), true);
+    if (session) showWarning(status, describeNothingDone(session, "moved", pathSeparator));
     drawHeader();
   });
 
@@ -353,7 +354,7 @@ export async function render(root, nav, result, duplicateGroups) {
       duplicatesDone = summary;
       showStatus(status, "");
     } else if (summary) {
-      showStatus(status, describeNothingDone(summary, "trashed", pathSeparator), true);
+      showWarning(status, describeNothingDone(summary, "trashed", pathSeparator));
     }
     if (current === "duplicates") drawPane();
     else changed();
@@ -382,6 +383,7 @@ export async function render(root, nav, result, duplicateGroups) {
     }, EMPTIED_DELAY);
   };
 
+  const guideCard = guide("review");
   root.append(
     el(
       "header",
@@ -398,8 +400,9 @@ export async function render(root, nav, result, duplicateGroups) {
         ),
         ...leftOut(result),
       ),
-      el("div", { className: "actions" }, cancel, run),
+      el("div", { className: "actions" }, cancel, run, guideCard.help),
     ),
+    guideCard.card,
     status,
     el("div", { className: "folder-split" }, sidebar, pane),
     menu.node,
@@ -745,6 +748,17 @@ export async function render(root, nav, result, duplicateGroups) {
     });
   }
 
+  /** What trashing the copies did: the warning if it left any, its counts, then the copies it left with why. */
+  function duplicatesOutcome(summary) {
+    const sections = notDoneSections(summary);
+    const text = describeWarning(summary, { action: "run", done: "trashed", separator: pathSeparator });
+    return [
+      text ? warningBlock(text, () => sections[0]?.scrollIntoView({ behavior: "smooth", block: "start" })) : "",
+      el("p", {}, describeSummary(summary, "trashed")),
+      ...sections,
+    ];
+  }
+
   /** A link to Session `sessionId`'s screen, where what it did can be checked or undone. */
   function sessionLink(sessionId) {
     const link = el("button", { type: "button", className: "link" }, "Open this Session");
@@ -762,7 +776,7 @@ export async function render(root, nav, result, duplicateGroups) {
     if (duplicatesDone) {
       return [
         el("h2", {}, "Duplicates"),
-        el("p", {}, describeSummary(duplicatesDone, "trashed")),
+        ...duplicatesOutcome(duplicatesDone),
         sessionLink(duplicatesDone.sessionId),
       ];
     }
@@ -1146,7 +1160,7 @@ export async function render(root, nav, result, duplicateGroups) {
     } catch (error) {
       if (cancelled) return nav.home();
       if (!stopped) notifyInBackground(`Couldn't finish reading ${rootName}`).catch(() => {});
-      waitFor("failed", [el("p", { className: "status error" }, describeError(error))]);
+      waitFor("failed", [warningBlock(describeError(error))]);
     } finally {
       analysing = false;
       estimate.stop();
