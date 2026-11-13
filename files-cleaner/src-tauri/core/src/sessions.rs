@@ -181,6 +181,7 @@ impl JournaledOperation {
             source: self.source.clone(),
             destination: landed.or_else(|| self.destination.clone()),
             note,
+            note_kind: None,
         }
     }
 }

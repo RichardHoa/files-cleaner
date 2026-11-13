@@ -31,8 +31,8 @@ const SESSIONS_FOLDER_NAME: &str = "sessions";
 const RECENT_FILE_NAME: &str = "recent-scan-roots.json";
 /// The Grouping Models' folder, inside the app data folder.
 const MODELS_FOLDER_NAME: &str = "grouping-models";
-/// The answer to the first-open offer of the Grouping Models, inside the app data folder.
-const MODELS_OFFER_FILE_NAME: &str = "grouping-models-offer.json";
+/// What the user has seen of the introduction and the guide cards, inside the app data folder.
+const ONBOARDING_FILE_NAME: &str = "onboarding.json";
 /// OCR's language files, inside the app data folder.
 const OCR_LANGUAGES_FOLDER_NAME: &str = "ocr-languages";
 /// The cards the Grouping Models wrote, inside the app data folder.
@@ -174,12 +174,21 @@ fn reset_settings(app: AppHandle) -> Result<LoadedConfig, CommandError> {
 
 #[tauri::command]
 fn change_setting(app: AppHandle, change: SettingChange) -> Result<LoadedConfig, CommandError> {
-    let path = config_path(&app)?;
+    // The describing model is switched only once it has passed its check (ADR 0009).
+    if matches!(change, SettingChange::DescribingModel(_)) {
+        return Err(CommandError::new("Pick the describing model under Advanced in Settings."));
+    }
+    save_setting(&app, &change)
+}
+
+/// Makes `change` to the config file and returns the config as saved.
+fn save_setting(app: &AppHandle, change: &SettingChange) -> Result<LoadedConfig, CommandError> {
+    let path = config_path(app)?;
     // Written first if missing, so there is a file to change.
     read_or_create(&path)?;
     let home = app.path().home_dir().map_err(CommandError::new)?;
     let config =
-        core::save_config(&path, &change, &home).map_err(|e| CommandError::new(e.message))?;
+        core::save_config(&path, change, &home).map_err(|e| CommandError::new(e.message))?;
     Ok(LoadedConfig { path, config })
 }
 
@@ -441,11 +450,12 @@ async fn analyse_loose_files(
     *analysing.cancel.lock().unwrap() = Arc::clone(&cancel);
     let stop = Arc::new(AtomicBool::new(false));
     *analysing.stop.lock().unwrap() = Arc::clone(&stop);
-    let settings = read_config(&app)?.config.grouping;
+    let config = read_config(&app)?.config;
+    let settings = config.grouping;
     let scan = without_copies(&latest)?;
     let (llm, embedding) = models
-        .files()
-        .ok_or_else(|| CommandError::new("Download the grouping models first"))?;
+        .files(config.describing_model.as_deref())
+        .map_err(CommandError::new)?;
     let store = CardStore::open(app_data_path(&app, CARDS_FOLDER_NAME)?);
     let pdfium = pdfium_library(&app);
     let tessdata = ocr_languages::installed(&app_data_path(&app, OCR_LANGUAGES_FOLDER_NAME)?);
@@ -609,25 +619,67 @@ fn remove_grouping_models(
     models.remove().map_err(CommandError::new)
 }
 
-/// Whether to offer the Grouping Models before Home: only until the offer
-/// is answered, and never once they're installed.
+/// Starts downloading the describing model at the Hugging Face `link`, in
+/// place of any picked before, or resumes the one stopped when `link` is
+/// null (ADR 0009). Once downloaded it describes a sample file, and is used
+/// only if it can.
 #[tauri::command]
-fn grouping_models_offer_pending(
-    app: AppHandle,
+async fn download_describing_model(
     models: State<'_, Arc<GroupingModels>>,
-) -> Result<bool, CommandError> {
-    Ok(!models.installed() && !app_data_path(&app, MODELS_OFFER_FILE_NAME)?.exists())
+    link: Option<String>,
+) -> Result<models::Status, CommandError> {
+    let models = Arc::clone(&models);
+    // Asking Hugging Face about the file goes over the network.
+    blocking(move || models.download_custom(link)).await
 }
 
-/// Remembers the answer to the first-open offer, `download` or `notNow`,
-/// so it isn't asked again.
+/// Pauses the picked describing model's download.
 #[tauri::command]
-fn answer_grouping_models_offer(app: AppHandle, answer: String) -> Result<(), CommandError> {
-    write_app_json(
-        &app,
-        MODELS_OFFER_FILE_NAME,
-        &serde_json::json!({ "answer": answer }),
-    )
+fn pause_describing_model(models: State<'_, Arc<GroupingModels>>) -> models::Status {
+    models.pause_custom()
+}
+
+/// Cancels the picked describing model's download, or deletes it.
+#[tauri::command]
+fn remove_describing_model(
+    models: State<'_, Arc<GroupingModels>>,
+) -> Result<models::Status, CommandError> {
+    models.remove_custom().map_err(CommandError::new)
+}
+
+/// Describes files with the picked model if `picked`, or else the default.
+#[tauri::command]
+fn use_describing_model(
+    models: State<'_, Arc<GroupingModels>>,
+    picked: bool,
+) -> Result<models::Status, CommandError> {
+    models.use_custom(picked).map_err(CommandError::new)
+}
+
+/// What the user has seen of the introduction and the guide cards, as
+/// stored.
+#[derive(Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct Onboarding {
+    introduction_seen: bool,
+    dismissed_guides: Vec<String>,
+}
+
+/// What the user has seen of the introduction and the guide cards.
+#[tauri::command]
+fn onboarding(app: AppHandle) -> Result<Onboarding, CommandError> {
+    let path = app_data_path(&app, ONBOARDING_FILE_NAME)?;
+    // Unreadable is the same as nothing seen: the introduction shows again.
+    Ok(fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default())
+}
+
+/// Remembers what the user has seen of the introduction and the guide cards.
+#[tauri::command]
+fn save_onboarding(app: AppHandle, onboarding: Onboarding) -> Result<(), CommandError> {
+    write_app_json(&app, ONBOARDING_FILE_NAME, &onboarding)
 }
 
 /// Writes `value` as JSON to the file `name` in the app data folder.
@@ -710,8 +762,12 @@ pub fn run() {
             download_grouping_models,
             pause_grouping_models,
             remove_grouping_models,
-            grouping_models_offer_pending,
-            answer_grouping_models_offer,
+            download_describing_model,
+            pause_describing_model,
+            remove_describing_model,
+            use_describing_model,
+            onboarding,
+            save_onboarding,
             analyse_loose_files,
             cancel_analysis,
             stop_reading,

@@ -1,7 +1,8 @@
 // History: every Session, newest first, ten to a page with numbered page links.
-import { describeError, listSessions } from "../../shared/api.js";
+import { describeError, listSessions, pathSeparator } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";
 import { count, plural } from "../../shared/format.js";
+import { guide } from "../../shared/onboarding/guide-card.js";
 import { pageCount, pageNumbers } from "./paging.js";
 import { noSessions, sessionList } from "../../shared/session-list/session-row.js";
 import { undoSections } from "../../shared/outcomes.js";
@@ -13,7 +14,8 @@ export function render(root, nav, page) {
   home.addEventListener("click", () => nav.home());
   const total = el("p", { className: "lead" });
   const content = el("div");
-  root.append(el("div", { className: "actions" }, home), el("h1", {}, "History"), total, content);
+  const { card, help } = guide("history");
+  root.append(el("div", { className: "actions" }, home, help), card, el("h1", {}, "History"), total, content);
   show(content, total, nav, page);
 }
 
@@ -38,7 +40,7 @@ async function show(node, totalLine, nav, page, undoResult = null) {
           undone: (undone) => show(node, totalLine, nav, page, undone),
         })
       : noSessions();
-  node.replaceChildren(...(undoResult ? undoSections(undoResult) : []), list, pager(page, pages, (to) => nav.history(to)));
+  node.replaceChildren(...(undoResult ? undoSections(undoResult, pathSeparator) : []), list, pager(page, pages, (to) => nav.history(to)));
 }
 
 /** Previous, the page numbers and Next; nothing for a single page. */

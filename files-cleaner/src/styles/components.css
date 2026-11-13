@@ -98,6 +98,20 @@ button.link:hover {
   text-decoration: underline;
 }
 
+/* A job the user started didn't fully happen: plain orange words, centered above what they're about, with
+   no close button. Also a status line's look when a whole step failed (see status.js). */
+.warning-block {
+  max-width: 560px;
+  margin: var(--space-4) auto;
+  color: var(--warning);
+  font-size: var(--font-lg);
+  text-align: center;
+}
+
+.warning-block p {
+  margin: 0 0 var(--space-1);
+}
+
 /* A bordered button for actions on a row, like a small macOS push button. */
 button.small {
   padding: 0 var(--space-2);
@@ -177,6 +191,93 @@ button.small {
 
 .sheet .actions {
   justify-content: flex-end;
+}
+
+/* The introduction: one card at a time, a line drawing over a sentence. */
+.intro {
+  width: min(400px, calc(100vw - 2 * var(--space-6)));
+  text-align: center;
+}
+
+.intro-picture {
+  display: flex;
+  justify-content: center;
+  margin: var(--space-2) 0 var(--space-3);
+}
+
+.intro-drawing {
+  width: 160px;
+  height: 100px;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.intro-text {
+  min-height: 3lh;
+  margin: 0;
+  font-size: var(--font-lg);
+}
+
+.intro-dots {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-1-5);
+  margin: var(--space-3) 0 0;
+}
+
+.intro-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.intro-dots span.current {
+  background: var(--muted);
+}
+
+.intro .status {
+  text-align: start;
+}
+
+.intro .intro-skip {
+  margin-inline-end: auto;
+}
+
+/* What a screen shows and what happens next, at its top until "Got it". */
+.guide-card {
+  margin: var(--space-3) 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.guide-card h2 {
+  margin: 0 0 var(--space-1);
+  font-size: var(--font-md);
+}
+
+.guide-card p {
+  margin: var(--space-1) 0;
+}
+
+.guide-card .actions {
+  margin-bottom: 0;
+}
+
+/* The "?" at the right end of a screen's action bar, bringing its guide card back. */
+.help-button {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  margin-inline-start: auto;
+  border-radius: 50%;
+  font-weight: 600;
+  line-height: 1;
 }
 
 /* A thin bar like macOS's. The fill is scaled, not resized, so it glides between updates (see

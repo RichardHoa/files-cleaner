@@ -22,6 +22,9 @@ pub struct Config {
     /// Whether the user wants a notification when the folders are ready:
     /// `None` until they're asked, which is only once.
     pub notifications: Option<bool>,
+    /// The Hugging Face link of the model the user picked to describe
+    /// files (ADR 0009), or `None` for the app's own.
+    pub describing_model: Option<String>,
 }
 
 /// How the files are grouped into Suggested Folders: the `grouping` section,
@@ -59,6 +62,9 @@ pub enum SettingChange {
     SmallestFolder(Option<usize>),
     /// The user's answer when asked about notifications.
     Notifications(bool),
+    /// The Hugging Face link of the model that describes files, or `None`
+    /// for the app's own. Set by the app once the model has passed its check.
+    DescribingModel(Option<String>),
 }
 
 /// Which copy of a Duplicate Group starts out kept.
@@ -115,6 +121,7 @@ struct RawConfig {
     #[serde(default)]
     grouping: RawGrouping,
     notifications: Option<bool>,
+    describing_model: Option<String>,
 }
 
 #[derive(Default, Deserialize)]
@@ -144,12 +151,16 @@ pub fn load_config(text: &str, home: &Path) -> Result<Config, ConfigError> {
     }
 
     let grouping = validate_grouping(&raw.grouping, text)?;
+    if let Some(link) = &raw.describing_model {
+        crate::describing_model_link(link).map_err(|message| error_at(text, 0, link, message))?;
+    }
     Ok(Config {
         home: home.to_path_buf(),
         never_touch,
         default_copy_rule: raw.default_copy_rule,
         grouping,
         notifications: raw.notifications,
+        describing_model: raw.describing_model,
     })
 }
 
@@ -254,6 +265,12 @@ pub fn save_config(
         }
         SettingChange::Notifications(wanted) => {
             object.insert("notifications".into(), (*wanted).into());
+        }
+        SettingChange::DescribingModel(Some(link)) => {
+            object.insert("describingModel".into(), link.as_str().into());
+        }
+        SettingChange::DescribingModel(None) => {
+            object.remove("describingModel");
         }
     }
     let mut saved = serde_json::to_string_pretty(&json).map_err(|e| plain(&e))?;

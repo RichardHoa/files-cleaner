@@ -1,10 +1,18 @@
-// Status lines: a one-line message under an action, red when it's an error.
+// Status lines: a one-line message under an action, red when it's an error, or the orange warning when a
+// whole step failed.
 import { describeError } from "./api.js";
 
 /** Shows `text` in the status line `node`, styled as an error if `isError`. */
 export function showStatus(node, text, isError = false) {
   node.textContent = text;
   node.classList.toggle("error", isError);
+  node.classList.remove("warning-block");
+}
+
+/** Shows `text` in the status line `node`, in place of its progress, as the orange warning: a whole step failed. */
+export function showWarning(node, text) {
+  showStatus(node, text);
+  node.classList.add("warning-block");
 }
 
 /**

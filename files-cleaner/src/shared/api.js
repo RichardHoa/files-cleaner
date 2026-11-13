@@ -94,10 +94,14 @@ export const recentScanRoots = () => invoke("recent_scan_roots");
 /** Takes `scanRoot` off the Recent Scan Roots. */
 export const removeRecentScanRoot = (scanRoot) => invoke("remove_recent_scan_root", { scanRoot });
 
-// The Grouping Models' status is `{ state, downloaded, total, error, models }`, `state` being
-// "notInstalled", "downloading", "paused" or "installed", `downloaded` and `total` in bytes, `error` why the
-// last download failed, or null, and `models` each model's `{ name, size, path }`: its bytes on disk and
-// its file (the partial one while downloading), or null when nothing of it is on disk.
+// The Grouping Models' status is `{ state, downloaded, total, error, models, custom, customError }`, `state`
+// being "notInstalled", "downloading", "paused" or "installed", `downloaded` and `total` in bytes, `error` why
+// the last download failed, or null, and `models` each model's `{ name, size, path }`: its bytes on disk and
+// its file (the partial one while downloading), or null when nothing of it is on disk. `custom` is the model
+// the user picked to describe files (ADR 0009), or null: `{ state, name, link, downloaded, total, sha256,
+// path, inUse }`, `state` being "downloading", "paused", "checking" (describing the sample file) or
+// "installed", and `inUse` whether it describes files now. `customError` says why its download stopped, or
+// why it was refused, or is null.
 
 export const groupingModelsStatus = () => invoke("grouping_models_status");
 
@@ -110,14 +114,33 @@ export const pauseGroupingModels = () => invoke("pause_grouping_models");
 /** Cancels the download, or removes the installed Grouping Models. */
 export const removeGroupingModels = () => invoke("remove_grouping_models");
 
+/**
+ * Starts downloading the describing model at the Hugging Face `link` (to one `.gguf` file), in place of any
+ * picked before, or resumes the stopped one when `link` is null. Rejects, saying why, for a link that isn't to
+ * one public `.gguf` file, or a disk too full for it. Once downloaded it's checked, and used only if it passes.
+ */
+export const downloadDescribingModel = (link = null) => invoke("download_describing_model", { link });
+
+/** Pauses the picked describing model's download. */
+export const pauseDescribingModel = () => invoke("pause_describing_model");
+
+/** Cancels the picked describing model's download, or deletes it; the default describes files again. */
+export const removeDescribingModel = () => invoke("remove_describing_model");
+
+/** Describes files with the picked model if `picked`, or else the default; nothing is downloaded. */
+export const useDescribingModel = (picked) => invoke("use_describing_model", { picked });
+
 /** Calls `onStatus(status)` on every change; resolves to a function that stops listening. */
 export const onGroupingModelsStatus = (onStatus) => events.listen("grouping-models", (event) => onStatus(event.payload));
 
-/** Whether to offer the Grouping Models before Home: until the offer is answered, unless they're installed. */
-export const groupingModelsOfferPending = () => invoke("grouping_models_offer_pending");
+/**
+ * What the user has seen: `{ introductionSeen, dismissedGuides }`, the guide cards named as in onboarding.js.
+ * Nothing is seen until it's saved.
+ */
+export const onboarding = () => invoke("onboarding");
 
-/** Remembers the answer to the first-open offer, "download" or "notNow", so it isn't asked again. */
-export const answerGroupingModelsOffer = (answer) => invoke("answer_grouping_models_offer", { answer });
+/** Remembers what the user has seen, as `onboarding` resolves to it. */
+export const saveOnboarding = (state) => invoke("save_onboarding", { onboarding: state });
 
 // The Suggested Folders are `{ folders, ungrouped, summaries }`: `folders` largest first, each
 // `{ name, files, existing, fixedKind }`, `existing` the matched subfolder's path or null; `ungrouped` the

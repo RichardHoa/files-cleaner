@@ -1,8 +1,8 @@
-//! The Grouping Models on llama.cpp: Qwen2.5-1.5B-Instruct writes the cards
-//! and places the files left out of every folder, and Qwen3-Embedding-0.6B
-//! embeds the cards, on the GPU through Metal on macOS or Vulkan elsewhere,
-//! or on the CPU when there's no usable GPU. File contents never leave the
-//! machine.
+//! The Grouping Models on llama.cpp: Qwen2.5-1.5B-Instruct, or the model
+//! the user picked (ADR 0009), writes the cards and places the files left
+//! out of every folder, and Qwen3-Embedding-0.6B embeds the cards, on the
+//! GPU through Metal on macOS or Vulkan elsewhere, or on the CPU when
+//! there's no usable GPU. File contents never leave the machine.
 
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
@@ -12,11 +12,11 @@ use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
-use llama_cpp_2::model::LlamaModel;
+use llama_cpp_2::model::{LlamaChatMessage, LlamaModel};
 use llama_cpp_2::sampling::LlamaSampler;
 use llama_cpp_2::{list_llama_ggml_backend_devices, LlamaBackendDeviceType};
 
-use crate::card::{parse_card, prompt, prompt_id, Card};
+use crate::card::{self, parse_card, prompt_id, Card, Chat};
 use crate::cluster::Vector;
 use crate::place::{self, Question};
 use crate::read::Content;
@@ -68,6 +68,24 @@ impl LlamaModels {
             self.embedding = Some(load(&self.embedding_path)?);
         }
         Ok(self.embedding.as_ref().expect("just loaded"))
+    }
+
+    /// `chat` in the LLM's own chat template, ready to generate from. A
+    /// model with no chat template, or one llama.cpp doesn't know, isn't a
+    /// chat model it can use.
+    fn format(&mut self, chat: &Chat) -> Result<String, String> {
+        let model = &self.llm()?.model;
+        let template = model
+            .chat_template(None)
+            .map_err(|_| "it has no chat template, so it isn't a chat model".to_string())?;
+        let messages = [("system", chat.system), ("user", chat.user.as_str())]
+            .into_iter()
+            .map(|(role, content)| LlamaChatMessage::new(role.into(), content.into()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        model
+            .apply_chat_template(&template, &messages, true)
+            .map_err(|_| "llama.cpp can't use its chat template".to_string())
     }
 
     /// The LLM's greedy reply to `prompt`, at most `max_new` tokens, and
@@ -133,7 +151,7 @@ impl Models for LlamaModels {
     }
 
     fn card(&mut self, content: &Content) -> Result<Card, String> {
-        let prompt = prompt(content);
+        let prompt = self.format(&card::chat(content))?;
         let (reply, cut) = self.generate(&prompt, MAX_NEW_TOKENS)?;
         let card = parse_card(&reply);
         if trace::enabled() {
@@ -147,7 +165,7 @@ impl Models for LlamaModels {
     }
 
     fn place(&mut self, question: &Question) -> Result<Option<usize>, String> {
-        let prompt = place::prompt(question);
+        let prompt = self.format(&place::chat(question))?;
         let (reply, cut) = self.generate(&prompt, place::MAX_NEW_TOKENS)?;
         let chosen = place::parse(&reply, question);
         if trace::enabled() {
@@ -214,6 +232,34 @@ impl Models for LlamaModels {
             .or(self.embedding.as_ref())
             .map(|loaded| loaded.device.clone())
     }
+}
+
+/// Checks that the GGUF at `path` can describe files: it's loaded and
+/// asked to describe a built-in sample file, and its reply must read as a
+/// description. The error says why not, in words to show the user.
+pub fn check_describing_model(path: &Path) -> Result<(), String> {
+    let mut models = LlamaModels::new(path, path);
+    models
+        .llm()
+        .map_err(|e| format!("llama.cpp couldn't load it ({e})"))?;
+    let sample = Content {
+        name: "invoice march 2024".to_string(),
+        file_name: "Invoice-March-2024.txt".to_string(),
+        body: "INVOICE #1042\nGreenleaf Web Design\nBill to: Riverside Bakery\nDate: 14 March 2024\n\n\
+               Website redesign, 12 hours at $60: $720\nHosting, one year: $120\nTotal due: $840\n\n\
+               Please pay within 30 days."
+            .to_string(),
+        scanned: false,
+    };
+    let prompt = models.format(&card::chat(&sample))?;
+    let (reply, _) = models.generate(&prompt, MAX_NEW_TOKENS)?;
+    if parse_card(&reply).summary.is_empty() {
+        let start: String = reply.trim().chars().take(80).collect();
+        return Err(format!(
+            "its description of a sample file couldn't be read (it replied \"{start}\")"
+        ));
+    }
+    Ok(())
 }
 
 /// llama.cpp, set up once per process.

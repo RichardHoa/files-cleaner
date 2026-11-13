@@ -96,8 +96,8 @@ pub fn prompt_id() -> String {
     id.to_hex()[..8].to_string()
 }
 
-/// The card prompt in Qwen's chat template, written out.
-pub fn prompt(content: &Content) -> String {
+/// The card prompt as chat messages, for the model's own chat template.
+pub fn chat(content: &Content) -> Chat {
     let body = if content.body.is_empty() {
         "(none: only the file name is known; leave topic empty unless the name makes it obvious)"
             .to_string()
@@ -109,5 +109,24 @@ pub fn prompt(content: &Content) -> String {
          Start of the file:\n\"\"\"\n{body}\n\"\"\"\n\n{INSTRUCTIONS}",
         content.name
     );
-    format!("<|im_start|>system\n{SYSTEM}<|im_end|>\n<|im_start|>user\n{user}<|im_end|>\n<|im_start|>assistant\n")
+    Chat {
+        system: SYSTEM,
+        user,
+    }
+}
+
+/// A prompt as chat messages, for the model to put in its own chat template.
+pub struct Chat {
+    pub system: &'static str,
+    pub user: String,
+}
+
+impl Chat {
+    /// The messages in Qwen's chat template (ChatML), written out.
+    pub fn chatml(&self) -> String {
+        format!(
+            "<|im_start|>system\n{}<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n",
+            self.system, self.user
+        )
+    }
 }

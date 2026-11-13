@@ -7,7 +7,8 @@ import { describeError, openSessionFile, pathSeparator, redoOperations, retryOpe
 import { el } from "../../shared/dom.js";
 import { drawMore, revealMenu } from "../../shared/plan/file-list.js";
 import { count, formatDate, formatSize, plural, splitPath } from "../../shared/format.js";
-import { describeSummary } from "../../shared/outcomes.js";
+import { describeSummary, describeWarning, warningBlock } from "../../shared/outcomes.js";
+import { guide } from "../../shared/onboarding/guide-card.js";
 import { tickState, toggleAll } from "../../shared/plan/plan-selection.js";
 import { PAGE_SIZE, fileName, folderLabel, paging, selectedFile, visibleFiles } from "../../shared/plan/plan-view.js";
 import { actionFor, groupByState, paneSentence, sessionHeading, sessionLead, whereNow } from "./session-view.js";
@@ -57,19 +58,23 @@ const groupAction = (group) => group.operations.map(actionOf).find(Boolean) ?? n
 
 const SORT_NAMES = { size: "biggest first", name: "by name", folder: "by folder" };
 
-export function render(root, nav, sessionId, from, message) {
+export function render(root, nav, sessionId, from, result) {
   const fromHistory = from?.page != null;
   const back = el("button", { type: "button" }, fromHistory ? "History" : "Home");
   back.addEventListener("click", () => (fromHistory ? nav.history(from.page) : nav.home()));
   const status = el("p", { className: "status" });
   const content = el("div");
-  root.append(el("div", { className: "actions" }, back), content);
+  const { card, help } = guide("results");
+  root.append(el("div", { className: "actions" }, back, help), card, content);
 
   // Kept when the Session is drawn again after an action.
   const view = { group: null, query: "", sort: "size", limit: PAGE_SIZE, selectedId: null };
+  // The last action's `{ summary, action, done }`, drawn as its status line and, if it left files, the warning.
+  let last = null;
 
-  /** Draws the Session afresh, with `text` (the last action's result) in the status line. */
-  async function load(text) {
+  /** Draws the Session afresh, with `actionResult` (the last action's, if any) in the status line and the warning. */
+  async function load(actionResult) {
+    last = actionResult;
     let details;
     try {
       details = await sessionDetails(sessionId);
@@ -78,11 +83,11 @@ export function render(root, nav, sessionId, from, message) {
       return;
     }
     draw(details);
-    showStatus(status, text ?? "");
+    showStatus(status, last ? describeSummary(last.summary, last.done) : "");
   }
 
-  /** Runs `call` with every control disabled and `label` in the status line, then draws its result. */
-  async function act(label, call, done) {
+  /** Runs `call`, the action `action` names in ACTIONS, with every control disabled and `label` in the status line, then draws its result. */
+  async function act(label, call, action) {
     const enabled = [...root.querySelectorAll("button, input, select")].filter((c) => !c.disabled);
     for (const control of enabled) control.disabled = true;
     showStatus(status, label);
@@ -94,7 +99,7 @@ export function render(root, nav, sessionId, from, message) {
       showStatus(status, describeError(error), true);
       return;
     }
-    await load(describeSummary(result, done));
+    await load({ summary: result, action, done: ACTIONS[action].done });
     // The drawn controls are new; this brings back the ones outside them, like Back.
     for (const control of enabled) control.disabled = false;
   }
@@ -109,7 +114,7 @@ export function render(root, nav, sessionId, from, message) {
 
     const putAll = el("button", { type: "button", className: "primary" }, "Put all back");
     putAll.hidden = !groups.some((g) => g.group === "moved" || g.group === "trashed");
-    putAll.addEventListener("click", () => act("Putting back…", () => undo(sessionId), "put back"));
+    putAll.addEventListener("click", () => act("Putting back…", () => undo(sessionId), "undo"));
     const header = el(
       "header",
       { className: "plan-head" },
@@ -123,8 +128,11 @@ export function render(root, nav, sessionId, from, message) {
       el("div", { className: "actions" }, putAll),
     );
 
+    const warningText = last && describeWarning(last.summary, { action: last.action, done: last.done, separator: pathSeparator });
+    const warning = warningText ? warningBlock(warningText, () => showLeft()) : "";
+
     if (!group) {
-      content.replaceChildren(header, status, el("p", { className: "muted" }, "This Session has no files."));
+      content.replaceChildren(header, status, warning, el("p", { className: "muted" }, "This Session has no files."));
       return;
     }
 
@@ -206,7 +214,7 @@ export function render(root, nav, sessionId, from, message) {
     bulk.addEventListener("click", () => {
       const action = groupAction(group);
       const ids = [...ticked];
-      act(action.busy, () => action.call(sessionId, ids), action.done);
+      act(action.busy, () => action.call(sessionId, ids), actionFor(group.operations.find(actionOf)));
     });
     const bulkBar = el("div", { className: "session-bulk" }, bulk);
     const pane = el("aside", { className: "plan-pane", ariaLabel: "Selected file" });
@@ -334,7 +342,7 @@ export function render(root, nav, sessionId, from, message) {
       }
       if (action) {
         const one = el("button", { type: "button" }, action.single);
-        one.addEventListener("click", () => act(action.busy, () => action.call(sessionId, [op.id]), action.done));
+        one.addEventListener("click", () => act(action.busy, () => action.call(sessionId, [op.id]), actionFor(op)));
         buttons.push(one);
       }
       pane.replaceChildren(
@@ -345,29 +353,44 @@ export function render(root, nav, sessionId, from, message) {
       );
     }
 
+    /** For the warning's "Show which files": lists the group holding the first file the last action left, with that file selected. */
+    function showLeft() {
+      const left = new Set(["unrecoverable", "failed", "skipped"].flatMap((kind) => last.summary[kind].map((o) => o.operationId)));
+      const g = groups.find((candidate) => candidate.operations.some((op) => left.has(op.id)));
+      if (!g) return;
+      group = g;
+      view.group = g.group;
+      view.query = search.value = "";
+      ticked = new Set();
+      const files = visibleFiles(g.operations, view);
+      const at = files.findIndex((op) => left.has(op.id));
+      view.selectedId = files[at].id;
+      view.limit = Math.max(PAGE_SIZE, at + 1);
+      drawCards();
+      drawList();
+      listSection.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    const listSection = el(
+      "section",
+      { className: "plan-list" },
+      listHeading,
+      el("div", { className: "filters" }, search, sort, selectAllLabel),
+      list,
+      more,
+      bulkBar,
+      menu.node,
+    );
     content.replaceChildren(
       header,
       status,
+      warning,
       el("div", { className: "plan-cards" }, ...cards.map((c) => c.node)),
-      el(
-        "div",
-        { className: "plan-split" },
-        el(
-          "section",
-          { className: "plan-list" },
-          listHeading,
-          el("div", { className: "filters" }, search, sort, selectAllLabel),
-          list,
-          more,
-          bulkBar,
-          menu.node,
-        ),
-        pane,
-      ),
+      el("div", { className: "plan-split" }, listSection, pane),
     );
     drawCards();
     drawList();
   }
 
-  load(message);
+  load(result);
 }
