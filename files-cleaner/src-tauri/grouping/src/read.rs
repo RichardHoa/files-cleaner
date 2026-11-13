@@ -20,7 +20,7 @@ pub struct Content {
     /// What's inside, at most `MAX_CHARS`; empty when read by name only.
     pub body: String,
     /// A PDF with no text layer, such as a scan, that OCR couldn't read
-    /// either: OCR's languages aren't downloaded, or its pages are pictures.
+    /// either: OCR's languages aren't bundled, or its pages are pictures.
     pub scanned: bool,
 }
 

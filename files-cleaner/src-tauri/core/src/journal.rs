@@ -182,11 +182,20 @@ impl Journal {
         unreachable!("there is always another Session ID to try")
     }
 
-    /// Reopens an existing Session's Journal to add to it.
+    /// Reopens an existing Session's Journal to add to it. A last line cut
+    /// short by a crash, which `read` ignores, is dropped first, so the next
+    /// record starts a line of its own rather than finishing it.
     pub fn reopen(journal_dir: &Path, id: &str) -> io::Result<Journal> {
-        let file = OpenOptions::new()
-            .append(true)
-            .open(path(journal_dir, id))?;
+        let path = path(journal_dir, id);
+        let bytes = fs::read(&path)?;
+        let whole_lines = bytes.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+        if whole_lines < bytes.len() {
+            // Not in append mode, which Windows won't let shorten a file.
+            let file = OpenOptions::new().write(true).open(&path)?;
+            file.set_len(whole_lines as u64)?;
+            file.sync_data()?;
+        }
+        let file = OpenOptions::new().append(true).open(path)?;
         Ok(Journal { file })
     }
 

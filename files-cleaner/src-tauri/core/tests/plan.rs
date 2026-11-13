@@ -4,7 +4,10 @@ use std::fs;
 use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
 
-use common::{build_plan, build_plan_with_progress, config, empty_config, scan_root, write};
+use common::{
+    build_plan, build_plan_with_progress, config, empty_config, scan_root, symlink, write,
+};
+
 use files_cleaner_core::{duplicate_groups, scan, OperationKind, Plan, Reason};
 
 /// Sets `path`'s modified date to `secs` after the epoch.
@@ -303,4 +306,39 @@ fn one_copy_missing_its_created_date_skips_that_tie_break_for_the_whole_group() 
         ["a/x/long.txt", "b/mid.txt"],
         "the shortest path is kept"
     );
+}
+
+#[test]
+#[cfg(unix)]
+fn hard_links_to_the_same_data_are_one_file_not_duplicates() {
+    let dir = scan_root();
+    let original = write(dir.path(), "report.pdf", "same contents");
+    fs::hard_link(&original, dir.path().join("linked.pdf")).unwrap();
+
+    assert!(trashed(&plan_for(dir.path())).is_empty());
+}
+
+#[test]
+#[cfg(unix)]
+fn a_hard_link_still_counts_once_beside_a_real_copy() {
+    let dir = scan_root();
+    let original = write(dir.path(), "report.pdf", "same contents");
+    fs::hard_link(&original, dir.path().join("linked.pdf")).unwrap();
+    let copy = write(dir.path(), "copy.pdf", "same contents");
+    set_modified(&original, 5_000);
+    set_modified(&copy, 4_000);
+
+    assert_eq!(trashed(&plan_for(dir.path())), ["copy.pdf"]);
+}
+
+#[test]
+fn a_symlink_is_never_a_duplicate_of_the_file_it_points_to() {
+    let dir = scan_root();
+    write(dir.path(), "report.pdf", "same contents");
+    symlink(
+        dir.path().join("report.pdf"),
+        dir.path().join("shortcut.pdf"),
+    );
+
+    assert!(trashed(&plan_for(dir.path())).is_empty());
 }

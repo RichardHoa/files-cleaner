@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+mod downloads;
 mod models;
-mod ocr_languages;
 
 use files_cleaner_core::{
     self as core, Config, DuplicateChoice, DuplicateGroup, DuplicateProgress, Plan, RecentScanRoot,
@@ -33,8 +33,6 @@ const RECENT_FILE_NAME: &str = "recent-scan-roots.json";
 const MODELS_FOLDER_NAME: &str = "grouping-models";
 /// What the user has seen of the introduction and the guide cards, inside the app data folder.
 const ONBOARDING_FILE_NAME: &str = "onboarding.json";
-/// OCR's language files, inside the app data folder.
-const OCR_LANGUAGES_FOLDER_NAME: &str = "ocr-languages";
 /// The cards the Grouping Models wrote, inside the app data folder.
 const CARDS_FOLDER_NAME: &str = "grouping-cards";
 /// How long reading a file takes on this computer, inside the app data folder.
@@ -46,6 +44,8 @@ const PDFIUM_LIBRARY: &str = "pdfium/libpdfium.dylib";
 const PDFIUM_LIBRARY: &str = "pdfium/pdfium.dll";
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 const PDFIUM_LIBRARY: &str = "pdfium/libpdfium.so";
+/// OCR's language files, bundled by the build script, inside the app's resources.
+const TESSDATA_FOLDER: &str = "tessdata";
 
 /// The latest scan and, once found and built, its Duplicate Groups and its
 /// Plan, kept here so the UI doesn't send them back. One lock holds them
@@ -176,7 +176,9 @@ fn reset_settings(app: AppHandle) -> Result<LoadedConfig, CommandError> {
 fn change_setting(app: AppHandle, change: SettingChange) -> Result<LoadedConfig, CommandError> {
     // The describing model is switched only once it has passed its check (ADR 0009).
     if matches!(change, SettingChange::DescribingModel(_)) {
-        return Err(CommandError::new("Pick the describing model under Advanced in Settings."));
+        return Err(CommandError::new(
+            "Pick the describing model under Advanced in Settings.",
+        ));
     }
     save_setting(&app, &change)
 }
@@ -337,8 +339,10 @@ async fn retry_operations(
     operation_ids: Vec<String>,
 ) -> Result<Summary, CommandError> {
     let journal_dir = journal_dir(&app)?;
-    blocking(move || core::retry_operations(&session_id, &operation_ids, &journal_dir, &SystemTrash))
-        .await
+    blocking(move || {
+        core::retry_operations(&session_id, &operation_ids, &journal_dir, &SystemTrash)
+    })
+    .await
 }
 
 /// A past Session and each of its Operations, for the Session screen.
@@ -415,11 +419,12 @@ fn without_copies(latest: &Latest) -> Result<ScanResult, CommandError> {
     })
 }
 
-/// PDFium as bundled with the app, if it's there; without it, PDFs are
-/// read by name.
-fn pdfium_library(app: &AppHandle) -> Option<PathBuf> {
-    let path = app.path().resource_dir().ok()?.join(PDFIUM_LIBRARY);
-    path.is_file().then_some(path)
+/// The file or folder at `path` in the app's resources, if it's there:
+/// PDFium (without it, PDFs are read by name) or OCR's language files
+/// (without them, scanned PDFs are).
+fn bundled(app: &AppHandle, path: &str) -> Option<PathBuf> {
+    let path = app.path().resource_dir().ok()?.join(path);
+    path.exists().then_some(path)
 }
 
 /// What an analysis found, for the review screen.
@@ -457,8 +462,8 @@ async fn analyse_loose_files(
         .files(config.describing_model.as_deref())
         .map_err(CommandError::new)?;
     let store = CardStore::open(app_data_path(&app, CARDS_FOLDER_NAME)?);
-    let pdfium = pdfium_library(&app);
-    let tessdata = ocr_languages::installed(&app_data_path(&app, OCR_LANGUAGES_FOLDER_NAME)?);
+    let pdfium = bundled(&app, PDFIUM_LIBRARY);
+    let tessdata = bundled(&app, TESSDATA_FOLDER);
     let analysis = blocking(move || {
         // Dropped when the analysis ends, freeing the models' memory.
         let mut models = LlamaModels::new(&llm, &embedding);
@@ -566,8 +571,13 @@ fn open_file(app: AppHandle, latest: State<'_, Latest>, path: PathBuf) -> Result
 /// of a past Session is now. Like `open_file`, it only opens a path the app
 /// knows of: none while the item is in the System Trash or is gone for good.
 #[tauri::command]
-fn open_session_file(app: AppHandle, session_id: String, operation_id: String) -> Result<(), CommandError> {
-    let details = core::session_details(&session_id, &journal_dir(&app)?).map_err(CommandError::new)?;
+fn open_session_file(
+    app: AppHandle,
+    session_id: String,
+    operation_id: String,
+) -> Result<(), CommandError> {
+    let details =
+        core::session_details(&session_id, &journal_dir(&app)?).map_err(CommandError::new)?;
     let op = details
         .operations
         .into_iter()
@@ -736,9 +746,7 @@ pub fn run() {
         .manage(Latest::default())
         .manage(Analysing::default())
         .setup(|app| {
-            let data = app.path().app_data_dir()?;
-            ocr_languages::install(data.join(OCR_LANGUAGES_FOLDER_NAME));
-            let folder = data.join(MODELS_FOLDER_NAME);
+            let folder = app.path().app_data_dir()?.join(MODELS_FOLDER_NAME);
             app.manage(Arc::new(GroupingModels::new(app.handle().clone(), folder)));
             Ok(())
         })

@@ -2,6 +2,48 @@
 
 A desktop app for macOS, Windows and Linux that walks you through cleaning a folder: scan it, then review one screen that removes exact duplicates and sorts what's left into Suggested Folders, read in the background while you go through the duplicates. The duplicates and the folders are approved with a button each, and each runs as its own Session, which you can undo whole or in part. Nothing is ever permanently deleted. There are no Rules (ADR 0008).
 
+## Install
+
+Download the installer for your OS from [GitHub Releases](https://github.com/RichardHoa/files-cleaner/releases). Your OS will warn you the first time you open it. That's expected: the app isn't signed with a paid Apple or Windows certificate, so the OS can't vouch for who made it.
+
+### macOS
+
+Open the `.dmg` and drag files-cleaner into Applications. When you first open it, macOS says it "can't be verified" and offers only to move it to the Trash. Click **Done**, then:
+
+1. Open **System Settings → Privacy & Security**.
+2. Scroll down to the message about files-cleaner and click **Open Anyway**.
+3. Confirm with your password, then click **Open**.
+
+On macOS 15 and later, right-click → Open no longer gets past this warning. If **Open Anyway** doesn't appear, run this in Terminal, then open the app again:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/files-cleaner.app
+```
+
+### Windows
+
+Run the `.msi` or the `-setup.exe`. SmartScreen says "Windows protected your PC": click **More info**, then **Run anyway**.
+
+### Linux
+
+```sh
+sudo apt install ./files-cleaner_*.deb        # Debian, Ubuntu
+sudo dnf install ./files-cleaner-*.rpm        # Fedora, RHEL
+chmod +x files-cleaner_*.AppImage && ./files-cleaner_*.AppImage   # any distro
+```
+
+## Privacy
+
+The app works on your computer. The only thing it ever downloads is the two Grouping Models, from Hugging Face, and only after you agree; a model you pick yourself in Settings also comes from Hugging Face. Opening the app makes no network request, and nothing about you or your files is sent anywhere.
+
+You can check this in the code:
+
+- [`src/downloads.rs`](files-cleaner/src-tauri/src/downloads.rs) is the app's only network code. Every request, and every redirect, is checked against the allowed hosts in [`core/src/download_hosts.rs`](files-cleaner/src-tauri/core/src/download_hosts.rs): HTTPS only, starting at `huggingface.co`, with redirects only to Hugging Face's own hosts. A test ([`tests/network.rs`](files-cleaner/src-tauri/tests/network.rs)) fails if any other source file uses an HTTP client or a socket.
+- The window's content security policy in [`tauri.conf.json`](files-cleaner/src-tauri/tauri.conf.json) (`app.security.csp`) lets the UI talk only to the app itself, so it can't reach the network either.
+- The build script, [`build.rs`](files-cleaner/src-tauri/build.rs), downloads PDFium and the OCR language files when the app is built, never when it runs. Each is pinned by SHA-256 and ships inside the installer.
+
+The app icon credit in Settings opens the author's page on Flaticon in your browser, only when you click it. On Windows, the installer downloads Microsoft's WebView2 if your PC doesn't have it yet.
+
 ## Tech stack
 
 - **Tauri 2**: desktop shell (`files-cleaner/src-tauri`), with the dialog and opener plugins
@@ -69,29 +111,7 @@ cargo build --release -p files-cleaner-core --bin bench-scan
 
 ## things to improve
 
-- Warning, if there is a failture, warning, display a medium, oragne text in the middle of the screen to let the user know sometime has gone wrong, especially with the trash
-
-- In the setting, simplify the language, especially the "Grouping", let user adjust the level, not the number directly, user does not care about the number. For other heading make it's intuitive and clear 
-
-- Give a nice introduction to user, when they open the app for the first time introduce the app function to them, ask them to download the model, try to visualize instead of just using wall of words
-
-- Have a guide to guide user thorugh every step, what does each section mean and what they can expeect, especially for the first time they come to the app
-
-- have the option for user to pick the model rather than the defauult one (they provide the hugging face url)
-
-
-
-
 - press space to preview the file immediately (just like macos)
 
-- include installation step so user are not scared when seeing warning (do this in readme)
-
-- We are a local app, the only chance we download anything is to download the models, make it clear we only do that, and show it by code, not words
-
-
-
-- Testing most important functions with edge cases
-
-- keep the dependency barebone, delete any dependency we are not using
-
+- User can trash file seprately in the suggested folder and move separately, they can choose to move only some folder (overall: more power to do what they want)
 

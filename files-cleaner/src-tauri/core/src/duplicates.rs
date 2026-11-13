@@ -3,7 +3,7 @@
 //! start and end, then a full BLAKE3 hash, so most files are never read.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::hash::Hash;
 use std::io::{self, Read, Seek, SeekFrom};
@@ -114,7 +114,11 @@ pub fn find(
         .collect();
     let mut progress = Progress::new(on_progress);
 
-    let same_size = split(candidates, |e| Some(e.size));
+    let same_size: Vec<Vec<&ScanEntry>> = split(candidates, |e| Some(e.size))
+        .into_iter()
+        .map(one_name_per_file)
+        .filter(|group| group.len() > 1)
+        .collect();
     progress.start(
         DuplicatePhase::Comparing,
         same_size.iter().map(|group| group.len() as u64).sum(),
@@ -215,6 +219,30 @@ fn split<K: Hash + Eq>(
         .into_values()
         .filter(|group| group.len() > 1)
         .collect()
+}
+
+/// `entries` with each file listed under only one name: hard links to the
+/// same data are one file, and trashing one name frees nothing. The name
+/// kept is the first alphabetically.
+fn one_name_per_file(mut entries: Vec<&ScanEntry>) -> Vec<&ScanEntry> {
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    let mut seen = HashSet::new();
+    entries.retain(|e| file_id(&e.path).is_none_or(|id| seen.insert(id)));
+    entries
+}
+
+/// Which file `path` names, if it has other names (hard links). Windows
+/// can't tell in stable Rust, so there each name counts as its own file.
+#[cfg(unix)]
+fn file_id(path: &Path) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = std::fs::symlink_metadata(path).ok()?;
+    (metadata.nlink() > 1).then(|| (metadata.dev(), metadata.ino()))
+}
+
+#[cfg(not(unix))]
+fn file_id(_path: &Path) -> Option<(u64, u64)> {
+    None
 }
 
 /// Which of two copies `rule` prefers (sorts first). Dates compare by modified

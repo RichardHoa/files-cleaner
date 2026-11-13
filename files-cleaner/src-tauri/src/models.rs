@@ -3,10 +3,11 @@
 //! folder in the app data folder. The download runs on its own thread, so
 //! the user can scan and clean meanwhile.
 //!
-//! Each model downloads into `<file>.part`, resumed with an HTTP Range
-//! request after a pause or an interruption, and is moved to `<file>` only
-//! once its SHA-256 matches. So a model is installed exactly when `<file>`
-//! exists, and the state can always be read from the folder.
+//! Each model downloads into `<file>.part` through `downloads`, the app's
+//! only network access, resumed with an HTTP Range request after a pause or
+//! an interruption, and is moved to `<file>` only once its SHA-256 matches.
+//! So a model is installed exactly when `<file>` exists, and the state can
+//! always be read from the folder.
 //!
 //! The user may also pick a model to describe files in place of the first
 //! (ADR 0009), linked from Hugging Face. It downloads the same way into
@@ -14,8 +15,8 @@
 //! place only once it has described a sample file; its SHA-256 is shown,
 //! never checked. At most one is kept, and the default stays on disk.
 
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::fs::{self, File};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
@@ -27,13 +28,13 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter};
 
+use crate::downloads;
+
 /// The event the download's status is sent on, to every window.
 pub const STATUS_EVENT: &str = "grouping-models";
 
 /// How often, at most, the status is sent while downloading.
 const STATUS_EVERY: Duration = Duration::from_millis(250);
-/// A connection that sends nothing for this long fails, so the user can resume.
-const READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// One model file, pinned at a fixed repository revision, never a branch.
 struct Model {
@@ -466,7 +467,7 @@ impl GroupingModels {
                 }
                 let parsed = core::describing_model_link(&link)?;
                 Source {
-                    size: remote_size(&parsed.url)?,
+                    size: downloads::remote_size(&parsed.url)?,
                     link: link.trim().to_string(),
                     url: parsed.url,
                     file_name: parsed.file_name,
@@ -750,96 +751,15 @@ fn fetch(
     let failed = |e: &dyn std::fmt::Display| {
         Stopped::Failed(format!("Downloading the {} failed: {e}", target.role))
     };
-    let partial = &target.partial;
-    let mut offset = fs::metadata(partial).map(|m| m.len()).unwrap_or(0);
-    if offset > target.size {
-        fs::remove_file(partial).map_err(|e| failed(&e))?;
-        offset = 0;
+    let stop = || asked.load(Ordering::SeqCst) != RUN;
+    match downloads::fetch(target.url, target.size, &target.partial, &stop, progress) {
+        Ok(downloads::Fetched::Complete) => {}
+        Ok(downloads::Fetched::Stopped) => return Err(Stopped::Asked),
+        Err(reason) => return Err(failed(&reason)),
     }
-    if offset < target.size {
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .timeout_connect(Some(READ_TIMEOUT))
-            .timeout_per_read(Some(READ_TIMEOUT))
-            .http_status_as_error(false)
-            .build()
-            .into();
-        let response = agent
-            .get(target.url)
-            .header("Range", format!("bytes={offset}-"))
-            .call()
-            .map_err(|e| failed(&e))?;
-        let resumed = match response.status().as_u16() {
-            206 => {
-                let range = response
-                    .headers()
-                    .get("content-range")
-                    .and_then(|v| v.to_str().ok());
-                if !range.is_some_and(|range| range.starts_with(&format!("bytes {offset}-"))) {
-                    return Err(failed(&"the server sent the wrong part of the file"));
-                }
-                true
-            }
-            // The server ignored the range: start again.
-            200 => false,
-            code => return Err(failed(&format!("the server answered {code}"))),
-        };
-        let mut out = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .append(resumed)
-            .truncate(!resumed)
-            .open(partial)
-            .map_err(|e| failed(&e))?;
-        let mut body = response.into_body().into_reader();
-        let mut buffer = vec![0; 256 * 1024];
-        loop {
-            if asked.load(Ordering::SeqCst) != RUN {
-                return Err(Stopped::Asked);
-            }
-            let read = body.read(&mut buffer).map_err(|e| failed(&e))?;
-            if read == 0 {
-                break;
-            }
-            out.write_all(&buffer[..read]).map_err(|e| failed(&e))?;
-            progress();
-        }
-        out.sync_all().map_err(|e| failed(&e))?;
-    }
-    if fs::metadata(partial).map_err(|e| failed(&e))?.len() != target.size {
-        // A wrong file is never resumed: the next try starts again.
-        let _ = fs::remove_file(partial);
-        return Err(failed(&"the file came out the wrong size; try again"));
-    }
-    sha256(partial, asked)
+    sha256(&target.partial, asked)
         .map_err(|e| failed(&e))?
         .ok_or(Stopped::Asked)
-}
-
-/// The size of the file at the Hugging Face download link `url`, or why it
-/// can't be downloaded without a login.
-fn remote_size(url: &str) -> Result<u64, String> {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_connect(Some(READ_TIMEOUT))
-        .timeout_per_read(Some(READ_TIMEOUT))
-        .http_status_as_error(false)
-        .build()
-        .into();
-    let response = agent
-        .head(url)
-        .call()
-        .map_err(|e| format!("Couldn't reach Hugging Face: {e}"))?;
-    match response.status().as_u16() {
-        200 => response
-            .headers()
-            .get("content-length")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse().ok())
-            .ok_or_else(|| "Hugging Face didn't say how big the file is.".to_string()),
-        // Gated and private models, and repos that don't exist, all ask for a login.
-        401 | 403 => Err("This model needs a Hugging Face login; pick a public one.".to_string()),
-        404 => Err("Hugging Face has no file at that link.".to_string()),
-        code => Err(format!("Hugging Face answered {code}.")),
-    }
 }
 
 /// The partial file `file` downloads into.
