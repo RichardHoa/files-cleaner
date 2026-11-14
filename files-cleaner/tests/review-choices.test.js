@@ -11,6 +11,7 @@ import {
   mergeFolder,
   moveFile,
   moveToOtherFolder,
+  partChoices,
   planChoices,
   planDuplicates,
   removeFolder,
@@ -219,4 +220,40 @@ test("a folder counts only the files going into it, and is trashed once every fi
   folder.files.set("/d/c.pdf", "inFolder");
   folder.choice = "trashAll";
   assert.deepEqual(folderTally(folder), { going: 0, trashed: true });
+});
+
+test("a folder's Move sends only the files going into it, and its Trash only those marked Trash and not yet trashed", () => {
+  const [labs] = initialChoices([{ name: "Labs", files: ["/d/a.pdf", "/d/b.pdf", "/d/c.pdf", "/d/e.pdf"], existing: null }]);
+  labs.files.set("/d/b.pdf", "trash");
+  labs.files.set("/d/c.pdf", "takeOut");
+  labs.files.set("/d/e.pdf", "trash");
+  const ran = new Set(["/d/e.pdf"]);
+  assert.deepEqual(partChoices(labs, "move", ran), [{ name: "Labs", choice: { type: "createHere" }, files: [["/d/a.pdf", "inFolder"]] }]);
+  assert.deepEqual(partChoices(labs, "trash", ran), [{ name: "Labs", choice: { type: "trashAll" }, files: [["/d/b.pdf", "inFolder"]] }]);
+});
+
+test("once a folder's moves ran, the rest of the Plan has only its trashes left, and lists what already left", () => {
+  const [labs, ielts] = initialChoices([
+    { name: "Labs", files: ["/d/a.pdf", "/d/b.pdf"], existing: null },
+    { name: "IELTS", files: ["/d/c.pdf"], existing: null },
+  ]);
+  labs.files.set("/d/b.pdf", "trash");
+  labs.moved = true;
+  const left = new LeftFiles(["/d/e.pdf", "/d/f.pdf"]);
+  left.trashed.add("/d/e.pdf").add("/d/f.pdf");
+  const ran = new Set(["/d/a.pdf", "/d/f.pdf", "/d/x/copy.pdf"]);
+  assert.deepEqual(planChoices([labs, ielts], left, ran), [
+    { name: "Labs", choice: { type: "trashAll" }, files: [["/d/b.pdf", "inFolder"]] },
+    { name: "IELTS", choice: { type: "createHere" }, files: [["/d/c.pdf", "inFolder"]] },
+    { name: "Left where they are", choice: { type: "trashAll" }, files: [["/d/e.pdf", "inFolder"]] },
+    {
+      name: "Already run",
+      choice: { type: "trashAll" },
+      files: [
+        ["/d/a.pdf", "inFolder"],
+        ["/d/f.pdf", "inFolder"],
+        ["/d/x/copy.pdf", "inFolder"],
+      ],
+    },
+  ]);
 });

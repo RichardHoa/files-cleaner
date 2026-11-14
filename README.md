@@ -111,7 +111,5 @@ cargo build --release -p files-cleaner-core --bin bench-scan
 
 ## things to improve
 
-- press space to preview the file immediately (just like macos)
-
-- User can trash file seprately in the suggested folder and move separately, they can choose to move only some folder (overall: more power to do what they want)
+- Proper JS doc for the project
 
