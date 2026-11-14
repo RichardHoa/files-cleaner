@@ -5,10 +5,15 @@
 // or "trashAll"; each of its files is "inFolder" (goes wherever the folder's choice sends it), "trash" or
 // "takeOut". The user can also add a folder, merge one into another, or remove one. The files left where they
 // are stay there, unless the user trashes one or moves it to a folder, suggested or any other on disk.
+// A folder's moves and its trashes, and the trashes among the files left where they are, can each be run on
+// their own (ADR 0010): the files already run are kept in a Set `ran`, and a folder whose moves ran holds
+// what that did in `moved`.
 import { plural, splitPath } from "../../shared/format.js";
 
 /** What the Plan calls the files trashed from those left where they are. */
 const LEFT_NAME = "Left where they are";
+/** What the Plan calls the files already moved or trashed by a part run on its own. */
+const RAN_NAME = "Already run";
 
 /** The files left where they are, and in `trashed` those of them the user trashes. A file that leaves is no longer trashed. */
 export class LeftFiles extends Set {
@@ -151,6 +156,7 @@ export function initialChoices(folders) {
     choice: folder.existing ? "addTo" : "createHere",
     elsewhere: null,
     files: new Map(folder.files.map((path) => [path, "inFolder"])),
+    moved: null,
   }));
 }
 
@@ -192,25 +198,29 @@ function fileFate(choice, path, separator) {
 
 /**
  * `{ moved, trashed }`: how many files of all `choices` go into a folder, and how many are trashed, those
- * trashed from `left` and the copies `duplicates` trash included.
+ * trashed from `left` and the copies `duplicates` trash included. Files in `ran`, already run, and the
+ * moves of a folder whose moves ran, aren't counted.
  */
-export function totals(choices, left, separator, duplicates = []) {
-  const sum = { moved: 0, trashed: left.trashed.size + duplicates.reduce((n, duplicate) => n + trashedCopies(duplicate), 0) };
+export function totals(choices, left, separator, duplicates = [], ran = new Set()) {
+  const leftTrashed = [...left.trashed].filter((path) => !ran.has(path)).length;
+  const sum = { moved: 0, trashed: leftTrashed + duplicates.reduce((n, duplicate) => n + trashedCopies(duplicate), 0) };
   for (const choice of choices) {
     for (const path of choice.files.keys()) {
+      if (ran.has(path)) continue;
       const fate = fileFate(choice, path, separator);
-      if (fate === "move") sum.moved += 1;
+      if (fate === "move" && !choice.moved) sum.moved += 1;
       if (fate === "trash") sum.trashed += 1;
     }
   }
   return sum;
 }
 
-/** What the review's `{ heading, button }` say about `totals`. */
-export function describeChange({ moved, trashed }) {
+/** What the review's `{ heading, button }` say about `totals`, and about `emptied`, the ticked Emptied Folders, when they're all that's left. */
+export function describeChange({ moved, trashed }, emptied = 0) {
   if (moved > 0 && trashed > 0) return { heading: `${plural(moved, "file")} will move, ${trashed} will be trashed`, button: `Move ${moved}, trash ${trashed}` };
   if (moved > 0) return { heading: `${plural(moved, "file")} will move`, button: `Move ${plural(moved, "file")}` };
   if (trashed > 0) return { heading: `${plural(trashed, "file")} will be trashed`, button: `Trash ${plural(trashed, "file")}` };
+  if (emptied > 0) return { heading: `${plural(emptied, "empty folder")} will be trashed`, button: `Trash ${plural(emptied, "empty folder")}` };
   return { heading: "Nothing will change", button: "Nothing to move" };
 }
 
@@ -248,29 +258,57 @@ export function moveToOtherFolder(choices, left, paths, folder, separator) {
   if (moving.length === 0) return null;
   // A Disk Root has no name of its own, and a Suggested Folder needs one.
   const { name, parent } = splitPath(folder, separator);
-  const to = choices.find((choice) => choice.choice === "addTo" && choice.folder.existing === folder) ?? addFolder(choices, parent ? name : "Disk Root", folder);
+  // A folder whose moves ran takes no more files.
+  const to =
+    choices.find((choice) => choice.choice === "addTo" && choice.folder.existing === folder && !choice.moved) ?? addFolder(choices, parent ? name : "Disk Root", folder);
   for (const path of moving) moveFile(choices, left, path, to);
   return to;
 }
 
+/** Where the Suggested Folder `choice` goes, as `buildReviewPlan` takes it. */
+const planChoice = (choice) =>
+  choice.choice === "addTo"
+    ? { type: "addTo", folder: choice.folder.existing }
+    : choice.choice === "createIn"
+      ? { type: "createIn", folder: choice.elsewhere }
+      : { type: choice.choice };
+
+/** `paths` as a folder named `name` that trashes all of its own, as `buildReviewPlan` takes it, or nothing when there are none. */
+const trashing = (name, paths) => (paths.length > 0 ? [{ name, choice: { type: "trashAll" }, files: paths.map((path) => [path, "inFolder"]) }] : []);
+
+/** The files of the Suggested Folder `choice` that are trashed and not in `ran`, those already run. */
+const trashedFiles = (choice, ran) =>
+  [...choice.files].filter(([path, file]) => !ran.has(path) && (file === "trash" || (choice.choice === "trashAll" && file === "inFolder"))).map(([path]) => path);
+
 /**
- * `choices` as `buildReviewPlan` takes them, leaving out those with no files, so no empty folder is made,
- * then the files of `left` being trashed, as a folder that trashes all of its own.
+ * One part of the Suggested Folder `choice` as `buildReviewPlan` takes it, run on its own (ADR 0010): for
+ * `part` "move", the files going into it; for "trash", those it trashes. Files in `ran`, already run, are left out.
  */
-export function planChoices(choices, left = new LeftFiles()) {
-  const folders = choices.filter((choice) => choice.files.size > 0).map((choice) => ({
-    name: choice.name,
-    choice:
-      choice.choice === "addTo"
-        ? { type: "addTo", folder: choice.folder.existing }
-        : choice.choice === "createIn"
-          ? { type: "createIn", folder: choice.elsewhere }
-          : { type: choice.choice },
-    files: [...choice.files],
-  }));
-  if (left.trashed.size === 0) return folders;
-  return [...folders, { name: LEFT_NAME, choice: { type: "trashAll" }, files: [...left.trashed].map((path) => [path, "inFolder"]) }];
+export function partChoices(choice, part, ran = new Set()) {
+  if (part === "trash") return trashing(choice.name, trashedFiles(choice, ran));
+  if (choice.choice === "trashAll") return [];
+  const files = [...choice.files].filter(([path, file]) => file === "inFolder" && !ran.has(path));
+  return files.length > 0 ? [{ name: choice.name, choice: planChoice(choice), files }] : [];
 }
+
+/**
+ * What of `choices` hasn't run yet, as `buildReviewPlan` takes it: each folder with its files not in `ran`,
+ * those already run, leaving out a folder with none, so no empty folder is made, and of a folder whose moves
+ * ran, only its trashes; then the files of `left` being trashed, and last every file in `ran`, each as a folder
+ * that trashes all of its own. What ran is there only so the folders it left empty are offered: its
+ * Operations are never run again.
+ */
+export function planChoices(choices, left = new LeftFiles(), ran = new Set()) {
+  const folders = choices.flatMap((choice) => {
+    if (choice.moved) return partChoices(choice, "trash", ran);
+    const files = [...choice.files].filter(([path]) => !ran.has(path));
+    return files.length > 0 ? [{ name: choice.name, choice: planChoice(choice), files }] : [];
+  });
+  return [...folders, ...leftPartChoices(left, ran), ...trashing(RAN_NAME, [...ran])];
+}
+
+/** The files of `left` being trashed and not in `ran`, already run, as `buildReviewPlan` takes them: a folder that trashes all of its own. */
+export const leftPartChoices = (left, ran = new Set()) => trashing(LEFT_NAME, [...left.trashed].filter((path) => !ran.has(path)));
 
 /** `paths` by kind, A–Z with "Other" last, each kind's files newest first: `[[kind, paths], …]`. */
 export function byKindNewestFirst(paths, kindOf, modifiedOf) {

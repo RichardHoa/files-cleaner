@@ -65,7 +65,7 @@ _Avoid_: keeper rule, preference
 ### Planning
 
 **Plan**:
-The full list of proposed Operations for one Scan Root, shown grouped by Reason, one line per Operation, with the selected Operation's Reason beside it, for the user to approve, untick, or cancel.
+The full list of proposed Operations for one Scan Root, shown grouped by Reason, one line per Operation, with the selected Operation's Reason beside it, for the user to approve (all at once or a part at a time), untick, or cancel.
 _Avoid_: preview, proposal
 
 **Operation**:
@@ -105,7 +105,7 @@ _Avoid_: AI, smart features, LLM
 ### History
 
 **Session**:
-One approved Plan being carried out, from the first Operation to the last; the unit that Undo reverses. Every Operation that can happen does: one that can't is skipped with a Note and the rest carry on. Any approved Plan that changes something on disk is a Session, even if some of its Operations were skipped; one where nothing happened is not. Trying a skipped or failed Operation again later adds it to the same Session.
+One approved part of a Plan being carried out, from the first Operation to the last; the unit that Undo reverses. A part is the duplicates, one Suggested Folder's moves or its trashes, the trashes among the files left where they are, or everything not yet carried out. Every Operation that can happen does: one that can't is skipped with a Note and the rest carry on. Any approved part that changes something on disk is a Session, even if some of its Operations were skipped; one where nothing happened is not. Trying a skipped or failed Operation again later adds it to the same Session.
 _Avoid_: run, job, cleanup
 
 **Journal**:

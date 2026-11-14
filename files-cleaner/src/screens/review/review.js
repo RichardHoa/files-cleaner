@@ -4,15 +4,17 @@
 // files are read in the background meanwhile, which needs the Grouping Models (without them, they're
 // offered in the Suggested Folders' place), and the Suggested Folders are filled in once that's done.
 // The copies are trashed from the Duplicates pane, as a Session of their own, without waiting for the
-// reading. Files, and copies, are selected as in Finder, by clicking or by dragging a rectangle over them,
-// then trashed, put back or taken out of their folder (or kept, for copies) from the selection bar or
-// their right-click menu. Files are moved by dragging them by the name onto a folder in the sidebar, from
+// reading; likewise each Suggested Folder's moves and its trashes, and the trashes among the files left
+// where they are, can be run from their pane on their own (ADR 0010). Files, and copies, are selected as
+// in Finder, by clicking or by dragging a rectangle over them, then trashed, put back or taken out of
+// their folder (or kept, for copies) from the selection bar or their right-click menu. Files are moved by dragging them by the name onto a folder in the sidebar, from
 // their right-click menu, or with "Move to…", which also offers any other folder on disk. A file opens in
 // its default app by double-clicking it or from its right-click menu. The sidebar counts what goes into each
 // folder, and grays out a folder whose every file is trashed. It also adds a folder, and merges one into
 // another by dragging it there, or removes one, from its right-click menu. The header's button waits for the
 // reading, which can be stopped early to group only what was read, then runs the rest of the Plan as one
-// Session; Cancel stops the reading and goes Home, leaving whatever was already run.
+// Session; Cancel stops the reading and goes Home, leaving whatever was already run, so it says Done once
+// anything has.
 import {
   analyseLooseFiles,
   answerNotifications,
@@ -54,11 +56,13 @@ import {
   initialChoices,
   initialDuplicates,
   LeftFiles,
+  leftPartChoices,
   mergeFolder,
   moveFile,
   moveToOtherFolder,
   nameMissing,
   otherKeptCopies,
+  partChoices,
   placeDuplicates,
   planChoices,
   planDuplicates,
@@ -220,8 +224,17 @@ export async function render(root, nav, result, duplicateGroups) {
   // What trashing the copies did, once it's done, and whether a Session is running.
   let duplicatesDone = null;
   let running = false;
-  /** The Duplicate Groups as the rest of the Plan is built with: once their copies are trashed, so the folders they leave empty are offered. */
-  const doneDuplicates = () => (duplicatesDone ? planDuplicates(duplicates) : []);
+  // Every file a part run on its own moved or trashed; the rest of the Plan is built with them, only so the
+  // folders they leave empty are offered. A file skipped or failed isn't: it can be run again. What each run of
+  // the trashes of a Suggested Folder, or of the files left where they are ("left"), did, by the folder.
+  const ran = new Set();
+  const trashesDone = new Map();
+  /** Puts the files `summary` says left their place, done or trashed for good, in `ran`. */
+  const addRan = (summary) => {
+    for (const outcome of [...summary.done, ...summary.unrecoverable]) ran.add(outcome.source);
+  };
+  /** Whether the Duplicate Group `duplicate` has a copy already run, by a Suggested Folder or the files left where they are: it can't change any more. */
+  const lockedGroup = (duplicate) => duplicate.group.copies.some((copy) => ran.has(copy.path));
   const sidebar = el("nav", { className: "folder-sidebar", ariaLabel: "Plan" });
   const pane = el("section", { className: "folder-pane" });
   const selectionBar = el("div", { className: "selection-bar", hidden: true });
@@ -286,16 +299,25 @@ export async function render(root, nav, result, duplicateGroups) {
     if (current === gone) show(next);
     else drawPane();
   };
+  /** Hands what the trashes of the Suggested Folder `from` did over to `to`, a folder or "left". */
+  const handOverTrashes = (from, to) => {
+    if (trashesDone.has(from)) trashesDone.set(to, [...(trashesDone.get(to) ?? []), ...trashesDone.get(from)]);
+    trashesDone.delete(from);
+  };
   const merge = (from, into) => {
     mergeFolder(choices, duplicates, from, into);
+    handOverTrashes(from, into);
     forgetFolder(from, into);
   };
   const remove = (choice) => {
     removeFolder(choices, left, duplicates, choice);
+    // Its files already trashed are gone, not left where they are.
+    for (const path of ran) left.delete(path);
+    handOverTrashes(choice, "left");
     forgetFolder(choice, "left");
   };
-  /** Where the selected files can go from the pane: every folder but the one listed, or back where they are. */
-  const destinations = () => [...(current === "left" ? [] : [null]), ...choices.filter((choice) => choice !== current)];
+  /** Where the selected files can go from the pane: every folder but the one listed and those whose moves ran, or back where they are. */
+  const destinations = () => [...(current === "left" ? [] : [null]), ...choices.filter((choice) => choice !== current && !choice.moved)];
 
   const heading = el("h1", {});
   const run = el("button", { type: "button", className: "primary" });
@@ -310,27 +332,29 @@ export async function render(root, nav, result, duplicateGroups) {
   });
   const status = el("p", { className: "status" });
   const drawHeader = () => {
-    const change = totals(choices, left, pathSeparator);
+    cancel.textContent = ran.size > 0 ? "Done" : "Cancel";
+    const change = totals(choices, left, pathSeparator, [], ran);
     if (folders === "reading") {
       heading.textContent = rootName;
       run.textContent = "Waiting for folders…";
       run.disabled = true;
       return;
     }
-    const words = describeChange(change);
+    const emptiedLeft = emptied.filter((op) => emptiedTicked.has(op.id) && !op.error).length;
+    const words = describeChange(change, emptiedLeft);
     heading.textContent = words.heading;
     run.textContent = words.button;
-    run.disabled = running || change.moved + change.trashed === 0 || choices.some(nameMissing);
+    run.disabled = running || change.moved + change.trashed + emptiedLeft === 0 || choices.some(nameMissing);
   };
 
   run.addEventListener("click", async () => {
     clearTimeout(emptiedTimer);
     running = true;
     const session = await busy(status, [run, cancel], "Planning…", async () => {
-      const plan = await buildReviewPlan(doneDuplicates(), planChoices(choices, left));
-      // The trashed copies are only there to work out the Emptied Folders: they were run already.
+      const plan = await buildReviewPlan([], planChoices(choices, left, ran));
+      // What already ran is only there to work out the Emptied Folders.
       const approved = plan.operations
-        .filter((op) => (op.reason.type === "emptiedFolder" ? emptiedTicked.has(op.id) && !op.error : runsOrIsListed(op) && op.reason.type !== "duplicate"))
+        .filter((op) => (op.reason.type === "emptiedFolder" ? emptiedTicked.has(op.id) && !op.error : runsOrIsListed(op) && !ran.has(op.source)))
         .map((op) => op.id);
       return runPlan(approved, (progress) => showStatus(status, describeRunProgress(progress)));
     });
@@ -352,12 +376,54 @@ export async function render(root, nav, result, duplicateGroups) {
     running = false;
     if (summary?.sessionId) {
       duplicatesDone = summary;
+      addRan(summary);
       showStatus(status, "");
     } else if (summary) {
       showWarning(status, describeNothingDone(summary, "trashed", pathSeparator));
     }
     if (current === "duplicates") drawPane();
     else changed();
+  }
+
+  /**
+   * Runs `part`, one part of the Plan as `buildReviewPlan` takes it, as a Session of its own (ADR 0010), saying
+   * `label` meanwhile and what wasn't `done` ("moved" or "trashed") if nothing was. Once a Session is made the
+   * files it moved or trashed are in `ran`, and a Duplicate Group with a copy among them can't be changed any
+   * more. Resolves to what it did, or null if it made no Session.
+   */
+  async function runPart(button, part, label, done) {
+    running = true;
+    const summary = await busy(status, [button, run, cancel], label, async () => {
+      const plan = await buildReviewPlan([], part);
+      const approved = plan.operations.filter((op) => op.reason.type !== "emptiedFolder" && runsOrIsListed(op)).map((op) => op.id);
+      return runPlan(approved, (progress) => showStatus(status, describeRunProgress(progress)));
+    });
+    running = false;
+    if (!summary?.sessionId) {
+      if (summary) showWarning(status, describeNothingDone(summary, done, pathSeparator));
+      return null;
+    }
+    addRan(summary);
+    // Left out of "Keep every copy in…" and "Trash every copy in…" from now on.
+    for (const duplicate of duplicates) {
+      if (lockedGroup(duplicate)) duplicate.changedByHand = true;
+    }
+    showStatus(status, "");
+    return summary;
+  }
+
+  /** Moves the files going into the Suggested Folder `choice`, which is then finished: only its trashes can still run. */
+  async function moveFolder(choice, button) {
+    const summary = await runPart(button, partChoices(choice, "move", ran), "Moving the files…", "moved");
+    if (summary) choice.moved = summary;
+    drawPane();
+  }
+
+  /** Trashes the files of `part`, a Suggested Folder's or those left where they are, keeping what it did under `key`. */
+  async function trashPart(key, part, button) {
+    const summary = await runPart(button, part, "Trashing the files…", "trashed");
+    if (summary) trashesDone.set(key, [...(trashesDone.get(key) ?? []), summary]);
+    drawPane();
   }
 
   // The Emptied Folders depend on everything the Plan moves, so they are worked out by the backend again
@@ -370,13 +436,16 @@ export async function render(root, nav, result, duplicateGroups) {
       if (!pane.isConnected) return;
       const asked = ++emptiedAsked;
       try {
-        const plan = await previewReviewPlan(doneDuplicates(), planChoices(choices, left));
+        const plan = await previewReviewPlan([], planChoices(choices, left, ran));
         if (asked !== emptiedAsked || !pane.isConnected) return;
         emptied = plan.operations.filter((op) => op.reason.type === "emptiedFolder");
         const ids = new Set(emptied.map((op) => op.id));
         emptiedTicked = new Set([...emptiedTicked].filter((id) => ids.has(id)));
         if (current === "emptied") drawPane();
-        else drawSidebar();
+        else {
+          drawSidebar();
+          drawHeader();
+        }
       } catch {
         // A name that can't be a folder name: the Emptied Folders stay as they were until it's fixed.
       }
@@ -491,6 +560,7 @@ export async function render(root, nav, result, duplicateGroups) {
    * A sidebar item listing `section` with `n` items, or no count when `n` is null. A Suggested Folder's
    * is renamed by double-clicking it, or Return once it's listed, as in Finder, merged by dragging it onto
    * another, and has a right-click menu; files can be dragged onto it, and onto the files left where they are.
+   * A folder whose moves ran is finished: it's only listed.
    */
   function sidebarItem(section, label, n, className = "", iconName = "folder") {
     const node = el(
@@ -502,7 +572,7 @@ export async function render(root, nav, result, duplicateGroups) {
     );
     // Clicking the listed one again leaves the sidebar as it is, so a double-click lands on the same item.
     node.addEventListener("click", () => section !== current && show(section));
-    if (choices.includes(section)) {
+    if (choices.includes(section) && !section.moved) {
       node.addEventListener("dblclick", () => rename(section, node));
       node.addEventListener("keydown", (event) => {
         if (event.key !== "Enter" || section !== current) return;
@@ -528,7 +598,7 @@ export async function render(root, nav, result, duplicateGroups) {
   /** The right-click menu of the Suggested Folder `choice`: "Merge into…", which then lists the other folders, and Remove. */
   function folderMenu(choice, node, event) {
     event.preventDefault();
-    const others = choices.filter((other) => other !== choice).map((into) => ({ label: displayName(into), action: () => merge(choice, into) }));
+    const others = choices.filter((other) => other !== choice && !other.moved).map((into) => ({ label: displayName(into), action: () => merge(choice, into) }));
     menu.open([], node, event, [
       ...(others.length > 0 ? [{ label: "Merge into…", action: () => menu.open([], node, event, others) }] : []),
       { label: "Remove", action: () => remove(choice) },
@@ -608,16 +678,19 @@ export async function render(root, nav, result, duplicateGroups) {
     for (const row of rows) row.classList.toggle("selected", selection.has(row.dataset.path));
     selectionBar.hidden = selection.size === 0;
     if (selection.size === 0) return;
-    const paths = [...selection];
-    const actions = fileActions(paths).map(({ label, action }) => {
+    // A file already run, or a copy of a Duplicate Group that can't change any more, can only be opened.
+    const paths = [...selection].filter((path) => !ran.has(path) && !(duplicateOf.has(path) && lockedGroup(duplicateOf.get(path))));
+    const actions = (paths.length > 0 ? fileActions(paths) : []).map(({ label, action }) => {
       const button = el("button", { type: "button", className: "small" }, label);
       button.addEventListener("click", action);
       return button;
     });
     const clear = el("button", { type: "button", className: "link" }, "Deselect");
     clear.addEventListener("click", clearSelection);
-    const what = current === "duplicates" ? `${count(paths.length)} ${paths.length === 1 ? "copy" : "copies"}` : plural(paths.length, "file");
-    selectionBar.replaceChildren(el("span", {}, `${what} selected`), ...actions, ...(current === "duplicates" ? [] : [moveSelect(paths)]), clear);
+    const n = selection.size;
+    const what = current === "duplicates" ? `${count(n)} ${n === 1 ? "copy" : "copies"}` : plural(n, "file");
+    const movable = current !== "duplicates" && paths.length > 0;
+    selectionBar.replaceChildren(el("span", {}, `${what} selected`), ...actions, ...(movable ? [moveSelect(paths)] : []), clear);
   }
 
   /** The "Move to…" menu for the files at `paths`: the other folders, back where they are, or any other folder on disk. */
@@ -663,7 +736,7 @@ export async function render(root, nav, result, duplicateGroups) {
     return [
       ["Trash", "trash"],
       ["Take out", "takeOut"],
-      ["Put back", "inFolder"],
+      ...(folder.moved ? [] : [["Put back", "inFolder"]]),
     ]
       .filter(([, file]) => !paths.every((path) => folder.files.get(path) === file))
       .map(([label, file]) => ({ label, action: each((path) => folder.files.set(path, file)) }));
@@ -726,7 +799,8 @@ export async function render(root, nav, result, duplicateGroups) {
   /** Makes `node` take the dragged files into the Suggested Folder `to`, or leave them where they are when `to` is null, and merge another dragged folder into `to`. */
   function dropTarget(node, to) {
     const holds = (path) => (to ? to.files.has(path) : left.has(path));
-    const accepts = () => (draggedFolder ? to !== null && to !== draggedFolder : dragged !== null && dragged.some((path) => !holds(path)));
+    const accepts = () =>
+      !to?.moved && (draggedFolder ? to !== null && to !== draggedFolder : dragged !== null && dragged.some((path) => !holds(path)));
     node.addEventListener("dragover", (event) => {
       if (!accepts()) return;
       event.preventDefault();
@@ -748,16 +822,19 @@ export async function render(root, nav, result, duplicateGroups) {
     });
   }
 
-  /** What trashing the copies did: the warning if it left any, its counts, then the copies it left with why. */
-  function duplicatesOutcome(summary) {
+  /** What a part run on its own did, as `summary`: the warning if it left any, its counts with what was `done` ("moved" or "trashed"), then the files it left with why. */
+  function partOutcome(summary, done) {
     const sections = notDoneSections(summary);
-    const text = describeWarning(summary, { action: "run", done: "trashed", separator: pathSeparator });
+    const text = describeWarning(summary, { action: "run", done, separator: pathSeparator });
     return [
       text ? warningBlock(text, () => sections[0]?.scrollIntoView({ behavior: "smooth", block: "start" })) : "",
-      el("p", {}, describeSummary(summary, "trashed")),
+      el("p", {}, describeSummary(summary, done)),
       ...sections,
     ];
   }
+
+  /** What each run of the trashes kept under `key`, a Suggested Folder or "left", did, each with a link to its Session. */
+  const trashOutcomes = (key) => (trashesDone.get(key) ?? []).flatMap((summary) => [...partOutcome(summary, "trashed"), sessionLink(summary.sessionId)]);
 
   /** A link to Session `sessionId`'s screen, where what it did can be checked or undone. */
   function sessionLink(sessionId) {
@@ -776,7 +853,7 @@ export async function render(root, nav, result, duplicateGroups) {
     if (duplicatesDone) {
       return [
         el("h2", {}, "Duplicates"),
-        ...duplicatesOutcome(duplicatesDone),
+        ...partOutcome(duplicatesDone, "trashed"),
         sessionLink(duplicatesDone.sessionId),
       ];
     }
@@ -856,7 +933,10 @@ export async function render(root, nav, result, duplicateGroups) {
     return row;
   }
 
-  /** One copy of the Duplicate Group `duplicate`: Keep or Trash, then its name, with its full path on hover, its folder from the Scan Root and its modified date. */
+  /**
+   * One copy of the Duplicate Group `duplicate`: Keep or Trash, then its name, with its full path on hover, its
+   * folder from the Scan Root and its modified date. Neither can be picked once a copy of the group was run.
+   */
   function duplicateCopy(duplicate, copy) {
     const fate = duplicate.copies.get(copy.path);
     const own = fileName(copy.path);
@@ -864,7 +944,7 @@ export async function render(root, nav, result, duplicateGroups) {
       ["keep", "Keep"],
       ["trash", "Trash"],
     ].map(([value, label]) => {
-      const segment = el("button", { type: "button", role: "radio", className: "segment", ariaChecked: String(value === fate) }, label);
+      const segment = el("button", { type: "button", role: "radio", className: "segment", ariaChecked: String(value === fate), disabled: lockedGroup(duplicate) }, label);
       segment.addEventListener("click", () => {
         if (value === fate) return;
         setCopy(duplicate, copy.path, value, choices, left);
@@ -886,20 +966,31 @@ export async function render(root, nav, result, duplicateGroups) {
     return selectable(row, copy.path, { movable: false });
   }
 
-  /** The files left where they are, by kind, for the pane. A Kept Copy that isn't filed stays where it is, so it can only be opened or shown. */
+  /**
+   * The files left where they are, by kind, for the pane, with a button trashing those marked Trash on their
+   * own, and what that did last. A Kept Copy that isn't filed stays where it is, and a file already run is
+   * gone, so either can only be opened or shown.
+   */
   function leftPanel() {
     const others = otherKeptCopies(duplicates);
     const row = (path) => {
-      if (others.has(path)) {
+      if (others.has(path) || ran.has(path)) {
         const node = leftRow(path);
         node.tabIndex = 0;
         return copyMenu(node, path);
       }
       return selectable(leftRow(path, [trashToggle(path)]), path);
     };
+    const trashing = [...left.trashed].filter((path) => !ran.has(path));
+    const trash = el("button", { type: "button", disabled: running || trashing.length === 0 }, trashing.length ? `Trash ${plural(trashing.length, "file")}` : "Nothing to trash");
+    trash.addEventListener("click", () => trashPart("left", leftPartChoices(left, ran), trash));
+    const head = [
+      el("div", { className: "duplicates-head" }, el("h2", {}, `Left where they are (${count(left.size)})`), trash),
+      ...trashOutcomes("left"),
+    ];
     if (choices.length === 0) {
       return [
-        el("h2", {}, `Left where they are (${count(left.size)})`),
+        ...head,
         el(
           "p",
           { className: "note" },
@@ -909,7 +1000,7 @@ export async function render(root, nav, result, duplicateGroups) {
       ];
     }
     return [
-      el("h2", {}, `Left where they are (${count(left.size)})`),
+      ...head,
       ...(left.size
         ? leftLists([...left], row)
         : [el("p", { className: "note" }, "Drag a file onto “Left where they are” to leave it where it is.")]),
@@ -926,6 +1017,7 @@ export async function render(root, nav, result, duplicateGroups) {
       all.checked = state === "all";
       all.indeterminate = state === "some";
       for (const [op, box] of boxes) box.checked = emptiedTicked.has(op.id);
+      drawHeader();
     };
     all.addEventListener("change", () => {
       emptiedTicked = toggleAll(ids, emptiedTicked);
@@ -981,9 +1073,15 @@ export async function render(root, nav, result, duplicateGroups) {
       return [value, segment];
     });
     const pick = el("div", { className: "segmented", role: "radiogroup", ariaLabel: "What to do with this folder" }, ...segments.map(([, segment]) => segment));
+    // Once its moves ran, the folder is finished: its name and where it goes stay as they were.
     const drawPick = () => {
-      for (const [value, segment] of segments) segment.ariaChecked = String(value === choice.choice);
+      for (const [value, segment] of segments) {
+        segment.ariaChecked = String(value === choice.choice);
+        segment.disabled = Boolean(choice.moved);
+      }
     };
+    const runs = el("div", { className: "folder-panel-run" });
+    const outcomes = el("div");
     const list = el("ul", { className: "folder-files", ariaLabel: "Files" });
     const empty = el("p", { className: "note" }, "No files. Drag files onto this folder in the list to add them.");
     const more = el("div", { className: "plan-more" });
@@ -1007,12 +1105,14 @@ export async function render(root, nav, result, duplicateGroups) {
       changed();
     });
 
-    /** The name and whether it's missing, also when it was renamed in the sidebar. */
+    /** The name and whether it's missing, also when it was renamed in the sidebar, with the buttons that need one. */
     const drawName = () => {
       if (name.value !== choice.name) name.value = choice.name;
+      name.readOnly = Boolean(choice.moved);
       const missing = nameMissing(choice);
       showStatus(nameError, missing ? "A folder needs a name." : "", missing);
       name.ariaInvalid = String(missing);
+      drawRuns();
     };
 
     function drawWhere() {
@@ -1021,7 +1121,7 @@ export async function render(root, nav, result, duplicateGroups) {
       const parts = {
         addTo: () => ["Add to ", el("strong", {}, existingName)],
         createHere: () => [`New folder in ${rootName}`],
-        createIn: () => ["New folder in ", el("span", { className: "path" }, choice.elsewhere), " ", change],
+        createIn: () => ["New folder in ", el("span", { className: "path" }, choice.elsewhere), ...(choice.moved ? [] : [" ", change])],
         trashAll: () => [`Every file goes to ${trashPlace(pathSeparator)}`],
       };
       where.replaceChildren(...parts[choice.choice]());
@@ -1038,16 +1138,45 @@ export async function render(root, nav, result, duplicateGroups) {
         node.addEventListener("click", set(next));
         return node;
       };
-      const note = { trash: " · Trashed", takeOut: " · Stays where it is" }[state] ?? "";
-      const actions = state === "inFolder" ? [button("Trash", "trash"), button("Take out", "takeOut")] : [button("Put back", "inFolder")];
+      const done = ran.has(path);
+      const notes = { trash: " · Trashed", takeOut: " · Stays where it is", inFolder: choice.moved ? " · Not moved: retry it from its Session" : "" };
+      const note = done ? (state === "trash" || choice.choice === "trashAll" ? " · Trashed" : " · Moved") : notes[state];
+      // A file already run can only be opened; once the folder's moves ran, a file can't be put back into it.
+      const actions = done
+        ? []
+        : state === "inFolder"
+          ? [button("Trash", "trash"), button("Take out", "takeOut")]
+          : choice.moved
+            ? [state === "trash" ? button("Take out", "takeOut") : button("Trash", "trash")]
+            : [button("Put back", "inFolder")];
       const row = el(
         "li",
         { className: "folder-file" },
         el("span", { className: "folder-file-name", title: summaryOf(path) }, fileName(path), el("span", { className: "muted" }, note)),
         el("span", { className: "folder-file-actions" }, ...actions),
       );
-      row.classList.toggle("out", state !== "inFolder");
-      return selectable(row, path);
+      row.classList.toggle("out", done || state !== "inFolder");
+      return selectable(row, path, { movable: !done });
+    }
+
+    /** The buttons moving the files going into the folder, and trashing those it trashes, each on its own, then what each did last. */
+    function drawRuns() {
+      const moving = choice.moved ? 0 : totals([choice], new LeftFiles(), pathSeparator, [], ran).moved;
+      const trashing = partChoices(choice, "trash", ran)[0]?.files.length ?? 0;
+      const buttons = [];
+      if (choice.choice !== "trashAll" && !choice.moved) {
+        const move = el("button", { type: "button", disabled: running || moving === 0 || nameMissing(choice) }, moving ? `Move ${plural(moving, "file")}` : "Nothing to move");
+        move.addEventListener("click", () => moveFolder(choice, move));
+        buttons.push(move);
+      }
+      if (trashing > 0) {
+        const trash = el("button", { type: "button", disabled: running || nameMissing(choice) }, `Trash ${plural(trashing, "file")}`);
+        trash.addEventListener("click", () => trashPart(choice, partChoices(choice, "trash", ran), trash));
+        buttons.push(trash);
+      }
+      runs.replaceChildren(...buttons);
+      const moved = choice.moved ? [...partOutcome(choice.moved, "moved"), sessionLink(choice.moved.sessionId)] : [];
+      outcomes.replaceChildren(...moved, ...trashOutcomes(choice));
     }
 
     function draw() {
@@ -1072,6 +1201,8 @@ export async function render(root, nav, result, duplicateGroups) {
       el("div", { className: "folder-panel-head" }, icon("folder"), name, size),
       nameError,
       el("div", { className: "folder-panel-choice" }, pick, where),
+      runs,
+      outcomes,
       list,
       empty,
       more,
@@ -1099,7 +1230,7 @@ export async function render(root, nav, result, duplicateGroups) {
     const row = el(
       "li",
       { className: "folder-file" },
-      el("span", { className: "folder-file-name", title: summaryOf(path) }, fileName(path), el("span", { className: "muted" }, trashed ? " · Trashed" : "")),
+      el("span", { className: "folder-file-name", title: summaryOf(path) }, fileName(path), el("span", { className: "muted" }, trashed || ran.has(path) ? " · Trashed" : "")),
       el("span", { className: "folder-file-actions" }, el("span", { className: "muted folder-file-date" }, formatDate(modifiedOf(path))), ...actions),
     );
     row.classList.toggle("out", trashed);
