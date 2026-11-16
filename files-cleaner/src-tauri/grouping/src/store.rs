@@ -140,7 +140,11 @@ impl CardStore {
             db.query_row(
                 "SELECT folder FROM answers WHERE card_model = ?1 AND question = ?2",
                 params![card_model, question.as_bytes()],
-                |row| Ok(Answer { folder: row.get(0)? }),
+                |row| {
+                    Ok(Answer {
+                        folder: row.get(0)?,
+                    })
+                },
             )
             .optional()
         })
@@ -182,7 +186,9 @@ fn connection<'a>(db: &'a mut Database, folder: &Path) -> rusqlite::Result<&'a C
     }
     match db {
         Database::Open(opened) => Ok(opened),
-        _ => Err(rusqlite::Error::InvalidPath(folder.join(DATABASE_FILE_NAME))),
+        _ => Err(rusqlite::Error::InvalidPath(
+            folder.join(DATABASE_FILE_NAME),
+        )),
     }
 }
 
@@ -249,4 +255,154 @@ pub(crate) fn content_hash(path: &Path) -> Option<blake3::Hash> {
     let mut hasher = blake3::Hasher::new();
     hasher.update_reader(fs::File::open(path).ok()?).ok()?;
     Some(hasher.finalize())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MODELS: ModelIds = ModelIds {
+        card: "card-a",
+        embedding: "embedding-a",
+    };
+
+    fn entry(embedding: Option<Vector>) -> Stored {
+        Stored {
+            card: Card {
+                topic: "Bánh mì 'ngon' 😀".to_string(),
+                kind: String::new(),
+                summary: "x".repeat(100_000),
+            },
+            scanned: true,
+            embedding,
+        }
+    }
+
+    #[test]
+    fn an_entry_reads_back_as_it_was_stored_bit_for_bit() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = CardStore::open(dir.path());
+        let hash = blake3::hash(b"file");
+        let vector = vec![1.5, -0.0, f32::MIN_POSITIVE, f32::MAX, f32::NAN];
+
+        store.put(&MODELS, &hash, &entry(Some(vector.clone())));
+        let read = CardStore::open(dir.path()).get(&MODELS, &hash).unwrap();
+
+        assert_eq!(read.card, entry(None).card);
+        assert!(read.scanned);
+        let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&read.embedding.unwrap()), bits(&vector));
+    }
+
+    #[test]
+    fn an_entry_stored_again_replaces_the_one_before() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = CardStore::open(dir.path());
+        let hash = blake3::hash(b"file");
+
+        store.put(&MODELS, &hash, &entry(Some(vec![1.0])));
+        store.put(&MODELS, &hash, &entry(None));
+
+        assert!(store.get(&MODELS, &hash).unwrap().embedding.is_none());
+    }
+
+    #[test]
+    fn an_entry_is_found_only_by_the_models_and_contents_it_was_made_with() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = CardStore::open(dir.path());
+        let hash = blake3::hash(b"file");
+        store.put(&MODELS, &hash, &entry(None));
+
+        let other_card = ModelIds {
+            card: "card-b",
+            ..MODELS
+        };
+        let other_embedding = ModelIds {
+            embedding: "embedding-b",
+            ..MODELS
+        };
+        assert!(store.get(&other_card, &hash).is_none());
+        assert!(store.get(&other_embedding, &hash).is_none());
+        assert!(store.get(&MODELS, &blake3::hash(b"other")).is_none());
+    }
+
+    #[test]
+    fn an_answer_of_no_folder_is_kept_apart_from_no_answer() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = CardStore::open(dir.path());
+
+        store.put_answer("card-a", "where?", &Answer { folder: None });
+        store.put_answer(
+            "card-a",
+            "where else?",
+            &Answer {
+                folder: Some("Recipes".to_string()),
+            },
+        );
+
+        assert_eq!(store.get_answer("card-a", "where?").unwrap().folder, None);
+        assert_eq!(
+            store
+                .get_answer("card-a", "where else?")
+                .unwrap()
+                .folder
+                .as_deref(),
+            Some("Recipes")
+        );
+        assert!(store.get_answer("card-b", "where?").is_none());
+        assert!(store.get_answer("card-a", "never asked").is_none());
+    }
+
+    #[test]
+    fn clearing_through_one_store_clears_what_another_open_on_it_sees() {
+        let dir = tempfile::tempdir().unwrap();
+        let analysis = CardStore::open(dir.path());
+        let hash = blake3::hash(b"file");
+        analysis.put(&MODELS, &hash, &entry(None));
+        analysis.put_answer("card-a", "where?", &Answer { folder: None });
+
+        CardStore::open(dir.path()).clear().unwrap();
+
+        assert!(analysis.get(&MODELS, &hash).is_none());
+        assert!(analysis.get_answer("card-a", "where?").is_none());
+    }
+
+    #[test]
+    fn creating_the_database_deletes_the_old_card_folders_but_not_after() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("card-a/embedding-a")).unwrap();
+        fs::write(dir.path().join("card-a/embedding-a/abc.json"), "{}").unwrap();
+        let store = CardStore::open(dir.path());
+        store.put(&MODELS, &blake3::hash(b"file"), &entry(None));
+        assert!(!dir.path().join("card-a").exists());
+        drop(store);
+        fs::create_dir(dir.path().join("kept")).unwrap();
+
+        CardStore::open(dir.path()).put(&MODELS, &blake3::hash(b"file"), &entry(None));
+
+        assert!(dir.path().join("kept").exists());
+    }
+
+    #[test]
+    fn a_store_that_cant_be_opened_reads_nothing_and_writes_nothing_without_failing() {
+        let dir = tempfile::tempdir().unwrap();
+        // A file where the store's folder should be.
+        let folder = dir.path().join("cards");
+        fs::write(&folder, "").unwrap();
+        let store = CardStore::open(&folder);
+        let hash = blake3::hash(b"file");
+
+        store.put(&MODELS, &hash, &entry(None));
+        store.put_answer("card-a", "where?", &Answer { folder: None });
+
+        assert!(store.get(&MODELS, &hash).is_none());
+        assert!(store.get_answer("card-a", "where?").is_none());
+    }
+
+    #[test]
+    fn clearing_a_store_never_used_is_fine() {
+        let dir = tempfile::tempdir().unwrap();
+
+        CardStore::open(dir.path().join("cards")).clear().unwrap();
+    }
 }

@@ -1137,3 +1137,268 @@ fn undo_leaves_a_file_the_user_moved_again_where_they_put_it() {
     assert!(dir.path().join("Elsewhere/talk.pptx").exists());
     assert!(!dir.path().join("talk.pptx").exists());
 }
+
+/// How many records Session `id` has in the Journal database.
+fn record_count(journal: &Path, id: &str) -> i64 {
+    journal_database(journal)
+        .query_row(
+            "SELECT count(*) FROM records WHERE session_id = ?1",
+            [id],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
+/// Writes Session `id` out as the Journal file it would have been before
+/// the database, and deletes the database, as an older version left them.
+fn as_old_journal_file(journal: &Path, id: &str) {
+    let db = journal_database(journal);
+    let (root, started_at): (String, i64) = db
+        .query_row(
+            "SELECT scan_root, started_at FROM sessions WHERE id = ?1",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    let header = serde_json::json!({ "id": id, "scanRoot": root, "startedAt": started_at });
+    let mut lines = format!("{header}\n");
+    let mut query = db
+        .prepare("SELECT record FROM records WHERE session_id = ?1 ORDER BY seq")
+        .unwrap();
+    for record in query
+        .query_map([id], |row| row.get::<_, String>(0))
+        .unwrap()
+    {
+        lines.push_str(&record.unwrap());
+        lines.push('\n');
+    }
+    drop(query);
+    drop(db);
+    for name in ["journal.sqlite", "journal.sqlite-wal", "journal.sqlite-shm"] {
+        let _ = fs::remove_file(journal.join(name));
+    }
+    fs::write(journal.join(format!("{id}.jsonl")), lines).unwrap();
+}
+
+#[test]
+fn a_session_journaled_before_the_database_is_imported_and_can_still_be_undone() {
+    let dir = messy_folder();
+    let journal = journal_dir();
+    let before = snapshot(dir.path());
+    let plan = plan_for(dir.path());
+    let id = run(&plan, &all_ids(&plan), journal.path())
+        .unwrap()
+        .session_id
+        .unwrap();
+    as_old_journal_file(journal.path(), &id);
+
+    let undone = undo(&id, journal.path()).unwrap();
+
+    assert_eq!(undone.done.len(), 2);
+    assert_eq!(snapshot(dir.path()), before);
+    assert!(!journal.path().join(format!("{id}.jsonl")).exists());
+    assert_eq!(
+        all_sessions(journal.path())[0].status,
+        SessionStatus::Undone
+    );
+}
+
+#[test]
+fn an_old_journal_found_again_after_its_import_isnt_imported_twice() {
+    let journal = journal_dir();
+    let id = "2026-01-01_00-00-00-000Z";
+    fake_journal(journal.path(), id, 4);
+    assert_eq!(all_sessions(journal.path()).len(), 1);
+    // A crash between the import's commit and deleting the file.
+    fake_journal(journal.path(), id, 4);
+
+    assert_eq!(all_sessions(journal.path()).len(), 1);
+    assert_eq!(record_count(journal.path(), id), 3);
+    assert!(!journal.path().join(format!("{id}.jsonl")).exists());
+}
+
+#[test]
+fn an_old_journal_cut_short_mid_record_is_imported_without_that_record() {
+    let journal = journal_dir();
+    let id = "2026-01-01_00-00-00-000Z";
+    fake_journal(journal.path(), id, 4);
+    let path = journal.path().join(format!("{id}.jsonl"));
+    let mut text = fs::read_to_string(&path).unwrap();
+    text.push_str(r#"{"record":"intent","operationId":"#);
+    fs::write(&path, text).unwrap();
+
+    assert_eq!(page_ids(journal.path(), 0, 10), [id]);
+    assert_eq!(record_count(journal.path(), id), 3);
+    assert!(!path.exists());
+}
+
+#[test]
+fn an_old_journal_damaged_before_its_last_line_is_left_where_it_is() {
+    let journal = journal_dir();
+    let id = "2026-01-01_00-00-00-000Z";
+    let path = journal.path().join(format!("{id}.jsonl"));
+    let header = serde_json::json!({ "id": id, "scanRoot": "/root", "startedAt": 0 });
+    fs::write(
+        &path,
+        format!("{header}\nnot a record\n{{\"record\":\"finished\"}}\n"),
+    )
+    .unwrap();
+
+    assert!(all_sessions(journal.path()).is_empty());
+    assert!(path.exists());
+}
+
+#[test]
+fn a_record_from_a_newer_version_hides_only_its_own_session() {
+    let journal = journal_dir();
+    let mut ids = fake_journals(journal.path(), 3);
+    ids.reverse();
+    assert_eq!(page_ids(journal.path(), 0, 10), ids);
+
+    append_record(
+        journal.path(),
+        &ids[1],
+        serde_json::json!({ "record": "fromTheFuture" }),
+    );
+
+    assert_eq!(
+        page_ids(journal.path(), 0, 10),
+        [ids[0].clone(), ids[2].clone()]
+    );
+    assert!(matches!(
+        session_details(&ids[1], journal.path()),
+        Err(SessionError::BadJournal { .. })
+    ));
+}
+
+#[test]
+fn undo_passes_over_a_newer_session_it_cant_read() {
+    let dir = messy_folder();
+    let journal = journal_dir();
+    let before = snapshot(dir.path());
+    let plan = plan_for(dir.path());
+    let id = run(&plan, &all_ids(&plan), journal.path())
+        .unwrap()
+        .session_id
+        .unwrap();
+    let newer = "2999-01-01_00-00-00-000Z";
+    fake_journal(journal.path(), newer, 4);
+    all_sessions(journal.path());
+    append_record(
+        journal.path(),
+        newer,
+        serde_json::json!({ "record": "fromTheFuture" }),
+    );
+
+    undo(&id, journal.path()).unwrap();
+
+    assert_eq!(snapshot(dir.path()), before);
+}
+
+#[test]
+fn listing_the_sessions_of_a_folder_never_used_creates_nothing() {
+    let journal = journal_dir();
+    let missing = journal.path().join("Sessions");
+
+    assert_eq!(list_sessions(&missing, 0, 10).unwrap().total, 0);
+
+    assert!(!missing.exists());
+}
+
+#[test]
+fn sessions_can_be_listed_and_read_while_a_run_writes_its_journal() {
+    let dir = messy_folder();
+    let journal = journal_dir();
+    let plan = plan_for(dir.path());
+    let mut seen = Vec::new();
+
+    let summary = run_with_progress(&plan, &all_ids(&plan), journal.path(), |_| {
+        let page = list_sessions(journal.path(), 0, 10).unwrap();
+        session_details(&page.sessions[0].id, journal.path()).unwrap();
+        seen.push(page.sessions[0].id.clone());
+    })
+    .unwrap();
+
+    assert!(!seen.is_empty());
+    assert!(seen
+        .iter()
+        .all(|id| Some(id) == summary.session_id.as_ref()));
+}
+
+#[test]
+fn a_session_of_files_with_accents_quotes_and_emoji_in_their_names_undoes() {
+    let dir = scan_root();
+    for (path, secs) in [
+        ("giữ lại.txt", 3_000),
+        ("Tài liệu/bản sao 'cũ' 😀 100%.txt", 2_000),
+    ] {
+        set_modified(&write(dir.path(), path, "same contents"), secs);
+    }
+    let journal = journal_dir();
+    let before = snapshot(dir.path());
+    let plan = plan_for(dir.path());
+    let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
+    assert_eq!(summary.done.len(), 1);
+
+    undo(summary.session_id.as_deref().unwrap(), journal.path()).unwrap();
+
+    assert_eq!(snapshot(dir.path()), before);
+}
+
+#[test]
+fn a_run_where_nothing_happens_leaves_no_records_behind() {
+    let dir = messy_folder();
+    let journal = journal_dir();
+    let plan = plan_for(dir.path());
+    fs::remove_file(dir.path().join("a/copy.txt")).unwrap();
+    fs::remove_file(dir.path().join("b/c/copy.txt")).unwrap();
+
+    run(&plan, &all_ids(&plan), journal.path()).unwrap();
+
+    let records: i64 = journal_database(journal.path())
+        .query_row("SELECT count(*) FROM records", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(records, 0);
+}
+
+#[test]
+fn deleting_every_session_leaves_no_records_and_the_next_run_starts_afresh() {
+    let dir = messy_folder();
+    let journal = journal_dir();
+    let plan = plan_for(dir.path());
+    run(&plan, &all_ids(&plan), journal.path()).unwrap();
+
+    assert_eq!(delete_all_sessions(journal.path()).unwrap(), 1);
+
+    let records: i64 = journal_database(journal.path())
+        .query_row("SELECT count(*) FROM records", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(records, 0);
+    let dir = messy_folder();
+    let plan = plan_for(dir.path());
+    run(&plan, &all_ids(&plan), journal.path()).unwrap();
+    assert_eq!(all_sessions(journal.path()).len(), 1);
+}
+
+#[test]
+fn deleting_every_session_starts_a_journal_damaged_past_its_first_page_again() {
+    let dir = messy_folder();
+    let journal = journal_dir();
+    let plan = plan_for(dir.path());
+    run(&plan, &all_ids(&plan), journal.path()).unwrap();
+    journal_database(journal.path())
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+        .unwrap();
+    // Opening it reads only the first page, so the damage goes unseen until then.
+    let path = journal.path().join("journal.sqlite");
+    let mut bytes = fs::read(&path).unwrap();
+    bytes[4096..].fill(0xAB);
+    fs::write(&path, bytes).unwrap();
+
+    delete_all_sessions(journal.path()).unwrap();
+
+    let dir = messy_folder();
+    let plan = plan_for(dir.path());
+    run(&plan, &all_ids(&plan), journal.path()).unwrap();
+    assert_eq!(all_sessions(journal.path()).len(), 1);
+}

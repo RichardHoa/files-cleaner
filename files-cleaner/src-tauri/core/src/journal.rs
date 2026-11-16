@@ -264,7 +264,9 @@ impl Journals {
             .prepare("SELECT seq, record FROM records WHERE session_id = ?1 ORDER BY seq")
             .map_err(sql)?;
         let rows = query
-            .query_map([id], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
+            .query_map([id], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })
             .map_err(sql)?;
         let mut records = Vec::new();
         for row in rows {
@@ -314,11 +316,14 @@ impl Journals {
 }
 
 /// Deletes every Session's Journal in `journal_dir` and returns how many
-/// there were. A database too damaged to open is deleted whole, with no
-/// count, so the Journal can always be started again.
+/// there were. A database too damaged to open or empty is deleted whole,
+/// with no count, so the Journal can always be started again.
 pub fn remove_all_sessions(journal_dir: &Path) -> io::Result<usize> {
-    match Journals::open(journal_dir) {
-        Ok(mut journals) => journals.remove_all(journal_dir),
+    // Closed before it is deleted.
+    let removed =
+        Journals::open(journal_dir).and_then(|mut journals| journals.remove_all(journal_dir));
+    match removed {
+        Ok(removed) => Ok(removed),
         Err(e) if damaged(&e) => {
             delete_database(&journal_dir.join(DATABASE_FILE_NAME))?;
             remove_old_journals(journal_dir)?;
