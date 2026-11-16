@@ -1,11 +1,11 @@
-// Review: the one screen after the scan, holding the whole Plan (ADR 0005), laid out like Mail. A sidebar
+// Review: the one screen after the scan, holding the whole Plan, laid out like Mail. A sidebar
 // lists the Duplicates, then the files left where they are and each Suggested Folder, then the Emptied
 // Folders, and the pane beside it lists the one picked. The Duplicate Groups show at once. The loose
 // files are read in the background meanwhile, which needs the Grouping Models (without them, they're
 // offered in the Suggested Folders' place), and the Suggested Folders are filled in once that's done.
 // The copies are trashed from the Duplicates pane, as a Session of their own, without waiting for the
 // reading; likewise each Suggested Folder's moves and its trashes, and the trashes among the files left
-// where they are, can be run from their pane on their own (ADR 0010). Files, and copies, are selected as
+// where they are, can be run from their pane on their own. Files, and copies, are selected as
 // in Finder, by clicking or by dragging a rectangle over them, then trashed, put back or taken out of
 // their folder (or kept, for copies) from the selection bar or their right-click menu. Files are moved by dragging them by the name onto a folder in the sidebar, from
 // their right-click menu, or with "Move to…", which also offers any other folder on disk. A file opens in
@@ -386,7 +386,7 @@ export async function render(root, nav, result, duplicateGroups) {
   }
 
   /**
-   * Runs `part`, one part of the Plan as `buildReviewPlan` takes it, as a Session of its own (ADR 0010), saying
+   * Runs `part`, one part of the Plan as `buildReviewPlan` takes it, as a Session of its own, saying
    * `label` meanwhile and what wasn't `done` ("moved" or "trashed") if nothing was. Once a Session is made the
    * files it moved or trashed are in `ran`, and a Duplicate Group with a copy among them can't be changed any
    * more. Resolves to what it did, or null if it made no Session.

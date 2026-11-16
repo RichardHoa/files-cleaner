@@ -6,7 +6,7 @@
 // "takeOut". The user can also add a folder, merge one into another, or remove one. The files left where they
 // are stay there, unless the user trashes one or moves it to a folder, suggested or any other on disk.
 // A folder's moves and its trashes, and the trashes among the files left where they are, can each be run on
-// their own (ADR 0010): the files already run are kept in a Set `ran`, and a folder whose moves ran holds
+// their own: the files already run are kept in a Set `ran`, and a folder whose moves ran holds
 // what that did in `moved`.
 import { plural, splitPath } from "../../shared/format.js";
 
@@ -281,7 +281,7 @@ const trashedFiles = (choice, ran) =>
   [...choice.files].filter(([path, file]) => !ran.has(path) && (file === "trash" || (choice.choice === "trashAll" && file === "inFolder"))).map(([path]) => path);
 
 /**
- * One part of the Suggested Folder `choice` as `buildReviewPlan` takes it, run on its own (ADR 0010): for
+ * One part of the Suggested Folder `choice` as `buildReviewPlan` takes it, run on its own: for
  * `part` "move", the files going into it; for "trash", those it trashes. Files in `ran`, already run, are left out.
  */
 export function partChoices(choice, part, ran = new Set()) {

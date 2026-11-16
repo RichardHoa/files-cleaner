@@ -4,7 +4,8 @@
 use std::fs;
 use std::io;
 use std::path::Path;
-use std::time::Duration;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use rusqlite::{Connection, ErrorCode, TransactionBehavior};
 
@@ -27,7 +28,33 @@ pub fn open_database(
     migrations: &[&str],
 ) -> rusqlite::Result<Connection> {
     let mut db = Connection::open(path)?;
-    db.busy_timeout(Duration::from_secs(5))?;
+    db.busy_timeout(BUSY_TIMEOUT)?;
+    // Some locks SQLite takes while setting a database up give up at once
+    // instead of waiting out the busy timeout, as when a new one turns to
+    // WAL while others open it too (seen on Windows). Each step is safe to
+    // run again, so it is retried until the same timeout.
+    let deadline = Instant::now() + BUSY_TIMEOUT;
+    loop {
+        match set_up(&mut db, durability, migrations) {
+            Err(e)
+                if e.sqlite_error_code() == Some(ErrorCode::DatabaseBusy)
+                    && Instant::now() < deadline =>
+            {
+                thread::sleep(Duration::from_millis(10));
+            }
+            result => return result.map(|()| db),
+        }
+    }
+}
+
+/// How long opening a database waits for others holding it.
+const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+
+fn set_up(
+    db: &mut Connection,
+    durability: Durability,
+    migrations: &[&str],
+) -> rusqlite::Result<()> {
     db.pragma_update(None, "journal_mode", "WAL")?;
     match durability {
         Durability::Full => {
@@ -40,8 +67,7 @@ pub fn open_database(
         }
         Durability::Normal => db.pragma_update(None, "synchronous", "NORMAL")?,
     }
-    migrate(&mut db, migrations)?;
-    Ok(db)
+    migrate(db, migrations)
 }
 
 /// Whether `e` says the database isn't one SQLite can read, or can't be

@@ -1,5 +1,5 @@
 //! All of the app's network access. The app downloads only the Grouping
-//! Models (ADR-0004), default or picked (ADR-0009), and only after the user
+//! Models, default or picked, and only after the user
 //! agrees; `models` asks for them through here, and nothing else in the app
 //! uses the HTTP client (`tests/network.rs` fails if it does).
 //!

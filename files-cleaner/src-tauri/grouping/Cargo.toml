@@ -2,7 +2,7 @@
 name = "files-cleaner-grouping"
 version = "0.1.0"
 edition = "2021"
-description = "Suggested Folders from what's inside the files: reading, the Grouping Models on llama.cpp, and clustering (ADR-0004)"
+description = "Suggested Folders from what's inside the files: reading, the Grouping Models on llama.cpp, and clustering"
 
 [dependencies]
 blake3 = "1.8.7"

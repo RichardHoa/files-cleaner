@@ -1,6 +1,6 @@
 //! The Journal: every Session's records, appended to one SQLite database
 //! and committed to disk one by one, so a Session can be undone after a
-//! crash or a restart (ADR-0002, ADR-0012). Also the lock that lets one
+//! crash or a restart (ADR-0012). Also the lock that lets one
 //! Session run at a time.
 
 use std::collections::BTreeSet;

@@ -1,5 +1,5 @@
-//! The Hugging Face link to the model the user picked to describe files
-//! (ADR 0009): only a link to one `.gguf` file, never a repo, since a repo
+//! The Hugging Face link to the model the user picked to describe files:
+//! only a link to one `.gguf` file, never a repo, since a repo
 //! holds many quantizations.
 
 use serde::Serialize;

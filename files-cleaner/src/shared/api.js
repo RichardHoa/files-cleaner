@@ -98,7 +98,7 @@ export const removeRecentScanRoot = (scanRoot) => invoke("remove_recent_scan_roo
 // being "notInstalled", "downloading", "paused" or "installed", `downloaded` and `total` in bytes, `error` why
 // the last download failed, or null, and `models` each model's `{ name, size, path }`: its bytes on disk and
 // its file (the partial one while downloading), or null when nothing of it is on disk. `custom` is the model
-// the user picked to describe files (ADR 0009), or null: `{ state, name, link, downloaded, total, sha256,
+// the user picked to describe files, or null: `{ state, name, link, downloaded, total, sha256,
 // path, inUse }`, `state` being "downloading", "paused", "checking" (describing the sample file) or
 // "installed", and `inUse` whether it describes files now. `customError` says why its download stopped, or
 // why it was refused, or is null.

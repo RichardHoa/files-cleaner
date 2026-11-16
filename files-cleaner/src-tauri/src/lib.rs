@@ -175,7 +175,7 @@ fn reset_settings(app: AppHandle) -> Result<LoadedConfig, CommandError> {
 
 #[tauri::command]
 fn change_setting(app: AppHandle, change: SettingChange) -> Result<LoadedConfig, CommandError> {
-    // The describing model is switched only once it has passed its check (ADR 0009).
+    // The describing model is switched only once it has passed its check.
     if matches!(change, SettingChange::DescribingModel(_)) {
         return Err(CommandError::new(
             "Pick the describing model under Advanced in Settings.",
@@ -632,7 +632,7 @@ fn remove_grouping_models(
 
 /// Starts downloading the describing model at the Hugging Face `link`, in
 /// place of any picked before, or resumes the one stopped when `link` is
-/// null (ADR 0009). Once downloaded it describes a sample file, and is used
+/// null. Once downloaded it describes a sample file, and is used
 /// only if it can.
 #[tauri::command]
 async fn download_describing_model(

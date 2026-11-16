@@ -1,4 +1,4 @@
-//! The Grouping Models (ADR-0004): two official GGUF files, pinned by
+//! The Grouping Models: two official GGUF files, pinned by
 //! revision, size and SHA-256, downloaded on the user's say-so into a
 //! folder in the app data folder. The download runs on its own thread, so
 //! the user can scan and clean meanwhile.
@@ -10,7 +10,7 @@
 //! always be read from the folder.
 //!
 //! The user may also pick a model to describe files in place of the first
-//! (ADR 0009), linked from Hugging Face. It downloads the same way into
+//! linked from Hugging Face. It downloads the same way into
 //! `custom/`, beside a `source.json` saying where from, and is moved into
 //! place only once it has described a sample file; its SHA-256 is shown,
 //! never checked. At most one is kept, and the default stays on disk.

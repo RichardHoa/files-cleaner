@@ -389,7 +389,7 @@ function modelsSection() {
 
 /**
  * "Advanced": a box for a Hugging Face link to one `.gguf` file, to describe files with that model instead of
- * the default (ADR 0009), and the picked model's download, check or switch. Built once and fed each status,
+ * the default, and the picked model's download, check or switch. Built once and fed each status,
  * so what's typed in the box stays; shown only once the Grouping Models are installed.
  */
 function describingModelSetting() {

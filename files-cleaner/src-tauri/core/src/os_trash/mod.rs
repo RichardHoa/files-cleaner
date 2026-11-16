@@ -1,7 +1,6 @@
 //! The OS Trash: sends items to the System Trash and puts them back. The
 //! backend for each OS lives in a submodule; Run, Undo and Redo reach the OS
-//! only through `OsTrash`, and nothing here ever deletes an item for good
-//! (ADR-0001).
+//! only through `OsTrash`, and nothing here ever deletes an item for good.
 
 #[cfg(target_os = "linux")]
 mod linux;

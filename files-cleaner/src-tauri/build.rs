@@ -1,7 +1,7 @@
 //! Puts the files the app ships with in place before Tauri bundles them:
 //! PDFium for reading PDFs (a pinned prebuilt release), OCR's language
 //! files (pinned too), and on Windows the Vulkan loader, so the app starts
-//! on a machine with no Vulkan driver and groups on the CPU (ADR-0004).
+//! on a machine with no Vulkan driver and groups on the CPU.
 //! These downloads happen at build time only, each checked against its
 //! SHA-256; the app itself downloads nothing but the Grouping Models.
 

@@ -1,5 +1,5 @@
 //! Where the app may download from: Hugging Face only, over HTTPS. The
-//! Grouping Models, default or picked (ADR 0009), are the only thing the app
+//! Grouping Models, default or picked, are the only thing the app
 //! downloads, and the app's downloads module checks every request and every
 //! redirect hop here before making it.
 

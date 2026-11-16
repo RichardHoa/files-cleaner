@@ -1,5 +1,5 @@
 // The steps after picking a Scan Root, in order: the scan, finding its Duplicate Groups, then the review
-// screen with both, which reads the files for Suggested Folders from that same scan (ADR 0005).
+// screen with both, which reads the files for Suggested Folders from that same scan.
 // Kept apart from the screens, and given the commands it needs, so the order can be tested.
 import { count, formatSize, plural } from "./shared/format.js";
 

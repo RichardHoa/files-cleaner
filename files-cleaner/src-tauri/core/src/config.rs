@@ -25,7 +25,7 @@ pub struct Config {
     /// `None` until they're asked, which is only once.
     pub notifications: Option<bool>,
     /// The Hugging Face link of the model the user picked to describe
-    /// files (ADR 0009), or `None` for the app's own.
+    /// files, or `None` for the app's own.
     pub describing_model: Option<String>,
 }
 

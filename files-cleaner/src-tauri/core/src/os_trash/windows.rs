@@ -1,7 +1,7 @@
 //! The Windows System Trash: `IFileOperation` with `FOFX_RECYCLEONDELETE`,
 //! and a progress sink to learn where each item landed.
 //!
-//! A trash must never become a permanent delete (ADR-0001), and this operation
+//! A trash must never become a permanent delete, and this operation
 //! deletes outright when the Recycle Bin can't take an item. So the drive is
 //! checked first, and the sink vetoes any delete not flagged as a recycle. If
 //! Windows leaves that flag off a real recycle, items are refused and stay in

@@ -1,6 +1,10 @@
+---
+status: accepted
+---
+
 # No learning from past Plan decisions
 
-The app doesn't remember what the user decided on the Review screen (renames, destinations, merges, removals, trashes) to shape later Plans. Most of that memory already lives on disk. A file the user moved into a folder inside the Scan Root makes that folder an existing subfolder at the next scan, and existing subfolders are already read and offered as somewhere files can go. Learning would only add something for renamed Suggested Folders and for destinations outside the Scan Root. That is too little to justify another store and matching step that users can't see. This closes issue #12, which took the idea from AI File Sorter's "learning from approved reviews".
+The app doesn't remember what the user decided on the Review screen (renames, destinations, merges, removals, trashes) to shape later Plans. Most of that memory already lives on disk: a file moved into a folder inside the Scan Root makes that folder an existing subfolder at the next scan, and existing subfolders are already read and offered as somewhere files can go. Learning would only add something for renamed Suggested Folders and for destinations outside the Scan Root, too little to justify another store and matching step that users can't see. This closes issue #12, which took the idea from AI File Sorter's "learning from approved reviews".
 
 ## Considered Options
 

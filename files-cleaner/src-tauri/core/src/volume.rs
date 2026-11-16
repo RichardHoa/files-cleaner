@@ -1,6 +1,6 @@
 //! Which disk a path is on. A move within one disk is an atomic rename; a
 //! move between disks would be a copy and a delete, which the app never
-//! does (ADR-0002), so the Planner marks those as errors.
+//! does, so the Planner marks those as errors.
 
 use std::fs;
 use std::path::Path;

@@ -1,5 +1,5 @@
 //! The Grouping Models on llama.cpp: Qwen2.5-1.5B-Instruct, or the model
-//! the user picked (ADR 0009), writes the cards and places the files left
+//! the user picked, writes the cards and places the files left
 //! out of every folder, and Qwen3-Embedding-0.6B embeds the cards, on the
 //! GPU through Metal on macOS or Vulkan elsewhere, or on the CPU when
 //! there's no usable GPU. File contents never leave the machine.

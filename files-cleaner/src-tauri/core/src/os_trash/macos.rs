@@ -1,4 +1,4 @@
-//! The macOS System Trash: NSFileManager, as ADR-0001 says.
+//! The macOS System Trash: NSFileManager.
 
 use std::fs;
 use std::io;

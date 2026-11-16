@@ -1,5 +1,5 @@
 //! Suggested Folders from what's inside the loose files of a Scan Root
-//! (ADR-0004). A small LLM writes a card per file, an embedding model embeds
+//! A small LLM writes a card per file, an embedding model embeds
 //! the cards, and the cards are clustered; each group is named after its
 //! most common topic and anchored to a matching existing subfolder. Then
 //! the LLM is asked where each read file left out of every group belongs,
