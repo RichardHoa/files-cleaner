@@ -16,6 +16,7 @@ use files_cleaner_core::{
     RunProgress, ScanProgress, ScanResult, SessionDetails, SessionPage, SettingChange,
     SuggestedFolderChoice, Summary, SystemTrash, EXAMPLE_CONFIG,
 };
+use files_cleaner_core::write_atomically;
 use files_cleaner_grouping::{self as grouping, CardStore, Grouping, LlamaModels};
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
@@ -130,7 +131,7 @@ fn read_or_create(path: &Path) -> Result<String, CommandError> {
         if let Some(folder) = path.parent() {
             fs::create_dir_all(folder).map_err(CommandError::new)?;
         }
-        fs::write(path, EXAMPLE_CONFIG).map_err(CommandError::new)?;
+        write_atomically(path, EXAMPLE_CONFIG.as_bytes()).map_err(CommandError::new)?;
     }
     fs::read_to_string(path).map_err(CommandError::new)
 }
@@ -699,7 +700,7 @@ fn write_app_json(app: &AppHandle, name: &str, value: &impl Serialize) -> Result
         fs::create_dir_all(folder).map_err(CommandError::new)?;
     }
     let text = serde_json::to_string(value).map_err(CommandError::new)?;
-    fs::write(path, text).map_err(CommandError::new)
+    write_atomically(&path, text.as_bytes()).map_err(CommandError::new)
 }
 
 /// How long reading a file takes on this computer, as stored.

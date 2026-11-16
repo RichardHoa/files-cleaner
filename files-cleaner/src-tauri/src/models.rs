@@ -509,7 +509,8 @@ impl GroupingModels {
                 let folder = self.custom_folder();
                 fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
                 let json = serde_json::to_string(&source).map_err(|e| e.to_string())?;
-                fs::write(folder.join(SOURCE_FILE), json).map_err(|e| e.to_string())?;
+                core::write_atomically(&folder.join(SOURCE_FILE), json.as_bytes())
+                    .map_err(|e| e.to_string())?;
             }
             let asked = Arc::new(AtomicU8::new(RUN));
             inner.custom_running = Some(Arc::clone(&asked));
@@ -666,7 +667,8 @@ impl GroupingModels {
         };
         let json = serde_json::to_string(&checked).map_err(|e| failed(&e))?;
         fs::rename(&target.partial, &target.file).map_err(|e| failed(&e))?;
-        fs::write(self.custom_folder().join(SOURCE_FILE), json).map_err(|e| failed(&e))?;
+        core::write_atomically(&self.custom_folder().join(SOURCE_FILE), json.as_bytes())
+            .map_err(|e| failed(&e))?;
         crate::save_setting(
             &self.app,
             &SettingChange::DescribingModel(Some(source.link.clone())),

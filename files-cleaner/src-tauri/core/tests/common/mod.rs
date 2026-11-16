@@ -84,6 +84,23 @@ pub fn journal_dir() -> TempDir {
         .unwrap()
 }
 
+/// The Journal database in `journal`, for a test to change as a crash would.
+pub fn journal_database(journal: &Path) -> rusqlite::Connection {
+    rusqlite::Connection::open(journal.join("journal.sqlite")).unwrap()
+}
+
+/// Leaves Session `id`'s Journal as a crash right after its changes would:
+/// intents, and no outcome after them.
+pub fn drop_outcomes(journal: &Path, id: &str) {
+    journal_database(journal)
+        .execute(
+            "DELETE FROM records WHERE session_id = ?1
+             AND json_extract(record, '$.record') IN ('outcome', 'finished')",
+            [id],
+        )
+        .unwrap();
+}
+
 /// An OS Trash that moves items into a folder beside the Journals, so tests
 /// never touch a real Trash. It can refuse items, or say up front that
 /// everything in a folder can't be trashed.

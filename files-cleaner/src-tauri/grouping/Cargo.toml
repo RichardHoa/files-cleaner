@@ -9,6 +9,8 @@ blake3 = "1.8.7"
 files-cleaner-core = { path = "../core" }
 # `pdfium_7881` must match the PDFium release bundled with the app.
 pdfium-render = { version = "0.9.4", default-features = false, features = ["pdfium_7881"] }
+# The card store (ADR-0012).
+rusqlite = { version = "0.43.0", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # OCR of scanned PDFs (`ocr.rs`): Tesseract and Leptonica, built from

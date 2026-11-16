@@ -8,6 +8,7 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
+use crate::atomic_file::write_atomically;
 use crate::scanner::millis;
 
 /// How many Recent Scan Roots are kept.
@@ -82,16 +83,14 @@ fn read(store: &Path) -> Vec<Stored> {
         .unwrap_or_default()
 }
 
-/// Writes to a temporary file first, so a crash mid-write leaves the old
-/// list rather than half a file.
+/// Writes atomically, so a crash mid-write leaves the old list rather than
+/// half a file.
 fn write(store: &Path, entries: &[Stored]) -> io::Result<()> {
     if let Some(folder) = store.parent() {
         fs::create_dir_all(folder)?;
     }
-    let temporary = store.with_extension("json.tmp");
-    fs::write(
-        &temporary,
-        serde_json::to_vec_pretty(entries).expect("entries always serialise"),
-    )?;
-    fs::rename(&temporary, store)
+    write_atomically(
+        store,
+        &serde_json::to_vec_pretty(entries).expect("entries always serialise"),
+    )
 }

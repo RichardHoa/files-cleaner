@@ -1,8 +1,10 @@
 //! The Files Cleaner core: everything except the UI, with no Tauri
 //! dependency (ADR-0003). The public functions here are the test seam.
 
+mod atomic_file;
 mod clash;
 mod config;
+mod database;
 mod download_hosts;
 mod duplicates;
 mod executor;
@@ -19,10 +21,12 @@ mod sessions;
 mod suggested_folders;
 mod volume;
 
+pub use atomic_file::write_atomically;
 pub use config::{
     load_config, reset_config, save_config, Config, ConfigError, DefaultCopyRule, GroupingSettings,
     SettingChange, EXAMPLE_CONFIG,
 };
+pub use database::{delete_database, is_damaged, open_database, Durability};
 pub use download_hosts::{check_download, follow_redirect, Hop};
 pub use duplicates::{
     duplicate_groups, DuplicateCopy, DuplicateGroup, DuplicatePhase, DuplicateProgress,

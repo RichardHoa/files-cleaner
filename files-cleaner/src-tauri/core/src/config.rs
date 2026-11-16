@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::atomic_file;
+
 /// The config written on first launch, as a working starting point.
 pub const EXAMPLE_CONFIG: &str = r#"{
   "neverTouch": ["~/Downloads/Keep"]
@@ -288,17 +290,14 @@ pub fn reset_config(path: &Path, home: &Path) -> Result<Config, ConfigError> {
     load_config(EXAMPLE_CONFIG, home)
 }
 
-/// Replaces the file at `path` with `text` through a temporary file and a
-/// rename, so a crash mid-write leaves the old file rather than half a new one.
+/// Replaces the file at `path` with `text`, so a crash mid-write leaves the
+/// old file rather than half a new one.
 fn write_atomically(path: &Path, text: &str) -> Result<(), ConfigError> {
-    let plain = |e: std::io::Error| ConfigError {
+    atomic_file::write_atomically(path, text.as_bytes()).map_err(|e| ConfigError {
         message: e.to_string(),
         line: None,
         column: None,
-    };
-    let temporary = path.with_extension("json.tmp");
-    fs::write(&temporary, text).map_err(plain)?;
-    fs::rename(&temporary, path).map_err(plain)
+    })
 }
 
 /// A threshold as JSON, written as it reads (`0.73`), not as the nearest

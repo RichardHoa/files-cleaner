@@ -1,20 +1,27 @@
-//! The Journal: one append-only JSON-lines file per Session, flushed to
-//! disk after every record, so a Session can be undone after a crash or a
-//! restart (ADR-0002). Also the lock that lets one Session run at a time.
+//! The Journal: every Session's records, appended to one SQLite database
+//! and committed to disk one by one, so a Session can be undone after a
+//! crash or a restart (ADR-0002, ADR-0012). Also the lock that lets one
+//! Session run at a time.
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::fs::{self, File, OpenOptions, TryLockError};
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::SystemTime;
 
+use rusqlite::{params, Connection, ErrorCode, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
+use crate::database::{delete_database, is_damaged, open_database, Durability};
 use crate::planner::{OperationKind, SourceState};
 use crate::scanner::millis;
 use crate::session_id;
 
-const EXTENSION: &str = "jsonl";
+const DATABASE_FILE_NAME: &str = "journal.sqlite";
+/// Each Session's Journal before ADR-0012, imported into the database.
+const OLD_EXTENSION: &str = "jsonl";
 const LOCK_FILE_NAME: &str = "sessions.lock";
 
 /// The first line of a Journal.
@@ -98,7 +105,7 @@ pub enum SessionError {
     UnknownSession(String),
     /// A Journal that can't be understood.
     BadJournal {
-        path: PathBuf,
+        session: String,
         problem: String,
     },
     Io(io::Error),
@@ -111,8 +118,8 @@ impl fmt::Display for SessionError {
                 "Another Session or Undo is in progress; try again once it has finished",
             ),
             SessionError::UnknownSession(id) => write!(f, "There is no Session {id}"),
-            SessionError::BadJournal { path, problem } => {
-                write!(f, "The Journal {} is damaged: {problem}", path.display())
+            SessionError::BadJournal { session, problem } => {
+                write!(f, "The Journal of Session {session} is damaged: {problem}")
             }
             SessionError::Io(e) => write!(f, "Couldn't write the Journal: {e}"),
         }
@@ -151,140 +158,332 @@ pub fn lock_sessions(journal_dir: &Path) -> Result<SessionLock, SessionError> {
 
 /// An open Journal that records are appended to.
 pub struct Journal {
-    file: File,
+    journals: Journals,
+    id: String,
 }
 
 impl Journal {
     /// Starts the Journal of a new Session of `scan_root`, starting now,
     /// and writes its header.
     pub fn create(journal_dir: &Path, scan_root: PathBuf) -> io::Result<(SessionHeader, Journal)> {
+        let journals = Journals::open(journal_dir)?;
         let now = SystemTime::now();
+        let root = utf8(&scan_root)?.to_owned();
         for id in session_id::candidates(now) {
-            let file = match OpenOptions::new()
-                .create_new(true)
-                .append(true)
-                .open(path(journal_dir, &id))
-            {
-                Ok(file) => file,
-                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-                Err(e) => return Err(e),
-            };
-            sync_folder(journal_dir)?;
+            let started_at = millis(now);
+            let inserted = journals.db.execute(
+                "INSERT INTO sessions (id, scan_root, started_at) VALUES (?1, ?2, ?3)",
+                params![id, root, started_at],
+            );
+            match inserted {
+                Ok(_) => {}
+                Err(e) if e.sqlite_error_code() == Some(ErrorCode::ConstraintViolation) => continue,
+                Err(e) => return Err(sql(e)),
+            }
             let header = SessionHeader {
-                id,
+                id: id.clone(),
                 scan_root,
-                started_at: millis(now),
+                started_at,
             };
-            let mut journal = Journal { file };
-            journal.append_line(&header)?;
-            return Ok((header, journal));
+            return Ok((header, Journal { journals, id }));
         }
         unreachable!("there is always another Session ID to try")
     }
 
-    /// Reopens an existing Session's Journal to add to it. A last line cut
-    /// short by a crash, which `read` ignores, is dropped first, so the next
-    /// record starts a line of its own rather than finishing it.
-    pub fn reopen(journal_dir: &Path, id: &str) -> io::Result<Journal> {
-        let path = path(journal_dir, id);
-        let bytes = fs::read(&path)?;
-        let whole_lines = bytes.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
-        if whole_lines < bytes.len() {
-            // Not in append mode, which Windows won't let shorten a file.
-            let file = OpenOptions::new().write(true).open(&path)?;
-            file.set_len(whole_lines as u64)?;
-            file.sync_data()?;
-        }
-        let file = OpenOptions::new().append(true).open(path)?;
-        Ok(Journal { file })
-    }
-
     /// Writes `record` and waits until it is on disk.
     pub fn append(&mut self, record: &Record) -> io::Result<()> {
-        self.append_line(record)
+        let json = serde_json::to_string(record).expect("records always serialise");
+        self.journals
+            .db
+            .execute(
+                "INSERT INTO records (session_id, record) VALUES (?1, ?2)",
+                params![self.id, json],
+            )
+            .map(|_| ())
+            .map_err(sql)
     }
 
-    fn append_line(&mut self, value: &impl Serialize) -> io::Result<()> {
-        let mut line = serde_json::to_vec(value).expect("records always serialise");
-        line.push(b'\n');
-        self.file.write_all(&line)?;
-        self.file.sync_data()
+    /// Every Session's Journal, through this one's connection.
+    pub fn journals(&self) -> &Journals {
+        &self.journals
+    }
+
+    /// Deletes this Session's Journal.
+    pub fn discard(mut self) -> io::Result<()> {
+        self.journals.remove(&self.id)
     }
 }
 
-/// Session `id`'s header and every record after it. A last line cut
-/// short by a crash is ignored.
-pub fn read(journal_dir: &Path, id: &str) -> Result<(SessionHeader, Vec<Record>), SessionError> {
-    if !session_id::is_valid(id) {
-        return Err(SessionError::UnknownSession(id.to_string()));
+/// Every Session's Journal: the database in a Journal folder, open, so a
+/// pass over many Sessions opens it once.
+pub struct Journals {
+    db: Connection,
+}
+
+impl Journals {
+    /// The database in `journal_dir`, created or brought up to date, with
+    /// any Journals left from before ADR-0012 imported. Every committed
+    /// write is on disk before the commit returns.
+    pub fn open(journal_dir: &Path) -> io::Result<Journals> {
+        fs::create_dir_all(journal_dir)?;
+        let mut db = open_database(
+            &journal_dir.join(DATABASE_FILE_NAME),
+            Durability::Full,
+            MIGRATIONS,
+        )
+        .map_err(sql)?;
+        import_old_journals(&mut db, journal_dir);
+        Ok(Journals { db })
     }
-    let path = path(journal_dir, id);
-    let text = match fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            return Err(SessionError::UnknownSession(id.to_string()))
+
+    /// Reopens Session `id`'s Journal to add to it.
+    pub fn reopen(self, id: &str) -> io::Result<Journal> {
+        if header(&self.db, id).map_err(sql)?.is_none() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("There is no Session {id}"),
+            ));
         }
-        Err(e) => return Err(e.into()),
+        Ok(Journal {
+            journals: self,
+            id: id.to_owned(),
+        })
+    }
+
+    /// Session `id`'s header and every record after it, in the order they
+    /// were written.
+    pub fn read(&self, id: &str) -> Result<(SessionHeader, Vec<Record>), SessionError> {
+        if !session_id::is_valid(id) {
+            return Err(SessionError::UnknownSession(id.to_string()));
+        }
+        let Some(header) = header(&self.db, id).map_err(sql)? else {
+            return Err(SessionError::UnknownSession(id.to_string()));
+        };
+        let mut query = self
+            .db
+            .prepare("SELECT seq, record FROM records WHERE session_id = ?1 ORDER BY seq")
+            .map_err(sql)?;
+        let rows = query
+            .query_map([id], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
+            .map_err(sql)?;
+        let mut records = Vec::new();
+        for row in rows {
+            let (seq, json) = row.map_err(sql)?;
+            let record = serde_json::from_str(&json).map_err(|e| SessionError::BadJournal {
+                session: id.to_string(),
+                problem: format!("record {seq}: {e}"),
+            })?;
+            records.push(record);
+        }
+        Ok((header, records))
+    }
+
+    /// The IDs of every Session with a Journal.
+    pub fn session_ids(&self) -> io::Result<Vec<String>> {
+        let mut query = self.db.prepare("SELECT id FROM sessions").map_err(sql)?;
+        let ids = query
+            .query_map([], |row| row.get(0))
+            .map_err(sql)?
+            .collect::<Result<_, _>>()
+            .map_err(sql)?;
+        Ok(ids)
+    }
+
+    /// Deletes Session `id`'s Journal; one already gone is fine.
+    pub fn remove(&mut self, id: &str) -> io::Result<()> {
+        let tx = self.db.transaction().map_err(sql)?;
+        tx.execute("DELETE FROM records WHERE session_id = ?1", [id])
+            .map_err(sql)?;
+        tx.execute("DELETE FROM sessions WHERE id = ?1", [id])
+            .map_err(sql)?;
+        tx.commit().map_err(sql)
+    }
+
+    /// Deletes every Session's Journal in `journal_dir`, which these are
+    /// open from, and returns how many there were. Any old Journal file
+    /// that couldn't be imported goes too, though it was never a Session
+    /// anyone saw.
+    pub fn remove_all(&mut self, journal_dir: &Path) -> io::Result<usize> {
+        let tx = self.db.transaction().map_err(sql)?;
+        tx.execute("DELETE FROM records", []).map_err(sql)?;
+        let removed = tx.execute("DELETE FROM sessions", []).map_err(sql)?;
+        tx.commit().map_err(sql)?;
+        remove_old_journals(journal_dir)?;
+        Ok(removed)
+    }
+}
+
+/// Deletes every Session's Journal in `journal_dir` and returns how many
+/// there were. A database too damaged to open is deleted whole, with no
+/// count, so the Journal can always be started again.
+pub fn remove_all_sessions(journal_dir: &Path) -> io::Result<usize> {
+    match Journals::open(journal_dir) {
+        Ok(mut journals) => journals.remove_all(journal_dir),
+        Err(e) if damaged(&e) => {
+            delete_database(&journal_dir.join(DATABASE_FILE_NAME))?;
+            remove_old_journals(journal_dir)?;
+            Ok(0)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Whether `e` is a database only deleting fixes: see `is_damaged`.
+fn damaged(e: &io::Error) -> bool {
+    e.get_ref()
+        .and_then(|e| e.downcast_ref::<rusqlite::Error>())
+        .is_some_and(is_damaged)
+}
+
+fn remove_old_journals(journal_dir: &Path) -> io::Result<()> {
+    for path in old_journals(journal_dir)? {
+        remove_if_there(&path)?;
+    }
+    Ok(())
+}
+
+/// The database's layout: see `open_database`.
+const MIGRATIONS: &[&str] = &["CREATE TABLE sessions (
+         id TEXT PRIMARY KEY,
+         scan_root TEXT NOT NULL,
+         -- Milliseconds since the Unix epoch.
+         started_at INTEGER NOT NULL
+     ) STRICT;
+     -- Every record after a Session's header, as JSON, in the order written.
+     CREATE TABLE records (
+         seq INTEGER PRIMARY KEY,
+         session_id TEXT NOT NULL REFERENCES sessions (id),
+         record TEXT NOT NULL
+     ) STRICT;
+     CREATE INDEX records_by_session ON records (session_id, seq);"];
+
+/// Old Journal files this process found it couldn't understand, so they
+/// aren't read again on every open.
+static UNREADABLE: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
+
+/// Moves each Journal file left from before ADR-0012 into the database, so
+/// those Sessions can still be undone. A file is deleted only once its
+/// Session is committed; one that can't be understood is left where it is,
+/// until every Session is deleted. Another open may import the same file
+/// at the same time; the Session is inserted once. A file that can't be
+/// imported or deleted now is left for the next open, so it never stops
+/// the Journal being used.
+fn import_old_journals(db: &mut Connection, journal_dir: &Path) {
+    let Ok(paths) = old_journals(journal_dir) else {
+        return;
     };
-    let bad = |problem: String| SessionError::BadJournal {
-        path: path.clone(),
-        problem,
-    };
+    let mut unreadable = UNREADABLE.lock().unwrap_or_else(|e| e.into_inner());
+    for path in paths {
+        if unreadable.contains(&path) {
+            continue;
+        }
+        // Perhaps only held open by another program for now.
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Some((header, records)) = read_old_journal(&text) else {
+            unreadable.insert(path);
+            continue;
+        };
+        if import_old_journal(db, &header, records).is_ok() {
+            let _ = remove_if_there(&path);
+        }
+    }
+}
+
+fn import_old_journal(
+    db: &mut Connection,
+    header: &SessionHeader,
+    records: Vec<String>,
+) -> io::Result<()> {
+    let tx = db
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(sql)?;
+    // Already there if a crash came between the commit and the delete.
+    let inserted = tx
+        .execute(
+            "INSERT OR IGNORE INTO sessions (id, scan_root, started_at) VALUES (?1, ?2, ?3)",
+            params![header.id, utf8(&header.scan_root)?, header.started_at],
+        )
+        .map_err(sql)?;
+    if inserted == 1 {
+        for record in records {
+            tx.execute(
+                "INSERT INTO records (session_id, record) VALUES (?1, ?2)",
+                params![header.id, record],
+            )
+            .map_err(sql)?;
+        }
+    }
+    tx.commit().map_err(sql)
+}
+
+/// The Journal files in `journal_dir` from before ADR-0012.
+fn old_journals(journal_dir: &Path) -> io::Result<Vec<PathBuf>> {
+    let mut paths = Vec::new();
+    for child in fs::read_dir(journal_dir)? {
+        let path = child?.path();
+        if path.extension().is_some_and(|e| e == OLD_EXTENSION) {
+            paths.push(path);
+        }
+    }
+    Ok(paths)
+}
+
+/// Deletes the file at `path`, and says whether it was still there.
+fn remove_if_there(path: &Path) -> io::Result<bool> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// An old Journal file's header and the text of each record after it. A
+/// last line cut short by a crash is ignored.
+fn read_old_journal(text: &str) -> Option<(SessionHeader, Vec<String>)> {
     let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
-    let Some((first, rest)) = lines.split_first() else {
-        return Err(bad("it is empty".into()));
-    };
-    let header = serde_json::from_str(first)
-        .map_err(|e| bad(format!("its first line isn't a Session header: {e}")))?;
+    let (first, rest) = lines.split_first()?;
+    let header: SessionHeader = serde_json::from_str(first).ok()?;
+    if !session_id::is_valid(&header.id) {
+        return None;
+    }
     let mut records = Vec::with_capacity(rest.len());
     for (i, line) in rest.iter().enumerate() {
-        match serde_json::from_str(line) {
-            Ok(record) => records.push(record),
+        match serde_json::from_str::<Record>(line) {
+            Ok(_) => records.push((*line).to_owned()),
             Err(_) if i + 1 == rest.len() && !text.ends_with('\n') => {}
-            Err(e) => return Err(bad(format!("line {}: {e}", i + 2))),
+            Err(_) => return None,
         }
     }
-    Ok((header, records))
+    Some((header, records))
 }
 
-/// The IDs of every Session with a Journal in `journal_dir`.
-pub fn session_ids(journal_dir: &Path) -> io::Result<Vec<String>> {
-    let children = match fs::read_dir(journal_dir) {
-        Ok(children) => children,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(e) => return Err(e),
-    };
-    let mut ids = Vec::new();
-    for child in children {
-        let path = child?.path();
-        if path.extension().is_some_and(|e| e == EXTENSION) {
-            if let Some(stem) = path.file_stem() {
-                ids.push(stem.to_string_lossy().into_owned());
-            }
-        }
-    }
-    Ok(ids)
+fn header(db: &Connection, id: &str) -> rusqlite::Result<Option<SessionHeader>> {
+    db.query_row(
+        "SELECT scan_root, started_at FROM sessions WHERE id = ?1",
+        [id],
+        |row| {
+            Ok(SessionHeader {
+                id: id.to_owned(),
+                scan_root: PathBuf::from(row.get::<_, String>(0)?),
+                started_at: row.get(1)?,
+            })
+        },
+    )
+    .optional()
 }
 
-/// Deletes Session `id`'s Journal; one already gone is fine.
-pub fn remove(journal_dir: &Path, id: &str) -> io::Result<()> {
-    match fs::remove_file(path(journal_dir, id)) {
-        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
-        _ => Ok(()),
-    }
+/// Paths are journaled as text, as JSON writes them.
+fn utf8(path: &Path) -> io::Result<&str> {
+    path.to_str().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{} isn't valid Unicode", path.display()),
+        )
+    })
 }
 
-/// Waits until a new file's name in `folder` is on disk, not just its
-/// contents. Windows can't open a folder to sync it, and doesn't need to.
-fn sync_folder(folder: &Path) -> io::Result<()> {
-    if cfg!(windows) {
-        return Ok(());
-    }
-    // The app's own Journal folder; no path comes from a web request.
-    // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
-    File::open(folder)?.sync_all()
-}
-
-fn path(journal_dir: &Path, id: &str) -> PathBuf {
-    journal_dir.join(format!("{id}.{EXTENSION}"))
+fn sql(e: rusqlite::Error) -> io::Error {
+    io::Error::other(e)
 }

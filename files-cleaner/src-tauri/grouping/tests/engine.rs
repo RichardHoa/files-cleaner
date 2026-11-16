@@ -474,3 +474,13 @@ fn stopping_groups_the_files_read_so_far_and_leaves_the_rest_where_they_are() {
         .flat_map(|f| &f.files)
         .all(|p| read.contains(&p)));
 }
+
+#[test]
+fn clearing_a_damaged_store_starts_it_again() {
+    let store_dir = tempfile::tempdir().unwrap();
+    fs::write(store_dir.path().join("cards.sqlite"), "not a database").unwrap();
+
+    CardStore::open(store_dir.path()).clear().unwrap();
+
+    assert!(!store_dir.path().join("cards.sqlite").exists());
+}

@@ -6,6 +6,8 @@ description = "Scanning, planning, journaling and Undo for Files Cleaner, with n
 
 [dependencies]
 blake3 = "1.8.7"
+# The Journal (ADR-0012); `bundled` builds SQLite in, the same version on every OS.
+rusqlite = { version = "0.43.0", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps the config's keys in the order the user wrote them when Settings saves it.
 serde_json = { version = "1", features = ["preserve_order"] }

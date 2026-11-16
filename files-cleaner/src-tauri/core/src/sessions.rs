@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::executor::{exists, Outcome};
 use crate::journal::{
-    self, lock_sessions, OutcomeKind, Phase, Record, SessionError, SessionHeader,
+    self, lock_sessions, Journals, OutcomeKind, Phase, Record, SessionError, SessionHeader,
 };
 use crate::os_trash::TRASH_PLACE;
 use crate::planner::{names_below, OperationKind, SourceState};
@@ -213,8 +213,8 @@ pub(crate) struct SessionJournal {
 }
 
 impl SessionJournal {
-    pub fn read(journal_dir: &Path, id: &str) -> Result<SessionJournal, SessionError> {
-        let (header, records) = journal::read(journal_dir, id)?;
+    pub fn read(journals: &Journals, id: &str) -> Result<SessionJournal, SessionError> {
+        let (header, records) = journals.read(id)?;
         let mut session = SessionJournal {
             header,
             finished: false,
@@ -355,18 +355,26 @@ impl SessionJournal {
 /// The Sessions journaled in `journal_dir`, newest first, skipping
 /// `offset` and returning at most `limit`, plus how many there are in all.
 /// Session IDs sort by start time, so only the Journals on the page are
-/// read. A Journal that can't be understood (say, left empty by a crash) is
-/// left out, so it doesn't hide the others; its page is one short.
+/// read. A Journal that can't be understood (say, one with a record an
+/// older version can't read) is left out, so it doesn't hide the others;
+/// its page is one short.
 pub fn list_sessions(
     journal_dir: &Path,
     offset: usize,
     limit: usize,
 ) -> Result<SessionPage, SessionError> {
-    let mut ids = journal::session_ids(journal_dir)?;
+    if !journal_dir.exists() {
+        return Ok(SessionPage {
+            total: 0,
+            sessions: Vec::new(),
+        });
+    }
+    let journals = Journals::open(journal_dir)?;
+    let mut ids = journals.session_ids()?;
     ids.sort_unstable_by(|a, b| b.cmp(a));
     let mut sessions = Vec::new();
     for id in ids.iter().skip(offset).take(limit) {
-        match SessionJournal::read(journal_dir, id) {
+        match SessionJournal::read(&journals, id) {
             Ok(session) => sessions.push(session.info()),
             Err(SessionError::BadJournal { .. }) => {}
             Err(e) => return Err(e),
@@ -383,7 +391,7 @@ pub fn session_details(
     session_id: &str,
     journal_dir: &Path,
 ) -> Result<SessionDetails, SessionError> {
-    let session = SessionJournal::read(journal_dir, session_id)?;
+    let session = SessionJournal::read(&Journals::open(journal_dir)?, session_id)?;
     let root = &session.header.scan_root;
     let operations = session
         .operations
@@ -412,9 +420,5 @@ pub fn session_details(
 /// names. Fails with `SessionError::Busy` during a Run, Undo or Redo.
 pub fn delete_all_sessions(journal_dir: &Path) -> Result<usize, SessionError> {
     let _lock = lock_sessions(journal_dir)?;
-    let ids = journal::session_ids(journal_dir)?;
-    for id in &ids {
-        journal::remove(journal_dir, id)?;
-    }
-    Ok(ids.len())
+    Ok(journal::remove_all_sessions(journal_dir)?)
 }

@@ -6,9 +6,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
 use common::{
-    build_plan, build_suggested_folders_plan, empty_config, journal_dir, real_path,
-    redo_operations, retry_operations, run, run_with_progress, scan_root, undo, undo_operations,
-    write,
+    build_plan, build_suggested_folders_plan, drop_outcomes, empty_config, journal_database,
+    journal_dir, real_path, redo_operations, retry_operations, run, run_with_progress, scan_root,
+    undo, undo_operations, write,
 };
 use files_cleaner_core::{
     delete_all_sessions, list_sessions, lock_sessions, scan, session_details, FileChoice,
@@ -399,13 +399,38 @@ fn a_damaged_journal_doesnt_hide_the_other_sessions() {
     let journal = journal_dir();
     let plan = plan_for(dir.path());
     let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
-    // A crash right after the Journal file was created leaves it empty.
+    // An old Journal file left empty by a crash isn't imported.
     fs::write(journal.path().join("1999-01-01_00-00-00-000Z.jsonl"), "").unwrap();
 
     let sessions = all_sessions(journal.path());
 
     assert_eq!(sessions.len(), 1);
     assert_eq!(Some(sessions[0].id.clone()), summary.session_id);
+}
+
+#[test]
+fn deleting_every_session_deletes_an_old_journal_that_couldnt_be_imported() {
+    let journal = journal_dir();
+    let damaged = journal.path().join("1999-01-01_00-00-00-000Z.jsonl");
+    fs::write(&damaged, "").unwrap();
+
+    assert_eq!(delete_all_sessions(journal.path()).unwrap(), 0);
+
+    assert!(!damaged.exists());
+}
+
+#[test]
+fn deleting_every_session_starts_a_damaged_journal_again() {
+    let dir = messy_folder();
+    let journal = journal_dir();
+    fs::write(journal.path().join("journal.sqlite"), "not a database").unwrap();
+
+    delete_all_sessions(journal.path()).unwrap();
+
+    let plan = plan_for(dir.path());
+    let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
+    assert_eq!(all_sessions(journal.path()).len(), 1);
+    assert!(summary.session_id.is_some());
 }
 
 /// Session `id`'s Operations as `(relative source, state)`, in run order.
@@ -746,15 +771,15 @@ fn no_journals_is_an_empty_first_page() {
 }
 
 #[test]
-fn a_damaged_journal_is_left_out_without_moving_the_other_pages() {
+fn an_old_journal_that_cant_be_read_is_left_out_of_the_pages() {
     let journal = journal_dir();
     let mut ids = fake_journals(journal.path(), 12);
     ids.reverse();
-    // The newest Session's Journal was cut short by a crash.
+    // The newest Session's old Journal file was cut short by a crash.
     fs::write(journal.path().join(format!("{}.jsonl", ids[0])), "").unwrap();
 
-    assert_eq!(page_ids(journal.path(), 0, 10), ids[1..10]);
-    assert_eq!(page_ids(journal.path(), 10, 10), ids[10..12]);
+    assert_eq!(page_ids(journal.path(), 0, 10), ids[1..11]);
+    assert_eq!(page_ids(journal.path(), 10, 10), ids[11..12]);
 }
 
 #[test]
@@ -816,10 +841,12 @@ fn sessions_started_in_the_same_millisecond_keep_their_order() {
 
 /// Appends `record` to Session `id`'s Journal, as a crash would leave it.
 fn append_record(journal: &Path, id: &str, record: serde_json::Value) {
-    let path = journal.join(format!("{id}.jsonl"));
-    let mut text = fs::read_to_string(&path).unwrap();
-    text.push_str(&format!("{record}\n"));
-    fs::write(path, text).unwrap();
+    journal_database(journal)
+        .execute(
+            "INSERT INTO records (session_id, record) VALUES (?1, ?2)",
+            [id, &record.to_string()],
+        )
+        .unwrap();
 }
 
 #[test]
@@ -922,16 +949,8 @@ fn a_move_cut_short_after_it_happened_can_still_be_undone() {
     let plan = talk_into_slides(dir.path());
     let before = snapshot(dir.path());
     let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
-    // Rewrite the Journal as if the app crashed right after the move.
-    let path = journal
-        .path()
-        .join(format!("{}.jsonl", summary.session_id.as_deref().unwrap()));
-    let text = fs::read_to_string(&path).unwrap();
-    let kept: Vec<&str> = text
-        .lines()
-        .filter(|l| !l.contains("\"outcome\"") && !l.contains("finished"))
-        .collect();
-    fs::write(&path, format!("{}\n", kept.join("\n"))).unwrap();
+    // The Journal as if the app crashed right after the move.
+    drop_outcomes(journal.path(), summary.session_id.as_deref().unwrap());
     assert_eq!(
         all_sessions(journal.path())[0].status,
         SessionStatus::Crashed
@@ -1117,29 +1136,4 @@ fn undo_leaves_a_file_the_user_moved_again_where_they_put_it() {
         .contains("is gone"));
     assert!(dir.path().join("Elsewhere/talk.pptx").exists());
     assert!(!dir.path().join("talk.pptx").exists());
-}
-
-#[test]
-fn a_session_whose_journal_ends_in_a_half_written_line_still_undoes_and_stays_readable() {
-    let dir = messy_folder();
-    let journal = journal_dir();
-    let before = snapshot(dir.path());
-    let plan = plan_for(dir.path());
-    let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
-    let id = summary.session_id.unwrap();
-    // A crash in the middle of writing a record.
-    let path = journal.path().join(format!("{id}.jsonl"));
-    let mut text = fs::read_to_string(&path).unwrap();
-    text.push_str(r#"{"record":"intent","operationId":"#);
-    fs::write(&path, text).unwrap();
-
-    let undone = undo(&id, journal.path()).unwrap();
-
-    assert_eq!(undone.done.len(), 2);
-    assert_eq!(snapshot(dir.path()), before);
-    assert_eq!(
-        all_sessions(journal.path())[0].status,
-        SessionStatus::Undone
-    );
-    assert!(session_details(&id, journal.path()).is_ok());
 }

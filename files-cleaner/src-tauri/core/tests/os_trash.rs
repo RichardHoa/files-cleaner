@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
 use common::{
-    build_plan, empty_config, journal_dir, real_path, run, scan_root, undo, write, FakeTrash,
+    build_plan, drop_outcomes, empty_config, journal_dir, real_path, run, scan_root, undo, write,
+    FakeTrash,
 };
 use files_cleaner_core::{self as core, scan, session_details, OperationState, Plan};
 
@@ -184,16 +185,7 @@ fn a_crash_before_the_landing_was_recorded_says_to_restore_it_by_hand() {
     folder_with_copies(dir.path());
     let plan = plan_for(dir.path());
     let summary = run(&plan, &ticked(&plan), journal.path()).unwrap();
-    // The Journal as the crash left it: intents, and no outcome after them.
-    let path = journal
-        .path()
-        .join(format!("{}.jsonl", summary.session_id.as_deref().unwrap()));
-    let text = fs::read_to_string(&path).unwrap();
-    let kept: Vec<&str> = text
-        .lines()
-        .filter(|l| !l.contains("\"outcome\"") && !l.contains("finished"))
-        .collect();
-    fs::write(&path, format!("{}\n", kept.join("\n"))).unwrap();
+    drop_outcomes(journal.path(), summary.session_id.as_deref().unwrap());
 
     let details = session_details(summary.session_id.as_deref().unwrap(), journal.path()).unwrap();
 

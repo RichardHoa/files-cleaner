@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 use crate::clash;
-use crate::journal::{self, lock_sessions, Journal, OutcomeKind, Phase, Record, SessionError};
+use crate::journal::{lock_sessions, Journal, Journals, OutcomeKind, Phase, Record, SessionError};
 use crate::os_trash::{OsTrash, TRASH_PLACE};
 use crate::planner::{Operation, OperationKind, Plan, SourceState};
 use crate::protection::is_os_metadata_file;
@@ -214,9 +214,8 @@ pub fn run_with_progress(
         run_one(op, trash)
     })?;
     journal.append(&Record::Finished)?;
-    drop(journal);
     if summary.done.is_empty() {
-        journal::remove(journal_dir, &header.id)?;
+        journal.discard()?;
         summary.session_id = None;
     }
     progress.finish(&plan.root);
@@ -351,7 +350,7 @@ fn undo_selected(
     let _lock = lock_sessions(journal_dir)?;
     let (session, mut journal) = reopen(journal_dir, session_id, trash)?;
 
-    let newer = NewerSessions::read(journal_dir, &session.header.id)?;
+    let newer = NewerSessions::read(journal.journals(), &session.header.id)?;
     let mut summary = Summary::new(session.header.id.clone());
     // Operations this pass has settled: undone, or found unrecoverable.
     let mut settled: HashSet<String> = HashSet::new();
@@ -460,19 +459,20 @@ struct NewerSessions {
 impl NewerSessions {
     /// Reads the Journals of the Sessions started after `session_id`. One
     /// that can't be understood is passed over.
-    fn read(journal_dir: &Path, session_id: &str) -> Result<NewerSessions, SessionError> {
+    fn read(journals: &Journals, session_id: &str) -> Result<NewerSessions, SessionError> {
         let mut newer = NewerSessions {
             moved_away: HashMap::new(),
             put_at: HashMap::new(),
         };
-        let mut ids: Vec<String> = journal::session_ids(journal_dir)?
+        let mut ids: Vec<String> = journals
+            .session_ids()?
             .into_iter()
             .filter(|id| id.as_str() > session_id)
             .collect();
         // Oldest first, so the newest Session's word on a path wins.
         ids.sort();
         for id in ids {
-            let session = match SessionJournal::read(journal_dir, &id) {
+            let session = match SessionJournal::read(journals, &id) {
                 Ok(session) => session,
                 Err(SessionError::BadJournal { .. }) => continue,
                 Err(e) => return Err(e),
@@ -613,8 +613,9 @@ fn reopen(
     session_id: &str,
     trash: &dyn OsTrash,
 ) -> Result<(SessionJournal, Journal), SessionError> {
-    let mut session = SessionJournal::read(journal_dir, session_id)?;
-    let mut journal = Journal::reopen(journal_dir, &session.header.id)?;
+    let journals = Journals::open(journal_dir)?;
+    let mut session = SessionJournal::read(&journals, session_id)?;
+    let mut journal = journals.reopen(&session.header.id)?;
     settle_interrupted(&mut session, &mut journal, trash)?;
     Ok((session, journal))
 }
