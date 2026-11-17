@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { guideShown, introductionCards, withGuideDismissed } from "../src/shared/onboarding/onboarding.js";
+import { introductionCards } from "../src/shared/onboarding/onboarding.js";
 
 test("the introduction offers the Grouping Models last, and leaves that card out once they're installed", () => {
   assert.deepEqual(
@@ -13,10 +13,8 @@ test("the introduction offers the Grouping Models last, and leaves that card out
   );
 });
 
-test("a dismissed guide stays hidden, and the others still show", () => {
-  const state = withGuideDismissed({ introductionSeen: true, dismissedGuides: [] }, "review");
-
-  assert.equal(guideShown(state, "review"), false);
-  assert.equal(guideShown(state, "home"), true);
-  assert.deepEqual(withGuideDismissed(state, "review").dismissedGuides, ["review"], "dismissing twice keeps one entry");
+test("each introduction card's caption is a few words, the drawing saying the rest", () => {
+  for (const card of introductionCards(false, "1.8 GB")) {
+    assert.ok(card.text.split(/\s+/).length <= 6, card.text);
+  }
 });

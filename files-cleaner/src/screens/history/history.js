@@ -2,7 +2,6 @@
 import { describeError, listSessions, pathSeparator } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";
 import { count, plural } from "../../shared/format.js";
-import { guide } from "../../shared/onboarding/guide-card.js";
 import { pageCount, pageNumbers } from "./paging.js";
 import { noSessions, sessionList } from "../../shared/session-list/session-row.js";
 import { undoSections } from "../../shared/outcomes.js";
@@ -14,8 +13,7 @@ export function render(root, nav, page) {
   home.addEventListener("click", () => nav.home());
   const total = el("p", { className: "lead" });
   const content = el("div");
-  const { card, help } = guide("history");
-  root.append(el("div", { className: "actions" }, home, help), card, el("h1", {}, "History"), total, content);
+  root.append(el("div", { className: "actions" }, home), el("h1", {}, "History"), total, content);
   show(content, total, nav, page);
 }
 

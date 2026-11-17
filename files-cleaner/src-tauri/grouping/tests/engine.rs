@@ -484,3 +484,74 @@ fn clearing_a_damaged_store_starts_it_again() {
 
     assert!(!store_dir.path().join("cards.sqlite").exists());
 }
+
+/// Every file reads alike but has no topic, as when the LLM finds none.
+struct TopiclessModels;
+
+impl Models for TopiclessModels {
+    fn card_model_id(&self) -> String {
+        "topicless-card".to_string()
+    }
+
+    fn embedding_model_id(&self) -> String {
+        "topicless-embedding".to_string()
+    }
+
+    fn card(&mut self, _: &Content) -> Result<Card, String> {
+        Ok(Card {
+            topic: String::new(),
+            kind: "document".to_string(),
+            summary: String::new(),
+        })
+    }
+
+    fn embed(&mut self, texts: &[String]) -> Result<Vec<Vector>, String> {
+        Ok(texts.iter().map(|_| vec![1.0, 0.0]).collect())
+    }
+
+    fn place(&mut self, _: &Question) -> Result<Option<usize>, String> {
+        Ok(None)
+    }
+
+    fn device(&self) -> Option<String> {
+        None
+    }
+}
+
+#[test]
+fn read_files_sharing_no_topic_stay_where_they_are() {
+    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("test-tmp");
+    fs::create_dir_all(&base).unwrap();
+    let dir = tempfile::Builder::new()
+        .prefix("scan-")
+        .tempdir_in(&base)
+        .unwrap();
+    let root = dir.path();
+    for name in ["a.txt", "b.txt", "c.txt"] {
+        fs::write(root.join(name), "Some text about nothing in particular.").unwrap();
+    }
+    let store_dir = tempfile::tempdir().unwrap();
+    let config = load_config("{}", root).unwrap();
+    let scan = scan(root, &config).unwrap();
+    let store = CardStore::open(store_dir.path());
+
+    let input = Input {
+        scan: &scan,
+        settings: Settings::default(),
+        store: &store,
+        pdfium: None,
+        tessdata: None,
+    };
+    let analysis = analyse(
+        &input,
+        &mut TopiclessModels,
+        &AtomicBool::new(false),
+        &AtomicBool::new(false),
+        |_| {},
+    )
+    .unwrap();
+
+    let grouping = &analysis.grouping;
+    assert!(grouping.folders.is_empty());
+    assert_eq!(grouping.ungrouped.len(), 3);
+}

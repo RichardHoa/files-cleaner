@@ -134,7 +134,7 @@ export const useDescribingModel = (picked) => invoke("use_describing_model", { p
 export const onGroupingModelsStatus = (onStatus) => events.listen("grouping-models", (event) => onStatus(event.payload));
 
 /**
- * What the user has seen: `{ introductionSeen, dismissedGuides }`, the guide cards named as in onboarding.js.
+ * What the user has seen: `{ introductionSeen }`.
  * Nothing is seen until it's saved.
  */
 export const onboarding = () => invoke("onboarding");
@@ -143,7 +143,8 @@ export const onboarding = () => invoke("onboarding");
 export const saveOnboarding = (state) => invoke("save_onboarding", { onboarding: state });
 
 // The Suggested Folders are `{ folders, ungrouped, summaries }`: `folders` largest first, each
-// `{ name, files, existing, fixedKind }`, `existing` the matched subfolder's path or null; `ungrouped` the
+// `{ name, files, existing, basis }`, `existing` the matched subfolder's path or null, `basis` what its files
+// share: "topic", "kind" (one kind that is never read) or "existing" (placed in that subfolder); `ungrouped` the
 // files left where they are; `summaries` each read file's one-sentence summary, keyed by path.
 
 /**

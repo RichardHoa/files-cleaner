@@ -8,7 +8,7 @@
 // A folder's moves and its trashes, and the trashes among the files left where they are, can each be run on
 // their own: the files already run are kept in a Set `ran`, and a folder whose moves ran holds
 // what that did in `moved`.
-import { plural, splitPath } from "../../shared/format.js";
+import { count, plural, splitPath } from "../../shared/format.js";
 
 /** What the Plan calls the files trashed from those left where they are. */
 const LEFT_NAME = "Left where they are";
@@ -30,7 +30,7 @@ export class LeftFiles extends Set {
  * them): its first copy is kept and every other copy is trashed. Each copy is "keep" or "trash", by path.
  * `placed` is the copy holding the group's place among the Suggested Folders and the files left where they
  * are, `emptyPlace` where that was while no copy is kept, and `changedByHand` whether the user set one of
- * its copies themselves, which leaves it out of `setCopiesIn`.
+ * its copies themselves, which leaves it out of `keepCopyIn`.
  */
 export function initialDuplicates(groups) {
   return groups.map((group) => ({
@@ -119,15 +119,25 @@ export function setCopy(duplicate, path, fate, choices, left) {
   placeCopies(duplicate, choices, left);
 }
 
-/** Sets every copy directly in `folder` to `fate`, "keep" or "trash", in the groups of `duplicates` not changed by hand, and puts their copies where that leaves them. */
-export function setCopiesIn(duplicates, folder, fate, choices, left) {
+/**
+ * Keeps the copy directly in `folder` (the first, if it holds more) of each group of `duplicates` with one
+ * there, and trashes the group's other copies, then puts them where that leaves them. Groups changed by hand
+ * are left as they are: returns how many of those it would have changed.
+ */
+export function keepCopyIn(duplicates, folder, choices, left) {
+  let skipped = 0;
   for (const duplicate of duplicates) {
-    if (duplicate.changedByHand) continue;
-    const held = duplicate.group.copies.filter((copy) => copyFolder(copy) === folder);
-    if (held.length === 0) continue;
-    for (const copy of held) duplicate.copies.set(copy.path, fate);
+    const kept = duplicate.group.copies.find((copy) => copyFolder(copy) === folder);
+    if (!kept) continue;
+    const fates = duplicate.group.copies.map((copy) => [copy.path, copy === kept ? "keep" : "trash"]);
+    if (duplicate.changedByHand) {
+      if (fates.some(([path, fate]) => duplicate.copies.get(path) !== fate)) skipped += 1;
+      continue;
+    }
+    for (const [path, fate] of fates) duplicate.copies.set(path, fate);
     placeCopies(duplicate, choices, left);
   }
+  return skipped;
 }
 
 /** Puts the copies of `duplicates` where the choices made while the files were read leave them; the copy read, the first, holds each group's place until then. */
@@ -178,6 +188,8 @@ function dropFolder(choices, duplicates, choice, to) {
 /** Merges the Suggested Folder `from` into `into`, which keeps its name and where it goes: each file comes along with the choice made on it. */
 export function mergeFolder(choices, duplicates, from, into) {
   for (const [path, file] of from.files) into.files.set(path, file);
+  // Its files no longer share what the tool grouped them by.
+  into.folder = { ...into.folder, basis: null };
   dropFolder(choices, duplicates, from, into);
 }
 
@@ -215,13 +227,24 @@ export function totals(choices, left, separator, duplicates = [], ran = new Set(
   return sum;
 }
 
-/** What the review's `{ heading, button }` say about `totals`, and about `emptied`, the ticked Emptied Folders, when they're all that's left. */
-export function describeChange({ moved, trashed }, emptied = 0) {
-  if (moved > 0 && trashed > 0) return { heading: `${plural(moved, "file")} will move, ${trashed} will be trashed`, button: `Move ${moved}, trash ${trashed}` };
-  if (moved > 0) return { heading: `${plural(moved, "file")} will move`, button: `Move ${plural(moved, "file")}` };
-  if (trashed > 0) return { heading: `${plural(trashed, "file")} will be trashed`, button: `Trash ${plural(trashed, "file")}` };
-  if (emptied > 0) return { heading: `${plural(emptied, "empty folder")} will be trashed`, button: `Trash ${plural(emptied, "empty folder")}` };
-  return { heading: "Nothing will change", button: "Nothing to move" };
+/**
+ * What the review's `{ heading, button, scope }` say about `totals`, and about `emptied`, the ticked Emptied
+ * Folders: `scope` is what the button covers, which is what's left once `anyRan`, some part ran on its own.
+ */
+export function describeChange({ moved, trashed }, emptied = 0, anyRan = false) {
+  const parts = [
+    ...(moved > 0 ? [plural(moved, "move")] : []),
+    ...(trashed > 0 ? [`${count(trashed)} ${trashed === 1 ? "trash" : "trashes"}`] : []),
+    ...(emptied > 0 ? [plural(emptied, "empty folder")] : []),
+  ];
+  const listed = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0];
+  const scope = !listed ? "" : anyRan ? `Some parts already done. ${listed} left.` : `${listed} in the whole Plan.`;
+  const button = listed ? "Apply everything" : "Nothing to apply";
+  if (moved > 0 && trashed > 0) return { heading: `${plural(moved, "file")} will move, ${trashed} will be trashed`, button, scope };
+  if (moved > 0) return { heading: `${plural(moved, "file")} will move`, button, scope };
+  if (trashed > 0) return { heading: `${plural(trashed, "file")} will be trashed`, button, scope };
+  if (emptied > 0) return { heading: `${plural(emptied, "empty folder")} will be trashed`, button, scope };
+  return { heading: "Nothing will change", button, scope };
 }
 
 /**

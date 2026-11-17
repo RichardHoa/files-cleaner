@@ -23,8 +23,7 @@ import {
   useDescribingModel,
 } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";
-import { formatSize, plural, splitPath, trashPlace } from "../../shared/format.js";
-import { showAllGuidesAgain } from "../../shared/onboarding/guide-card.js";
+import { formatSize, plural, splitPath } from "../../shared/format.js";
 import { showIntroduction } from "../../shared/onboarding/introduction.js";
 import { groupingModelsControls, modelsButton, watchGroupingModels } from "../../shared/grouping-models/models-panel.js";
 import { warningBlock } from "../../shared/outcomes.js";
@@ -61,17 +60,11 @@ export function render(root, nav) {
   showConfigSections(configSections);
 }
 
-/** Replays the introduction, or brings back the guide cards the user dismissed. */
+/** Replays the introduction. */
 function helpSection() {
-  const status = el("p", { className: "status" });
   const replay = el("button", { type: "button" }, "Replay introduction");
   replay.addEventListener("click", () => showIntroduction());
-  const guides = el("button", { type: "button" }, "Show all guides again");
-  guides.addEventListener("click", async () => {
-    await showAllGuidesAgain();
-    showStatus(status, "Each screen shows its guide again the next time you open it.");
-  });
-  return section("Help", el("div", { className: "actions" }, replay, guides), status);
+  return section("Help", el("div", { className: "actions" }, replay));
 }
 
 /** Credits the app icon's author, linking to their page in the default browser. */
@@ -87,7 +80,11 @@ async function showConfigSections(node) {
   try {
     ({ config } = await loadConfig());
   } catch (error) {
-    const reset = el("button", { type: "button", className: "primary" }, "Reset settings");
+    const reset = el(
+      "button",
+      { type: "button", className: "primary", title: "Puts every setting back to its default, including the Never-Touch Paths." },
+      "Reset settings",
+    );
     const status = el("p", { className: "status" });
     reset.addEventListener("click", async () => {
       reset.disabled = true;
@@ -101,7 +98,6 @@ async function showConfigSections(node) {
     });
     node.replaceChildren(
       el("p", { className: "status error" }, `The settings couldn't be read: ${describeError(error)}`),
-      el("p", { className: "note" }, "Reset settings puts every setting back to its default, including the Never-Touch Paths."),
       el("div", { className: "actions" }, reset),
       status,
     );
@@ -133,7 +129,6 @@ function duplicatesSection(initial) {
   const choices = el(
     "fieldset",
     { className: "settings-choices" },
-    el("legend", { className: "note" }, "Every other copy starts out trashed."),
     ...COPY_RULES.map(({ value, label, detail }) => choice("default-copy-rule", label, detail, { value, checked: value === initial })),
   );
   let rule = initial;
@@ -146,7 +141,7 @@ function duplicatesSection(initial) {
       showStatus(status, describeError(error), true);
     }
   });
-  return section("When files are identical, keep…", choices, el("p", { className: "note" }, "Changes apply the next time a folder is scanned."), status);
+  return section("When files are identical, keep…", choices, status);
 }
 
 function neverTouchSection(initial) {
@@ -184,9 +179,10 @@ function neverTouchSection(initial) {
     list.hidden = paths.length === 0;
   }
   draw();
-  return section(
-    "Folders to leave alone",
-    el("p", { className: "note" }, "Folders the app leaves alone, everything inside them included. System and app folders are left alone already."),
+  return el(
+    "section",
+    { className: "settings-section" },
+    el("h2", { title: "Everything inside them is left alone too. System and app folders are left alone already." }, "Folders to leave alone"),
     list,
     el("div", { className: "actions" }, add),
     status,
@@ -196,7 +192,6 @@ function neverTouchSection(initial) {
 function groupingSection(grouping) {
   return section(
     "Folder suggestions",
-    el("p", { className: "note" }, "Changes apply the next time files are grouped."),
     folderLevelSetting(grouping.folderThreshold),
     existingFolderSetting(grouping.existingFolderThreshold),
     smallestFolderSetting(grouping.smallestFolder),
@@ -283,8 +278,12 @@ function existingFolderSetting(initial) {
   return el(
     "div",
     { className: "settings-setting" },
-    el("div", { className: "settings-setting-head" }, el("strong", {}, "Use your existing folders"), reset),
-    el("p", { className: "note" }, "How often a suggested folder goes into a folder already in the scanned folder, rather than a new one."),
+    el(
+      "div",
+      { className: "settings-setting-head" },
+      el("strong", { title: "How often a suggested folder goes into a folder already in the scanned folder, rather than a new one." }, "Use your existing folders"),
+      reset,
+    ),
     choices,
     error,
   );
@@ -336,20 +335,23 @@ function notificationsSection(initial) {
   return section(
     "Notifications",
     el("label", { className: "settings-choice" }, box, el("span", {}, "Notify me when the Suggested Folders are ready")),
-    el("p", { className: "note" }, "Only while Files Cleaner is in the background, so you can switch to other apps while files are read."),
     status,
   );
 }
 
 /** "Read every file again": forgets what the Grouping Models read, so the next grouping reads every file afresh. */
 function readAgainSection() {
-  const button = el("button", { type: "button" }, "Read every file again");
+  const button = el(
+    "button",
+    { type: "button", title: "Forgets what was read from your files before. It takes as long as the first time." },
+    "Read every file again",
+  );
   const status = el("p", { className: "status" });
   button.addEventListener("click", async () => {
     button.disabled = true;
     try {
       await clearGroupingCards();
-      showStatus(status, "Done. The next grouping reads every file again.");
+      showStatus(status, "Done");
     } catch (error) {
       showStatus(status, describeError(error), true);
       button.disabled = false;
@@ -359,7 +361,6 @@ function readAgainSection() {
     "div",
     { className: "settings-setting" },
     el("div", { className: "actions" }, button),
-    el("p", { className: "note" }, "Forgets what was read from your files before, so the next grouping reads them all afresh. It takes as long as the first time."),
     status,
   );
 }
@@ -377,7 +378,7 @@ function modelsSection() {
     const total = onDisk.reduce((sum, model) => sum + model.size, 0);
     const installed = status.state === "installed";
     body.replaceChildren(
-      ...(installed ? [el("p", {}, "Installed. Files are grouped by what's inside them.")] : groupingModelsControls(status, error, bar)),
+      ...(installed ? [el("p", { title: "Files are grouped by what's inside them." }, "Installed")] : groupingModelsControls(status, error, bar)),
       ...(onDisk.length ? [modelList(onDisk, error), el("p", { className: "muted" }, `Total: ${formatSize(total)}`)] : []),
       installed ? removeModels(status.total, error) : "",
     );
@@ -396,8 +397,11 @@ function describingModelSetting() {
   const link = el("input", {
     type: "url",
     className: "settings-link",
-    placeholder: "https://huggingface.co/…/blob/main/model.gguf",
+    placeholder: "Hugging Face .gguf link",
     ariaLabel: "Hugging Face link to one .gguf file",
+    title:
+      "Describe your files with another chat model: the link to one .gguf file. It's tried on a sample file first. " +
+      "The model that compares the descriptions stays the same.",
   });
   const download = el("button", { type: "button" }, "Download");
   const current = el("div");
@@ -407,12 +411,6 @@ function describingModelSetting() {
     "details",
     { className: "settings-setting" },
     el("summary", {}, "Advanced"),
-    el(
-      "p",
-      { className: "note" },
-      "Describe your files with another model from Hugging Face: paste the link to one .gguf file of a chat model. " +
-        "It's tried on a sample file before it's used. The model that compares the descriptions stays the same.",
-    ),
     current,
     el("div", { className: "actions" }, link, download),
     error,
@@ -503,7 +501,7 @@ function removeModels(total, error) {
   const cancel = el("button", { type: "button" }, "Cancel");
   ask.addEventListener("click", () =>
     node.replaceChildren(
-      el("span", {}, `Remove the grouping models? Using them again means downloading ${formatSize(total)}.`),
+      el("span", {}, `Remove the grouping models? Re-download is ${formatSize(total)}.`),
       modelsButton("Remove", removeGroupingModels, error, true),
       cancel,
     ),
@@ -554,7 +552,7 @@ function sessionsSection() {
     showStatus(status, "");
     confirm.disabled = false;
     actions.replaceChildren(
-      el("span", {}, `Delete ${total === 1 ? "the 1 Session" : `all ${plural(total, "Session")}`}? You won't be able to undo them from the app. Your files won't change.`),
+      el("span", {}, `Delete ${total === 1 ? "the 1 Session" : `all ${plural(total, "Session")}`}? Your files stay put.`),
       confirm,
       cancel,
     );
@@ -574,7 +572,6 @@ function sessionsSection() {
 
   return section(
     "History",
-    el("p", { className: "note" }, `Deleting the Sessions clears History. Your files stay where they are, and anything in the ${trashPlace(pathSeparator)} can still be put back from there.`),
     actions,
     status,
   );

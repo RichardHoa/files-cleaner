@@ -25,10 +25,7 @@ function thisComputer() {
 /** What the Grouping Models are, `total` bytes in all, and that nothing leaves the computer: for the panel and Settings. */
 export function groupingModelsPitch(total) {
   const computer = thisComputer();
-  return (
-    `Files Cleaner can download grouping models (${formatSize(total)}) to read your files on this ${computer} ` +
-    `and suggest folders for them. Nothing leaves your ${computer}.`
-  );
+  return `Read inside files for better folders · ${formatSize(total)} · stays on this ${computer}`;
 }
 
 // The panels on screen, each `{ node, show(status) }`, fed by one listener for the whole app. Screens

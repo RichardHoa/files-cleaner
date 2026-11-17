@@ -32,7 +32,7 @@ const SESSIONS_FOLDER_NAME: &str = "sessions";
 const RECENT_FILE_NAME: &str = "recent-scan-roots.json";
 /// The Grouping Models' folder, inside the app data folder.
 const MODELS_FOLDER_NAME: &str = "grouping-models";
-/// What the user has seen of the introduction and the guide cards, inside the app data folder.
+/// What the user has seen of the introduction, inside the app data folder.
 const ONBOARDING_FILE_NAME: &str = "onboarding.json";
 /// The cards the Grouping Models wrote, inside the app data folder.
 const CARDS_FOLDER_NAME: &str = "grouping-cards";
@@ -667,16 +667,14 @@ fn use_describing_model(
     models.use_custom(picked).map_err(CommandError::new)
 }
 
-/// What the user has seen of the introduction and the guide cards, as
-/// stored.
+/// What the user has seen of the introduction, as stored.
 #[derive(Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct Onboarding {
     introduction_seen: bool,
-    dismissed_guides: Vec<String>,
 }
 
-/// What the user has seen of the introduction and the guide cards.
+/// What the user has seen of the introduction.
 #[tauri::command]
 fn onboarding(app: AppHandle) -> Result<Onboarding, CommandError> {
     let path = app_data_path(&app, ONBOARDING_FILE_NAME)?;
@@ -687,7 +685,7 @@ fn onboarding(app: AppHandle) -> Result<Onboarding, CommandError> {
         .unwrap_or_default())
 }
 
-/// Remembers what the user has seen of the introduction and the guide cards.
+/// Remembers what the user has seen of the introduction.
 #[tauri::command]
 fn save_onboarding(app: AppHandle, onboarding: Onboarding) -> Result<(), CommandError> {
     write_app_json(&app, ONBOARDING_FILE_NAME, &onboarding)

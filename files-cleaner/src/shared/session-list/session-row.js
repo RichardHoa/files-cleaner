@@ -18,7 +18,7 @@ export function statusPill(status) {
 
 /** What Home and History show before the first Session. */
 export function noSessions() {
-  return el("p", { className: "empty" }, "No Sessions yet. Once you run a Plan, it shows up here and can be undone.");
+  return el("p", { className: "empty" }, "No Sessions yet");
 }
 
 /**

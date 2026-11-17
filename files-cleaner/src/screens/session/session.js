@@ -8,7 +8,6 @@ import { el } from "../../shared/dom.js";
 import { drawMore, revealMenu } from "../../shared/plan/file-list.js";
 import { count, formatDate, formatSize, plural, splitPath } from "../../shared/format.js";
 import { describeSummary, describeWarning, warningBlock } from "../../shared/outcomes.js";
-import { guide } from "../../shared/onboarding/guide-card.js";
 import { tickState, toggleAll } from "../../shared/plan/plan-selection.js";
 import { PAGE_SIZE, fileName, folderLabel, paging, selectedFile, visibleFiles } from "../../shared/plan/plan-view.js";
 import { actionFor, groupByState, paneSentence, sessionHeading, sessionLead, whereNow } from "./session-view.js";
@@ -64,8 +63,7 @@ export function render(root, nav, sessionId, from, result) {
   back.addEventListener("click", () => (fromHistory ? nav.history(from.page) : nav.home()));
   const status = el("p", { className: "status" });
   const content = el("div");
-  const { card, help } = guide("results");
-  root.append(el("div", { className: "actions" }, back, help), card, content);
+  root.append(el("div", { className: "actions" }, back), content);
 
   // Kept when the Session is drawn again after an action.
   const view = { group: null, query: "", sort: "size", limit: PAGE_SIZE, selectedId: null };
@@ -143,10 +141,7 @@ export function render(root, nav, sessionId, from, result) {
     function cardText({ group: name, operations: ops }) {
       if (name !== "attention") return [line(el("strong", {}, GROUP_COUNTS[name](ops.length)), muted(" · "), sizeOf(ops))];
       const [n, ...rest] = GROUP_COUNTS.attention(ops.length).split(" ");
-      return [
-        line(el("strong", {}, el("span", { className: "session-attention" }, n), ` ${rest.join(" ")}`)),
-        el("span", { className: "plan-card-explain" }, "Skipped, failed, stopped part-way or no longer recoverable. Each file says why."),
-      ];
+      return [line(el("strong", {}, el("span", { className: "session-attention" }, n), ` ${rest.join(" ")}`))];
     }
     const cards = groups.map((g) => {
       const pick = el("button", { type: "button", className: "plan-card-pick" }, ...cardText(g));

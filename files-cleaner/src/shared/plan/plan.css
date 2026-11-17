@@ -58,13 +58,6 @@
   margin-right: var(--space-1);
 }
 
-.plan-card-explain {
-  display: block;
-  margin-top: var(--space-1);
-  color: var(--muted);
-  font-size: var(--font-sm);
-}
-
 .plan-include {
   display: inline-flex;
   align-items: center;

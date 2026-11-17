@@ -48,8 +48,7 @@ export function groupByState(operations) {
 
 /** How long the Session's files can be put back: until they are emptied from the System Trash, if any went there. */
 export function sessionLead(operations, separator) {
-  const until = operations.some((op) => op.inSystemTrash) ? `until you empty the ${trashPlace(separator)}` : "at any time";
-  return `Nothing was deleted. You can put back any file, or all of them, ${until}.`;
+  return operations.some((op) => op.inSystemTrash) ? `Undo anytime until the ${trashPlace(separator)} is emptied` : "Undo anytime";
 }
 
 /**

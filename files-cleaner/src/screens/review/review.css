@@ -278,6 +278,23 @@
   text-overflow: ellipsis;
 }
 
+.folder-file-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.folder-file-summary {
+  font-size: var(--font-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.folder-basis {
+  margin: 0;
+}
+
 .folder-file-actions {
   display: flex;
   align-items: center;
@@ -417,4 +434,30 @@
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
+}
+
+/* The header's button, with what it covers under it. */
+.review-run .actions {
+  justify-content: flex-end;
+  margin-bottom: var(--space-1);
+}
+
+.review-run-scope {
+  margin: 0;
+  text-align: end;
+  font-size: var(--font-sm);
+}
+
+/* What the scan left out of the Suggested Folders, under its summary: a chip each, the detail on hover. */
+.skipped-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin: var(--space-1) 0 0;
+}
+
+.skipped-chips .pill {
+  font-weight: 400;
+  cursor: default;
 }

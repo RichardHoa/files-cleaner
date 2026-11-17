@@ -247,39 +247,6 @@ button.small {
   margin-inline-end: auto;
 }
 
-/* What a screen shows and what happens next, at its top until "Got it". */
-.guide-card {
-  margin: var(--space-3) 0;
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-}
-
-.guide-card h2 {
-  margin: 0 0 var(--space-1);
-  font-size: var(--font-md);
-}
-
-.guide-card p {
-  margin: var(--space-1) 0;
-}
-
-.guide-card .actions {
-  margin-bottom: 0;
-}
-
-/* The "?" at the right end of a screen's action bar, bringing its guide card back. */
-.help-button {
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  margin-inline-start: auto;
-  border-radius: 50%;
-  font-weight: 600;
-  line-height: 1;
-}
-
 /* A thin bar like macOS's. The fill is scaled, not resized, so it glides between updates (see
    progress-bar.js); with nothing to measure yet, a short piece of it slides across instead. */
 .progress {

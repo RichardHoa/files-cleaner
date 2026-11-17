@@ -1,12 +1,11 @@
-// What the user has seen of the introduction and the guide cards: loaded once, saved on every change.
+// Whether the user has seen the introduction: loaded once, saved on every change.
 import { onboarding, saveOnboarding } from "../api.js";
-import { GUIDES } from "./onboarding.js";
 
 let state = null;
 
-/** Resolves to what the user has seen; if it can't be loaded, everything counts as seen, so nothing nags. */
+/** Resolves to what the user has seen; if it can't be loaded, it counts as seen, so nothing nags. */
 export function seen() {
-  state ??= onboarding().catch(() => ({ introductionSeen: true, dismissedGuides: Object.keys(GUIDES) }));
+  state ??= onboarding().catch(() => ({ introductionSeen: true }));
   return state;
 }
 

@@ -105,8 +105,8 @@ test("an older Session's Trash is named by the folder it went to, not the System
 });
 
 test("the lead says files can be put back until the System Trash is emptied, if any went there", () => {
-  assert.match(sessionLead([op("a.txt")], "/"), /until you empty the Trash\.$/);
-  assert.match(sessionLead([movedOp("move", "a.pptx", "/r/a.pptx")], "/"), /at any time\.$/);
+  assert.equal(sessionLead([op("a.txt")], "/"), "Undo anytime until the Trash is emptied");
+  assert.equal(sessionLead([movedOp("move", "a.pptx", "/r/a.pptx")], "/"), "Undo anytime");
 });
 
 test("the pane says where a file moved out of the Scan Root is, and what happened to a created folder", () => {

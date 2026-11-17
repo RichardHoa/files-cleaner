@@ -95,7 +95,7 @@ _Avoid_: Finder-style suffix, copy suffix
 ### Grouping
 
 **Suggested Folder**:
-A folder the Plan gathers Loose Files into: proposed by the tool from similar files, or added by the user. It goes into the existing folder it matched or the user picked, a new folder in the Scan Root (the default) or somewhere else the user picks on the same disk, or all its files are trashed. The user can merge one into another, or remove it, which leaves its files where they are. A Suggested Folder always has a name: leaving the name empty never means "trash".
+A folder the Plan gathers Loose Files into: proposed by the tool, or added by the user. The tool proposes one only for files that share a topic (at least half of them, and at least two) or for files of one kind it never reads, such as images (or of any kind, without the Grouping Models), and names it after that topic or kind; read files that share no topic are left where they are. It goes into the existing folder it matched or the user picked, a new folder in the Scan Root (the default) or somewhere else the user picks on the same disk, or all its files are trashed. The user can merge one into another, or remove it, which leaves its files where they are. A Suggested Folder always has a name: leaving the name empty never means "trash".
 _Avoid_: cluster, group, category, proposed folder
 
 **Grouping Models**:

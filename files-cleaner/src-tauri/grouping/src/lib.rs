@@ -1,7 +1,8 @@
 //! Suggested Folders from what's inside the loose files of a Scan Root
 //! A small LLM writes a card per file, an embedding model embeds
-//! the cards, and the cards are clustered; each group is named after its
-//! most common topic and anchored to a matching existing subfolder. Then
+//! the cards, and the cards are clustered; each group is named after the
+//! topic most of its files share and anchored to a matching existing
+//! subfolder, and a group sharing none stays where it is. Then
 //! the LLM is asked where each read file left out of every group belongs,
 //! if anywhere, among the groups and subfolders nearest it.
 //! Archives, images and installers are never read. PDFs with no text
@@ -158,9 +159,21 @@ pub struct SuggestedFolder {
     pub files: Vec<PathBuf>,
     /// The existing subfolder of the Scan Root it matches, if any.
     pub existing: Option<PathBuf>,
-    /// Whether it gathers a kind that is never read: archives, images,
-    /// installers or scanned PDFs.
-    pub fixed_kind: bool,
+    pub basis: Basis,
+}
+
+/// What a Suggested Folder's files have in common, for the user to see why
+/// they're together.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Basis {
+    /// Most of them share a topic, which names the folder.
+    Topic,
+    /// They're one kind that is never read: archives, images, installers or
+    /// scanned PDFs.
+    Kind,
+    /// The LLM placed each in the existing subfolder it goes into.
+    Existing,
 }
 
 /// Everything the models said about a Scan Root, enough to group again
@@ -610,23 +623,32 @@ impl Analysis {
             settings.folder_threshold,
             settings.smallest_folder,
         );
+        // A group whose files share no topic is no folder: its files are left out of every group,
+        // to be placed one by one like the others left out.
+        let mut groups: Vec<(&[usize], String)> = Vec::new();
+        let mut left_out = clusters.ungrouped.clone();
+        for members in &clusters.groups {
+            match self.shared_topic(members, &topics) {
+                Some(topic) => groups.push((members, topic)),
+                None => left_out.extend(members),
+            }
+        }
         let mut named: Vec<(String, &[usize])> = Vec::new();
         // Each Suggested Folder of read files, by its place in `folders`, with its centroid and topics.
         let mut topical: Vec<(usize, Vector, Vec<String>)> = Vec::new();
 
         // A file that is never read joins the first group with a file name
         // sharing a mark with its own: `Lab5_StudentID.zip` with `Lab5_Report.docx`.
-        let group_marks: Vec<HashSet<String>> = clusters
-            .groups
+        let group_marks: Vec<HashSet<String>> = groups
             .iter()
-            .map(|members| {
+            .map(|(members, _)| {
                 members
                     .iter()
                     .flat_map(|&i| marks::name_marks(&file_name(&self.files[i])))
                     .collect()
             })
             .collect();
-        let mut joined: Vec<Vec<PathBuf>> = vec![Vec::new(); clusters.groups.len()];
+        let mut joined: Vec<Vec<PathBuf>> = vec![Vec::new(); groups.len()];
         let mut fixed: BTreeMap<&str, Vec<PathBuf>> = BTreeMap::new();
         for (kind, files) in &self.fixed {
             for file in files {
@@ -654,11 +676,11 @@ impl Analysis {
                 name: kind.to_string(),
                 files,
                 existing,
-                fixed_kind: true,
+                basis: Basis::Kind,
             });
         }
 
-        for (members, joined) in clusters.groups.iter().zip(joined) {
+        for (&(members, ref topic), joined) in groups.iter().zip(joined) {
             let centre = centroid(members.iter().map(|&i| &self.vectors[i])).unwrap_or_default();
             let existing = self
                 .subfolders
@@ -667,27 +689,12 @@ impl Analysis {
                 .max_by(|a, b| a.1.total_cmp(&b.1))
                 .filter(|(_, s)| *s >= settings.existing_folder_threshold)
                 .map(|(f, _)| f.path.clone());
-            // Topics that differ but share a mark name the folder after it: "IELTS".
             let member_topics: Vec<&str> = members
                 .iter()
                 .map(|&i| self.cards[i].topic.trim())
                 .filter(|t| !t.is_empty())
                 .collect();
-            let agreed = members
-                .iter()
-                .filter_map(|&i| topics[i].as_ref())
-                .collect::<HashSet<_>>()
-                .len()
-                <= 1;
-            let base = (!agreed)
-                .then(|| marks::shared_mark(&member_topics))
-                .flatten()
-                .map(str::to_string)
-                .or_else(|| most_common(member_topics.iter().copied()))
-                .or_else(|| most_common(members.iter().map(|&i| self.cards[i].kind.as_str())))
-                .map(|label| capitalized(&label))
-                .unwrap_or_else(|| self.majority_kind(members));
-            let name = unused_name(&mut used_names, &base);
+            let name = unused_name(&mut used_names, topic);
             named.push((name.clone(), members));
             topical.push((
                 folders.len(),
@@ -703,13 +710,12 @@ impl Analysis {
                 name,
                 files,
                 existing,
-                fixed_kind: false,
+                basis: Basis::Topic,
             });
         }
 
         // Every question is put before any file is placed, so none depends on another's answer.
-        let questions: Vec<(usize, String, Question, Vec<Target>)> = clusters
-            .ungrouped
+        let questions: Vec<(usize, String, Question, Vec<Target>)> = left_out
             .iter()
             .filter_map(|&i| {
                 let (question, targets) = self.question(i, &folders, &topical)?;
@@ -742,7 +748,7 @@ impl Analysis {
                         name,
                         files: Vec::new(),
                         existing: Some(subfolder.path.clone()),
-                        fixed_kind: false,
+                        basis: Basis::Existing,
                     });
                     folders.len() - 1
                 }),
@@ -751,8 +757,7 @@ impl Analysis {
             placed.insert(i, folders[folder].name.clone());
         }
         ungrouped.extend(
-            clusters
-                .ungrouped
+            left_out
                 .iter()
                 .filter(|i| !placed.contains_key(i))
                 .map(|&i| self.files[i].clone()),
@@ -762,8 +767,7 @@ impl Analysis {
             let similarity = |i: usize, j: usize| {
                 cluster::similarity(&self.vectors[i], &self.vectors[j], same_topic(i, j))
             };
-            let report =
-                self.similarity_report(settings, &named, &clusters.ungrouped, &placed, similarity);
+            let report = self.similarity_report(settings, &named, &left_out, &placed, similarity);
             trace::write(trace::SIMILARITY, "similarity.txt", &report);
         }
         folders.sort_by(|a, b| {
@@ -962,19 +966,33 @@ impl Analysis {
         out
     }
 
-    /// The kind most of `members` are, as a folder name.
-    fn majority_kind(&self, members: &[usize]) -> String {
-        let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
-        for &i in members {
-            *counts
-                .entry(kinds::kind(&extension(&self.files[i])))
-                .or_insert(0) += 1;
-        }
-        counts
-            .into_iter()
-            .max_by_key(|&(_, c)| c)
-            .map_or("Files", |(k, _)| k)
-            .to_string()
+    /// What the read files `members` are about, to name their folder
+    /// after: a mark their differing topics share ("IELTS"), or else the
+    /// topic most of them have. Either needs at least half of them, and at
+    /// least two; `None` when they share no topic.
+    fn shared_topic(&self, members: &[usize], topics: &[Option<String>]) -> Option<String> {
+        let enough = |n: usize| n >= 2 && n * 2 >= members.len();
+        let member_topics: Vec<&str> = members
+            .iter()
+            .map(|&i| self.cards[i].topic.trim())
+            .filter(|t| !t.is_empty())
+            .collect();
+        let agreed = members
+            .iter()
+            .filter_map(|&i| topics[i].as_ref())
+            .collect::<HashSet<_>>()
+            .len()
+            <= 1;
+        let mark = (!agreed && enough(member_topics.len()))
+            .then(|| marks::shared_mark(&member_topics))
+            .flatten()
+            .map(str::to_string);
+        mark.or_else(|| {
+            most_common(member_topics.iter().copied())
+                .filter(|(_, n)| enough(*n))
+                .map(|(topic, _)| topic)
+        })
+        .map(|topic| capitalized(&topic))
     }
 }
 
@@ -1014,15 +1032,18 @@ fn file_name(path: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// The non-empty label most files carry (ignoring case), as first written;
-/// the first of equals wins.
-fn most_common<'a>(labels: impl Iterator<Item = &'a str>) -> Option<String> {
+/// The non-empty label most files carry (ignoring case and spacing), as first written,
+/// with how many carry it; the first of equals wins.
+fn most_common<'a>(labels: impl Iterator<Item = &'a str>) -> Option<(String, usize)> {
     let mut counts: Vec<(&str, usize)> = Vec::new();
     for label in labels.map(str::trim).filter(|l| !l.is_empty()) {
-        match counts
-            .iter_mut()
-            .find(|(seen, _)| seen.to_lowercase() == label.to_lowercase())
-        {
+        let key = |l: &str| {
+            l.split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase()
+        };
+        match counts.iter_mut().find(|(seen, _)| key(seen) == key(label)) {
             Some((_, n)) => *n += 1,
             None => counts.push((label, 1)),
         }
@@ -1032,7 +1053,7 @@ fn most_common<'a>(labels: impl Iterator<Item = &'a str>) -> Option<String> {
         .into_iter()
         .rev()
         .max_by_key(|&(_, n)| n)
-        .map(|(label, _)| label.to_string())
+        .map(|(label, n)| (label.to_string(), n))
 }
 
 fn capitalized(label: &str) -> String {

@@ -129,12 +129,6 @@
   color: var(--text);
 }
 
-.tiles-empty {
-  align-self: center;
-  margin: 0;
-  color: var(--muted);
-}
-
 .section-head {
   display: flex;
   align-items: baseline;

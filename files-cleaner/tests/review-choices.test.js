@@ -7,6 +7,7 @@ import {
   foldersHoldingCopies,
   initialChoices,
   initialDuplicates,
+  keepCopyIn,
   LeftFiles,
   mergeFolder,
   moveFile,
@@ -15,7 +16,6 @@ import {
   planChoices,
   planDuplicates,
   removeFolder,
-  setCopiesIn,
   setCopy,
   totals,
 } from "../src/screens/review/review-choices.js";
@@ -116,10 +116,13 @@ test("the count leaves out a file already in the folder it goes to, and takes in
 });
 
 test("the header and button say what will happen to the files", () => {
-  assert.deepEqual(describeChange({ moved: 0, trashed: 0 }), { heading: "Nothing will change", button: "Nothing to move" });
-  assert.deepEqual(describeChange({ moved: 2, trashed: 0 }), { heading: "2 files will move", button: "Move 2 files" });
-  assert.deepEqual(describeChange({ moved: 0, trashed: 1 }), { heading: "1 file will be trashed", button: "Trash 1 file" });
-  assert.deepEqual(describeChange({ moved: 2, trashed: 1 }), { heading: "2 files will move, 1 will be trashed", button: "Move 2, trash 1" });
+  assert.deepEqual(describeChange({ moved: 0, trashed: 0 }), { heading: "Nothing will change", button: "Nothing to apply", scope: "" });
+  assert.deepEqual(describeChange({ moved: 2, trashed: 1 }), {
+    heading: "2 files will move, 1 will be trashed",
+    button: "Apply everything",
+    scope: "2 moves and 1 trash in the whole Plan.",
+  });
+  assert.equal(describeChange({ moved: 30, trashed: 12 }, 0, true).scope, "Some parts already done. 30 moves and 12 trashes left.");
 });
 
 test("files left where they are go by kind, Other last, each kind newest first", () => {
@@ -182,15 +185,21 @@ test("the folders holding copies are listed once each, A-Z, the Scan Root first"
   assert.deepEqual(foldersHoldingCopies(duplicates), ["", "x/old", "y"]);
 });
 
-test("trashing every copy in a folder trashes its copies in untouched groups only", () => {
-  const [untouched, byHand] = initialDuplicates([groupIn("a.pdf", ["x", "y"]), groupIn("b.pdf", ["x", "y"])]);
+test("keeping the copy in a folder trashes the group's other copies, in untouched groups only", () => {
+  const [untouched, byHand, elsewhere] = initialDuplicates([
+    groupIn("a.pdf", ["y", "x"]),
+    groupIn("b.pdf", ["x", "y"]),
+    groupIn("c.pdf", ["y", "z"]),
+  ]);
   const left = new Set();
   setCopy(byHand, "/d/y/b.pdf", "keep", [], left);
 
-  setCopiesIn([untouched, byHand], "x", "trash", [], left);
+  const skipped = keepCopyIn([untouched, byHand, elsewhere], "x", [], left);
 
-  assert.equal(untouched.copies.get("/d/x/a.pdf"), "trash");
+  assert.deepEqual([...untouched.copies.values()], ["trash", "keep"]);
   assert.deepEqual([...byHand.copies.values()], ["keep", "keep"]);
+  assert.deepEqual([...elsewhere.copies.values()], ["keep", "trash"]);
+  assert.equal(skipped, 1);
 });
 
 test("trashing every copy takes the group out of its folder, and keeping one again puts it back", () => {

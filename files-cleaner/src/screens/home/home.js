@@ -12,7 +12,6 @@ import {
 import { el } from "../../shared/dom.js";
 import { count, relativeTime, splitPath } from "../../shared/format.js";
 import { icon } from "../../shared/icons.js";
-import { guide } from "../../shared/onboarding/guide-card.js";
 import { noSessions, sessionList } from "../../shared/session-list/session-row.js";
 import { undoSections } from "../../shared/outcomes.js";
 import { showStatus, showWarning } from "../../shared/status.js";
@@ -27,13 +26,11 @@ export function render(root, nav) {
   const sessions = el("div");
   const seeAll = el("button", { type: "button", className: "link", hidden: true });
   seeAll.addEventListener("click", () => nav.history(1));
-  const { card, help } = guide("home");
 
   root.append(
-    el("header", { className: "home-header" }, el("h1", {}, "Files Cleaner"), el("div", { className: "home-header-actions" }, badge, help)),
-    card,
+    el("header", { className: "home-header" }, el("h1", {}, "Files Cleaner"), el("div", { className: "home-header-actions" }, badge)),
     configError,
-    el("p", { className: "lead" }, "Pick a folder to scan. Nothing changes until you approve a Plan."),
+    el("p", { className: "lead" }, "Pick a folder to clean"),
     tiles,
     status,
     el("div", { className: "section-head" }, el("h2", {}, "Sessions"), seeAll),
@@ -97,7 +94,11 @@ async function showConfig(badge, errorLine) {
 async function showTiles(node, startScan, pick) {
   const pickTile = el(
     "button",
-    { type: "button", className: "tile pick-tile" },
+    {
+      type: "button",
+      className: "tile pick-tile",
+      title: "Duplicates are found anywhere inside. Only files directly in the folder are sorted into folders.",
+    },
     icon("plus", "tile-icon"),
     el("span", { className: "tile-name" }, "Pick folder"),
     el("span", { className: "tile-detail" }, "Choose any folder to clean"),
@@ -112,9 +113,6 @@ async function showTiles(node, startScan, pick) {
   }
   const redraw = () => showTiles(node, startScan, pick);
   node.replaceChildren(...recent.map((folder) => recentTile(folder, startScan, redraw)), pickTile);
-  if (recent.length === 0) {
-    node.append(el("p", { className: "tiles-empty" }, "Folders you scan show up here, so you can clean them again in one click."));
-  }
 }
 
 function recentTile({ path, lastScanned, exists }, startScan, redraw) {
