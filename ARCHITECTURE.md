@@ -69,7 +69,8 @@ The safety-critical part. Its public functions (re-exported from `lib.rs`) are t
 | `suggested_folders`, `planner` | Turn the user's choices on the Review screen into a Plan of Operations |
 | `executor` | Runs a Plan as a Session; Undo, Redo, Retry |
 | `journal`, `database` | The Journal in SQLite, and the lock that lets one Session run at a time |
-| `sessions` | Past Sessions, read back from the Journal |
+| `session_journal` | Reads a Session's Journal back into the state of each Operation. Used by `executor` and `sessions` |
+| `sessions` | Past Sessions for the History screens |
 | `os_trash/` | Sends items to the System Trash and back. One file per OS |
 | `config`, `recent`, `atomic_file` | Small JSON settings files, replaced atomically |
 

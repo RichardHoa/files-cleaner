@@ -52,6 +52,9 @@ export const foldersHoldingCopies = (duplicates) =>
 /** How many copies of the Duplicate Group `duplicate` are trashed. */
 export const trashedCopies = (duplicate) => [...duplicate.copies.values()].filter((fate) => fate === "trash").length;
 
+/** How many copies of all the Duplicate Groups `duplicates` are trashed. */
+export const trashedCopiesIn = (duplicates) => duplicates.reduce((n, duplicate) => n + trashedCopies(duplicate), 0);
+
 /** The path of the Filed Copy of the Duplicate Group `duplicate`: its first Kept Copy, or null if no copy is kept. */
 export const filedCopy = (duplicate) => [...duplicate.copies].find(([, fate]) => fate === "keep")?.[0] ?? null;
 

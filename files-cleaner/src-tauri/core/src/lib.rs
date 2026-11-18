@@ -17,6 +17,7 @@ mod protection;
 mod recent;
 mod scanner;
 mod session_id;
+mod session_journal;
 mod sessions;
 mod suggested_folders;
 mod volume;
@@ -48,9 +49,10 @@ pub use recent::{
 pub use scanner::{
     scan, scan_root_warning, scan_with_progress, ScanEntry, ScanError, ScanProgress, ScanResult,
 };
+pub use session_journal::OperationState;
 pub use sessions::{
-    delete_all_sessions, list_sessions, session_details, OperationState, SessionDetails,
-    SessionInfo, SessionOperation, SessionPage, SessionStatus,
+    delete_all_sessions, list_sessions, session_details, SessionDetails, SessionInfo,
+    SessionOperation, SessionPage, SessionStatus,
 };
 pub use suggested_folders::{
     build_review_plan, build_suggested_folders_plan, DuplicateChoice, FileChoice, FolderChoice,

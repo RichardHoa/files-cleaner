@@ -12,8 +12,8 @@ use common::{
 };
 use files_cleaner_core::{
     delete_all_sessions, list_sessions, lock_sessions, scan, session_details, FileChoice,
-    FolderChoice, OperationKind, OperationState, Plan, SessionError, SessionInfo, SessionStatus,
-    SuggestedFolderChoice,
+    FolderChoice, OperationKind, OperationState, Plan, SessionDetails, SessionError, SessionInfo,
+    SessionStatus, SuggestedFolderChoice,
 };
 use tempfile::TempDir;
 
@@ -940,6 +940,40 @@ fn a_redo_cut_short_after_the_trash_says_to_restore_it_by_hand() {
     )
     .unwrap();
     assert!(undone.done.is_empty(), "the app never guesses: {undone:?}");
+}
+
+#[test]
+fn an_item_restored_by_hand_is_no_longer_unrecoverable() {
+    let dir = messy_folder();
+    let journal = journal_dir();
+    let plan = plan_for(dir.path());
+    let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
+    let session_id = summary.session_id.as_deref().unwrap();
+    undo(session_id, journal.path()).unwrap();
+    let id = id_of(&plan, "a/copy.txt");
+    // The Redo's Trash happened, then the app crashed before recording where.
+    fs::remove_file(dir.path().join("a/copy.txt")).unwrap();
+    append_record(
+        journal.path(),
+        session_id,
+        serde_json::json!({ "record": "intent", "operationId": &id, "phase": "redo" }),
+    );
+    let op_of = |details: SessionDetails| {
+        details
+            .operations
+            .into_iter()
+            .find(|op| op.id == id)
+            .unwrap()
+    };
+    let lost = op_of(session_details(session_id, journal.path()).unwrap());
+    assert_eq!(lost.state, OperationState::Unrecoverable);
+    assert!(lost.note.unwrap().contains("by hand"));
+
+    write(dir.path(), "a/copy.txt", "same contents");
+
+    let back = op_of(session_details(session_id, journal.path()).unwrap());
+    assert_eq!(back.state, OperationState::Undone);
+    assert_eq!(back.note, None);
 }
 
 #[test]

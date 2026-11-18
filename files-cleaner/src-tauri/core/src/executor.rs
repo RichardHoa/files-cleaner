@@ -16,8 +16,10 @@ use crate::journal::{lock_sessions, Journal, Journals, OutcomeKind, Phase, Recor
 use crate::os_trash::{OsTrash, TRASH_PLACE};
 use crate::planner::{Operation, OperationKind, Plan, SourceState};
 use crate::protection::is_os_metadata_file;
-use crate::scanner::{millis, total_size};
-use crate::sessions::{restore_by_hand_note, JournaledOperation, OperationState, SessionJournal};
+use crate::scanner::{exists, millis, total_size};
+use crate::session_journal::{
+    restore_by_hand_note, JournaledOperation, OperationState, SessionJournal,
+};
 
 /// What happened to each Operation in one Run, Undo, Redo or retry.
 #[derive(Debug, Clone, Serialize)]
@@ -71,6 +73,18 @@ pub struct Outcome {
     pub note: Option<String>,
     /// What kind of Note it is, when the UI words it apart from the rest.
     pub note_kind: Option<NoteKind>,
+}
+
+/// How `op` ended, at `landed` if the System Trash just took it.
+fn outcome_of(op: &JournaledOperation, landed: Option<PathBuf>, note: Option<String>) -> Outcome {
+    Outcome {
+        operation_id: op.id.clone(),
+        kind: op.kind,
+        source: op.source.clone(),
+        destination: landed.or_else(|| op.destination.clone()),
+        note,
+        note_kind: None,
+    }
 }
 
 /// The kinds of Note the UI tells apart, in its warning after a Run, Undo,
@@ -718,15 +732,11 @@ fn apply_each<T: Borrow<JournaledOperation>>(
             outcome,
             Outcome {
                 note_kind: kind,
-                ..op.outcome(landed, note)
+                ..outcome_of(op, landed, note)
             },
         );
     }
     Ok(())
-}
-
-pub(crate) fn exists(path: &Path) -> bool {
-    !matches!(fs::symlink_metadata(path), Err(e) if e.kind() == io::ErrorKind::NotFound)
 }
 
 /// Fails with a note if `path` is gone or isn't the item `expected`

@@ -242,6 +242,11 @@ pub(crate) fn total_size(folder: &Path) -> u64 {
     total
 }
 
+/// True unless nothing is at `path`; a broken symlink is there.
+pub(crate) fn exists(path: &Path) -> bool {
+    !matches!(fs::symlink_metadata(path), Err(e) if e.kind() == io::ErrorKind::NotFound)
+}
+
 pub(crate) fn millis(time: SystemTime) -> i64 {
     match time.duration_since(UNIX_EPOCH) {
         Ok(after) => after.as_millis() as i64,
