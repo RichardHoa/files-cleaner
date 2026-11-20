@@ -13,7 +13,7 @@ export const pathSeparator = window.__TAURI__.path.sep();
 
 /**
  * The config: `{ path, config }`, `config` being `{ home, neverTouch, defaultCopyRule, rules, grouping,
- * notifications }`, `defaultCopyRule` "newest", "oldest" or "shortestPath", and `grouping` `{ folderThreshold,
+ * notifications }`, `rules` the user's Rules in order (see rule-text.js), `defaultCopyRule` "newest", "oldest" or "shortestPath", and `grouping` `{ folderThreshold,
  * existingFolderThreshold, smallestFolder }`.
  */
 export const loadConfig = () => invoke("load_config");
@@ -21,7 +21,8 @@ export const loadConfig = () => invoke("load_config");
 /**
  * Saves one change to the config file, keeping everything else in it, and resolves to the config as
  * `loadConfig` does. `key` is "neverTouch" (the whole list of paths), "defaultCopyRule", "folderThreshold",
- * "existingFolderThreshold", "smallestFolder" or "notifications" (whether the user wants them); a grouping
+ * "existingFolderThreshold", "smallestFolder", "notifications" (whether the user wants them) or "rules" (the
+ * whole ordered list of Rules); a grouping
  * `value` of null resets it to the default.
  * Rejects, saving nothing, if the value is invalid.
  */
@@ -143,13 +144,20 @@ export const onboarding = () => invoke("onboarding");
 export const saveOnboarding = (state) => invoke("save_onboarding", { onboarding: state });
 
 // The Suggested Folders are `{ folders, ungrouped, summaries }`: `folders` largest first, each
-// `{ name, files, existing, basis }`, `existing` the matched subfolder's path or null, `basis` what its files
-// share: "topic", "kind" (one kind that is never read) or "existing" (placed in that subfolder); `ungrouped` the
+// `{ name, files, existing, basis, rule }`, `existing` the matched subfolder's path or null, `basis` what its files
+// share: "topic", "kind" (one kind that is never read), "existing" (placed in that subfolder) or "rule" (`rule`,
+// one of the user's Rules, put them there); `ungrouped` the
 // files left where they are; `summaries` each read file's one-sentence summary, keyed by path.
 
+/** The Suggested Folders the config's Rules make of the loose files of the latest scan, by code alone and so at once, the rest left where they are: shown while they're read. */
+export const ruleFolders = () => invoke("rule_folders");
+
+/** For each of `rules`, the index of the first enabled Rule before it that some file could match too, or null (ADR 0014). */
+export const ruleOverlaps = (rules) => invoke("rule_overlaps", { rules });
+
 /**
- * Reads the loose files of the latest scan with the Grouping Models and groups them by the config's
- * `grouping` settings, calling `onProgress({ finished, total, current, placing, loading })` as it goes:
+ * Reads the loose files of the latest scan with the Grouping Models and groups them by the config's Rules,
+ * then its `grouping` settings (without the models, only the Rules group files, and nothing is read), calling `onProgress({ finished, total, current, placing, loading })` as it goes:
  * `total` counts only the files not read before, `loading` is set until the first of them is read, and
  * `placing` once the files left out of every folder are being placed. Resolves to `{ grouping, device }`,
  * `device` where the models ran or null. Rejects once `cancelAnalysis` stops it.

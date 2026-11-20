@@ -6,6 +6,8 @@ description = "Suggested Folders from what's inside the files: reading, the Grou
 
 [dependencies]
 blake3 = "1.8.7"
+# The local calendar, for Rules that go by date.
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 files-cleaner-core = { path = "../core" }
 # `pdfium_7881` must match the PDFium release bundled with the app.
 pdfium-render = { version = "0.9.4", default-features = false, features = ["pdfium_7881"] }
@@ -17,6 +19,8 @@ serde_json = "1"
 # source with CMake and linked in statically on every OS, so users install
 # nothing. Its language files are bundled with the app by its build script.
 tesseract-rs = "0.4.0"
+# Rules compare names without accents.
+unicode-normalization = "0.1"
 zip = { version = "9.0.5", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 # Metal on macOS; Vulkan on Windows and Linux, which llama.cpp leaves for the

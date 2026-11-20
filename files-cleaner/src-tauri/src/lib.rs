@@ -489,9 +489,29 @@ struct AnalysisResult {
     device: Option<String>,
 }
 
+/// For each of `rules`, the first enabled Rule before it that some file
+/// could match too, if any: that file goes where the earlier one says.
+#[tauri::command]
+fn rule_overlaps(rules: Vec<core::Rule>) -> Vec<Option<usize>> {
+    grouping::rule_overlaps(&rules)
+}
+
+/// The Suggested Folders the config's Rules make of the loose files of the
+/// latest scan, by code alone and so at once: shown while the rest are read.
+/// Every copy of a Duplicate Group but its first is left out, as for
+/// `analyse_loose_files`.
+#[tauri::command]
+async fn rule_folders(app: AppHandle, latest: State<'_, Latest>) -> Result<Grouping, CommandError> {
+    let rules = read_config(&app)?.config.rules;
+    let scan = without_copies(&latest)?;
+    // Finding the existing folders the Rules' folders match reads the disk.
+    blocking(move || Ok::<_, Infallible>(grouping::group_by_rules(&scan, &rules))).await
+}
+
 /// Reads the loose files of the latest scan with the Grouping Models, off
 /// the UI thread, sending progress to `on_progress`, and suggests folders
-/// for them by the config's grouping settings. Every copy of a Duplicate
+/// for them by the config's Rules, then its grouping settings. Without the
+/// models, only the Rules suggest folders and nothing is read. Every copy of a Duplicate
 /// Group but its first is left out, as it is trashed by default (ADR
 /// 0007). The models are loaded for this analysis only. `cancel_analysis`
 /// stops it; `stop_reading` ends its reading early and groups what was read.
@@ -510,7 +530,15 @@ async fn analyse_loose_files(
     *analysing.stop.lock().unwrap() = Arc::clone(&stop);
     let config = read_config(&app)?.config;
     let settings = config.grouping;
+    let rules = config.rules;
     let scan = without_copies(&latest)?;
+    // Without the Grouping Models, only the Rules sort files.
+    if !models.installed() {
+        return Ok(AnalysisResult {
+            grouping: grouping::group_by_rules(&scan, &rules),
+            device: None,
+        });
+    }
     let (llm, embedding) = models
         .files(config.describing_model.as_deref())
         .map_err(CommandError::new)?;
@@ -526,6 +554,7 @@ async fn analyse_loose_files(
             store: &store,
             pdfium: pdfium.as_deref(),
             tessdata: tessdata.as_deref(),
+            rules: &rules,
         };
         // A closed window can't receive progress; the analysis carries on.
         grouping::analyse(&input, &mut models, &cancel, &stop, |progress| {
@@ -840,6 +869,8 @@ pub fn run() {
             use_describing_model,
             onboarding,
             save_onboarding,
+            rule_overlaps,
+            rule_folders,
             analyse_loose_files,
             cancel_analysis,
             stop_reading,

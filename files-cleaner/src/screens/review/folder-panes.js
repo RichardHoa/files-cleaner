@@ -7,6 +7,7 @@ import { drawMore } from "../../shared/plan/file-list.js";
 import { count, formatDate, formatSize, plural } from "../../shared/format.js";
 import { icon } from "../../shared/icons.js";
 import { showStatus } from "../../shared/status.js";
+import { describeRule } from "../rules/rule-text.js";
 import { byKindNewestFirst, nameMissing, otherKeptCopies } from "./review-choices.js";
 import { FILES_SHOWN, fileName, trashedMark, UNSORTED } from "./pane-helpers.js";
 
@@ -16,6 +17,7 @@ function basisText(folder, existingName) {
   if (folder.basis === "topic") return `Topic: most files are about “${folder.name}”${fits}`;
   if (folder.basis === "kind") return `File type: not read inside${fits}`;
   if (folder.basis === "existing") return `Fits your folder “${existingName}”`;
+  if (folder.basis === "rule") return `Rule: ${folder.rule.words ? `“${folder.rule.words}”` : describeRule(folder.rule)}${fits}`;
   return "";
 }
 

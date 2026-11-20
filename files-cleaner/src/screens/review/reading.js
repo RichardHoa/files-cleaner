@@ -1,16 +1,19 @@
 // The Review screen's reading: the loose files are read in the background, which needs the Grouping Models
-// (without them, they're offered in the Suggested Folders' place), with a counter, an estimate and a wait
-// note, and how far it is on the sidebar, and the Suggested Folders are filled in once that's done. The
-// reading can be stopped early to group only what was read; Cancel stops it and goes Home.
+// (without them, they're offered in the Suggested Folders' place, or the user's Rules alone sort the files), with a counter, an estimate and a wait
+// note, and how far it is on the sidebar. The Rules' folders need no reading, so they're shown at once, and the
+// other Suggested Folders are added once that's done. The reading can be stopped early to group only what was
+// read; Cancel stops it and goes Home.
 import {
   analyseLooseFiles,
   answerNotifications,
   cancelAnalysis,
   describeError,
   groupingModelsStatus,
+  loadConfig,
   notifications,
   notifyInBackground,
   readingPace,
+  ruleFolders,
   saveReadingPace,
   stopReading,
 } from "../../shared/api.js";
@@ -165,6 +168,12 @@ export function reading(ctx) {
     waitFor("reading", [progress, bar.node, estimate.node, el("p", {}, stop), ...waitNote()]);
     analysing = true;
     try {
+      // Not shown, the Rules' folders come with the rest.
+      const ruled = await ruleFolders().catch(() => null);
+      if (ruled?.folders.length > 0 && !cancelled) {
+        state.showRuled(ruled);
+        showFolders(state.choices);
+      }
       const analysis = await analyseLooseFiles((update) => {
         if (cancelled || stopped) return;
         // Every file is read by the last pass: stopping then would only skip it.
@@ -192,20 +201,29 @@ export function reading(ctx) {
     }
   }
 
-  /** Fills in the Suggested Folders and the files left where they are, from the analysis, with the choices made on the copies meanwhile. */
-  function ready(analysis) {
-    state.ready(analysis.grouping);
-    if (analysis.device) footer.replaceChildren(el("p", { className: "note" }, `Files read on ${analysis.device}.`));
-    if (view.current === "folders") ctx.show(state.choices[0] ?? "left");
+  /** Lists the first of `added`, the Suggested Folders just filled in, if the pane shows the reading; else brings the screen up to date. */
+  function showFolders(added) {
+    if (view.current === "folders") ctx.show(added[0] ?? state.choices[0] ?? "left");
     else ctx.redraw.all();
   }
 
-  /** Reads the files if the Grouping Models are installed, or offers them first. */
+  /** Fills in the Suggested Folders and the files left where they are, from the analysis, with the choices made on the copies meanwhile. */
+  function ready(analysis) {
+    const added = state.ready(analysis.grouping);
+    if (analysis.device) footer.replaceChildren(el("p", { className: "note" }, `Files read on ${analysis.device}.`));
+    showFolders(added);
+  }
+
+  /** Reads the files if the Grouping Models are installed; without them, sorts by the Rules alone if there are any, or else offers the models. */
   async function start() {
     try {
       const models = await groupingModelsStatus();
       if (models.state === "installed") analyse();
-      else {
+      else if ((await loadConfig()).config.rules.some((rule) => rule.enabled)) {
+        // Nothing is read: the Rules' folders come back at once.
+        ready(await analyseLooseFiles(() => {}));
+        footer.replaceChildren(el("p", { className: "note" }, "Sorted by your Rules only."));
+      } else {
         waitFor("offer", [groupingModelsPanel(analyse)]);
       }
     } catch (error) {

@@ -87,7 +87,7 @@ export function sessions(ctx, result) {
     emptiedText.textContent = `Also trash ${plural(possible.length, "emptied folder")}`;
     const ticked = possible.filter((op) => state.emptiedTicked.has(op.id)).length;
     emptiedBox.checked = ticked > 0;
-    if (state.phase === "reading") {
+    if (state.phase === "reading" || state.more === "reading") {
       run.textContent = "Waiting for folders…";
       run.disabled = true;
       return;

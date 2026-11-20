@@ -21,6 +21,8 @@ export class ReviewState {
    * once they're ready, the grouping they came from.
    */
   phase = "reading";
+  /** Once the Rules' folders are shown while the rest of the files are read: "reading", then "failed" or null once they're in. */
+  more = null;
   grouping = null;
   choices = [];
   left = new LeftFiles();
@@ -63,18 +65,68 @@ export class ReviewState {
     return this.#modified.get(path);
   }
 
-  /** The Suggested Folders' phase is now `phase`, before they're ready. */
+  /** The Suggested Folders' phase is now `phase`, before they're ready; once the Rules' folders are shown, it's the rest's. */
   waitFor(phase) {
-    this.phase = phase;
+    if (this.phase === "ready") this.more = phase;
+    else this.phase = phase;
   }
 
-  /** Fills in the Suggested Folders and the files left where they are from `grouping`, with the choices made on the copies meanwhile. */
+  /** Fills in the Rules' Suggested Folders from `grouping`, the rest of the files left where they are while they're read. */
+  showRuled(grouping) {
+    this.ready(grouping);
+    this.more = "reading";
+  }
+
+  /**
+   * Fills in the Suggested Folders and the files left where they are from `grouping`, with the choices made on
+   * the copies meanwhile, and returns the folders added. Once the Rules' folders are shown, it only adds to them.
+   */
   ready(grouping) {
+    if (this.phase === "ready") return this.#addRest(grouping);
     this.grouping = grouping;
     this.choices = initialChoices(grouping.folders);
     for (const path of grouping.ungrouped) this.left.add(path);
     placeDuplicates(this.choices, this.left, this.duplicates);
     this.phase = "ready";
+    return this.choices;
+  }
+
+  /**
+   * Adds the folders `grouping` made of the files read to those of the Rules, shown and maybe changed while
+   * they were read: each folder takes its files that are still left where they are and not trashed, and a
+   * Rule's folder takes the files the tool placed in it, unless the user removed it. Returns the folders added.
+   */
+  #addRest(grouping) {
+    this.grouping = grouping;
+    this.more = null;
+    // The tool lists each Duplicate Group by its first copy; its place is held by its Filed Copy.
+    const take = (path, choice) => {
+      const duplicate = this.duplicateOf.get(path);
+      if (duplicate && !duplicate.placed) {
+        if (duplicate.emptyPlace?.choice !== null) return false;
+        duplicate.emptyPlace = { choice, file: "inFolder" };
+        return true;
+      }
+      const placed = duplicate ? duplicate.placed : path;
+      if (!this.left.has(placed) || this.left.trashed.has(placed)) return false;
+      this.left.delete(placed);
+      choice.files.set(placed, "inFolder");
+      return true;
+    };
+    const added = [];
+    for (const folder of grouping.folders) {
+      if (folder.basis === "rule") {
+        const name = folder.name.toLowerCase();
+        const choice = this.choices.find((c) => c.folder.rule && c.folder.name.toLowerCase() === name);
+        for (const path of choice ? folder.files : []) take(path, choice);
+        continue;
+      }
+      const [choice] = initialChoices([folder]);
+      choice.files.clear();
+      if (folder.files.map((path) => take(path, choice)).includes(true)) added.push(choice);
+    }
+    this.choices.push(...added);
+    return added;
   }
 
   /** Sets the copy at `path` of the Duplicate Group `duplicate` to `fate`, "keep" or "trash". */

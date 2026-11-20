@@ -2,9 +2,13 @@ use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use files_cleaner_core::{load_config, scan};
+use chrono::{Days, Local};
+use files_cleaner_core::{
+    load_config, scan, DateField, DateGrouping, GroupBy, NameHow, NameMatch, Rule, RuleMatch,
+};
 use files_cleaner_grouping::{
-    analyse, Card, CardStore, Content, Input, Models, Question, Settings, Vector,
+    analyse, group_by_rules, rule_overlaps, Basis, Card, CardStore, Content, Input, Models,
+    Question, Settings, Vector,
 };
 
 /// Cards and vectors fixed by what each file says.
@@ -84,6 +88,7 @@ fn three_files_on_one_topic_make_one_suggested_folder() {
         store: &store,
         pdfium: None,
         tessdata: None,
+        rules: &[],
     };
     let analysis = analyse(
         &input,
@@ -133,6 +138,7 @@ fn a_file_without_an_extension_is_never_a_loose_file() {
         store: &store,
         pdfium: None,
         tessdata: None,
+        rules: &[],
     };
     let analysis = analyse(
         &input,
@@ -242,6 +248,7 @@ fn topics_sharing_a_mark_group_and_a_named_archive_joins_them() {
         store: &store,
         pdfium: None,
         tessdata: None,
+        rules: &[],
     };
     let analysis = analyse(
         &input,
@@ -299,6 +306,7 @@ fn a_cleared_store_reads_every_file_again() {
         store: &store,
         pdfium: None,
         tessdata: None,
+        rules: &[],
     };
     let embedded = |models: &mut TopicModels| {
         analyse(
@@ -351,6 +359,7 @@ fn a_file_left_out_goes_where_the_model_places_it_and_stays_there_on_regroup() {
         store: &store,
         pdfium: None,
         tessdata: None,
+        rules: &[],
     };
     let analysis = analyse(
         &input,
@@ -437,6 +446,7 @@ fn stopping_groups_the_files_read_so_far_and_leaves_the_rest_where_they_are() {
         store: &store,
         pdfium: None,
         tessdata: None,
+        rules: &[],
     };
     let stop = AtomicBool::new(false);
 
@@ -541,6 +551,7 @@ fn read_files_sharing_no_topic_stay_where_they_are() {
         store: &store,
         pdfium: None,
         tessdata: None,
+        rules: &[],
     };
     let analysis = analyse(
         &input,
@@ -554,4 +565,273 @@ fn read_files_sharing_no_topic_stay_where_they_are() {
     let grouping = &analysis.grouping;
     assert!(grouping.folders.is_empty());
     assert_eq!(grouping.ungrouped.len(), 3);
+}
+
+#[test]
+fn a_date_rule_sorts_its_files_and_the_rest_group_automatically() {
+    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("test-tmp");
+    fs::create_dir_all(&base).unwrap();
+    let dir = tempfile::Builder::new()
+        .prefix("scan-")
+        .tempdir_in(&base)
+        .unwrap();
+    let root = dir.path();
+    let text = "Week one lecture on algorithms, sorting and searching with worked examples.";
+    for name in ["T1T2-2706.txt", "week 2.txt", "notes.md"] {
+        fs::write(root.join(name), format!("{name}: {text}")).unwrap();
+    }
+    fs::write(root.join("today.png"), "").unwrap();
+    fs::write(root.join("yesterday.png"), "").unwrap();
+    let yesterday_noon = Local::now()
+        .date_naive()
+        .checked_sub_days(Days::new(1))
+        .unwrap()
+        .and_hms_opt(12, 0, 0)
+        .unwrap()
+        .and_local_timezone(Local)
+        .unwrap();
+    fs::File::options()
+        .write(true)
+        .open(root.join("yesterday.png"))
+        .unwrap()
+        .set_modified(yesterday_noon.into())
+        .unwrap();
+    let store_dir = tempfile::tempdir().unwrap();
+    let config = load_config("{}", root).unwrap();
+    let scan = scan(root, &config).unwrap();
+    let store = CardStore::open(store_dir.path());
+    let rules = [Rule {
+        enabled: true,
+        words: None,
+        matches: RuleMatch {
+            extensions: vec!["png".into()],
+            ..RuleMatch::default()
+        },
+        group_by: GroupBy::Date {
+            date: DateField::Changed,
+            by: DateGrouping::Buckets,
+        },
+    }];
+
+    let input = Input {
+        scan: &scan,
+        settings: Settings::default(),
+        store: &store,
+        pdfium: None,
+        tessdata: None,
+        rules: &rules,
+    };
+    let analysis = analyse(
+        &input,
+        &mut FakeModels,
+        &AtomicBool::new(false),
+        &AtomicBool::new(false),
+        |_| {},
+    )
+    .unwrap();
+
+    let folder = |name: &str| {
+        analysis
+            .grouping
+            .folders
+            .iter()
+            .find(|f| f.name == name)
+            .unwrap_or_else(|| panic!("no folder {name}"))
+    };
+    assert_eq!(folder("Today").files, [scan.root.join("today.png")]);
+    assert_eq!(folder("Yesterday").files, [scan.root.join("yesterday.png")]);
+    assert_eq!(folder("Today").basis, Basis::Rule);
+    assert_eq!(folder("Today").rule.as_ref(), Some(&rules[0]));
+    assert_eq!(folder("CS101").files.len(), 3);
+    assert_eq!(analysis.grouping.folders.len(), 3);
+}
+
+#[test]
+fn a_name_rule_finds_its_word_anywhere_in_any_case_and_accent() {
+    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("test-tmp");
+    fs::create_dir_all(&base).unwrap();
+    let dir = tempfile::Builder::new()
+        .prefix("scan-")
+        .tempdir_in(&base)
+        .unwrap();
+    let root = dir.path();
+    for name in [
+        "Trip to BARAKA.jpg",
+        "baraka_2024-final.pdf",
+        "Báraka notes.txt",
+        "baraka draft.txt",
+        "other.txt",
+    ] {
+        fs::write(root.join(name), "").unwrap();
+    }
+    let config = load_config("{}", root).unwrap();
+    let scan = scan(root, &config).unwrap();
+    let rules = [Rule {
+        enabled: true,
+        words: None,
+        matches: RuleMatch {
+            name: Some(NameMatch {
+                how: NameHow::Contains,
+                words: vec!["baraka".into()],
+            }),
+            except_names: vec!["Draft".into()],
+            ..RuleMatch::default()
+        },
+        group_by: GroupBy::Folder {
+            name: "Baraka".into(),
+            date: DateField::Changed,
+        },
+    }];
+
+    let grouping = group_by_rules(&scan, &rules);
+
+    let mut files = grouping.folders[0].files.clone();
+    files.sort();
+    let mut expected: Vec<_> = [
+        "Báraka notes.txt",
+        "Trip to BARAKA.jpg",
+        "baraka_2024-final.pdf",
+    ]
+    .iter()
+    .map(|n| scan.root.join(n))
+    .collect();
+    expected.sort();
+    assert_eq!(grouping.folders.len(), 1);
+    assert_eq!(files, expected);
+}
+
+/// `FakeModels`, but placing every file left out in the folder named "Trip".
+struct PlacingInTrip;
+
+impl Models for PlacingInTrip {
+    fn card_model_id(&self) -> String {
+        FakeModels.card_model_id()
+    }
+
+    fn embedding_model_id(&self) -> String {
+        FakeModels.embedding_model_id()
+    }
+
+    fn card(&mut self, content: &Content) -> Result<Card, String> {
+        FakeModels.card(content)
+    }
+
+    fn embed(&mut self, texts: &[String]) -> Result<Vec<Vector>, String> {
+        FakeModels.embed(texts)
+    }
+
+    fn place(&mut self, question: &Question) -> Result<Option<usize>, String> {
+        Ok(question.folders.iter().position(|f| f.name == "Trip"))
+    }
+
+    fn device(&self) -> Option<String> {
+        FakeModels.device()
+    }
+}
+
+#[test]
+fn a_file_left_out_can_be_placed_in_a_rules_folder_without_reading_its_files() {
+    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("test-tmp");
+    fs::create_dir_all(&base).unwrap();
+    let dir = tempfile::Builder::new()
+        .prefix("scan-")
+        .tempdir_in(&base)
+        .unwrap();
+    let root = dir.path();
+    fs::write(root.join("trip plan.txt"), "Where we stay in Da Lat.").unwrap();
+    fs::write(root.join("recipe.txt"), "A recipe for bread with pork.").unwrap();
+    let store_dir = tempfile::tempdir().unwrap();
+    let config = load_config("{}", root).unwrap();
+    let scan = scan(root, &config).unwrap();
+    let store = CardStore::open(store_dir.path());
+    let rules = [Rule {
+        enabled: true,
+        words: None,
+        matches: RuleMatch {
+            name: Some(NameMatch {
+                how: NameHow::Contains,
+                words: vec!["trip".into()],
+            }),
+            ..RuleMatch::default()
+        },
+        group_by: GroupBy::Folder {
+            name: "Trip".into(),
+            date: DateField::Changed,
+        },
+    }];
+    let input = Input {
+        scan: &scan,
+        settings: Settings::default(),
+        store: &store,
+        pdfium: None,
+        tessdata: None,
+        rules: &rules,
+    };
+
+    let analysis = analyse(
+        &input,
+        &mut PlacingInTrip,
+        &AtomicBool::new(false),
+        &AtomicBool::new(false),
+        |_| {},
+    )
+    .unwrap();
+
+    let trip = &analysis.grouping.folders[0];
+    assert_eq!(trip.name, "Trip");
+    assert_eq!(
+        trip.files,
+        [
+            scan.root.join("trip plan.txt"),
+            scan.root.join("recipe.txt")
+        ]
+    );
+    // The Rule's file was never read, so it has no summary.
+    assert!(!analysis
+        .grouping
+        .summaries
+        .contains_key(&scan.root.join("trip plan.txt")));
+}
+
+#[test]
+fn a_rule_matching_files_an_earlier_one_matches_is_found_to_overlap_it() {
+    let rule = |matches: RuleMatch, name: &str| Rule {
+        enabled: true,
+        words: None,
+        matches,
+        group_by: GroupBy::Folder {
+            name: name.into(),
+            date: DateField::Changed,
+        },
+    };
+    let rules = [
+        rule(
+            RuleMatch {
+                extensions: vec!["pdf".into()],
+                ..RuleMatch::default()
+            },
+            "Documents",
+        ),
+        rule(
+            RuleMatch {
+                extensions: vec!["pdf".into()],
+                name: Some(NameMatch {
+                    how: NameHow::Contains,
+                    words: vec!["invoice".into()],
+                }),
+                ..RuleMatch::default()
+            },
+            "Invoices",
+        ),
+        rule(
+            RuleMatch {
+                kind: Some("Images".into()),
+                ..RuleMatch::default()
+            },
+            "Pictures",
+        ),
+    ];
+
+    // "invoice.pdf" fits the first two; no image is a PDF.
+    assert_eq!(rule_overlaps(&rules), [None, Some(0), None]);
 }

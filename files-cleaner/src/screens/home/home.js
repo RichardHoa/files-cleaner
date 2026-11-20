@@ -1,4 +1,4 @@
-// Home: rescan a Recent Scan Root or pick a folder, open Settings, and see the latest Sessions.
+// Home: rescan a Recent Scan Root or pick a folder, open Rules or Settings, and see the latest Sessions.
 import {
   describeError,
   listSessions,
@@ -20,6 +20,8 @@ const LATEST_SESSIONS = 3;
 
 export function render(root, nav) {
   const badge = el("button", { type: "button", className: "config-badge" });
+  const rulesButton = el("button", { type: "button", className: "config-badge", title: "How files are sorted at every scan" }, "Rules");
+  rulesButton.addEventListener("click", () => nav.rules("home"));
   const configError = el("p", { className: "status error" });
   const tiles = el("div", { className: "tiles" });
   const status = el("p", { className: "status" });
@@ -28,7 +30,7 @@ export function render(root, nav) {
   seeAll.addEventListener("click", () => nav.history(1));
 
   root.append(
-    el("header", { className: "home-header" }, el("h1", {}, "Files Cleaner"), el("div", { className: "home-header-actions" }, badge)),
+    el("header", { className: "home-header" }, el("h1", {}, "Files Cleaner"), el("div", { className: "home-header-actions" }, rulesButton, badge)),
     configError,
     el("p", { className: "lead" }, "Pick a folder to clean"),
     tiles,

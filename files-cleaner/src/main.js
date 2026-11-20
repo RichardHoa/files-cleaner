@@ -3,6 +3,7 @@
 import * as history from "./screens/history/history.js";
 import * as home from "./screens/home/home.js";
 import * as review from "./screens/review/review.js";
+import * as rules from "./screens/rules/rules.js";
 import * as session from "./screens/session/session.js";
 import * as settings from "./screens/settings/settings.js";
 import { findDuplicates, scan } from "./shared/api.js";
@@ -21,6 +22,8 @@ const nav = {
    */
   session: (sessionId, from = null, result = null) => show(session, sessionId, from, result),
   settings: () => show(settings),
+  /** `from` is "settings" when opened from Settings, so Back returns there. */
+  rules: (from = "home") => show(rules, from),
 };
 nav.steps = stepFlow({ findDuplicates, scan }, nav);
 

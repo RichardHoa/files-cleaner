@@ -1,0 +1,225 @@
+/* Rules: a numbered list in one bordered box with a toolbar above it, and an editor laid out like a macOS
+   settings form: grouped boxes of rows, each a right-aligned label beside its controls. A Rule that overlaps
+   an earlier one wears the solid yellow badge. */
+.rules-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 760px;
+  margin: var(--space-3) 0 var(--space-2);
+}
+
+.rules-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.rules-list {
+  max-width: 760px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: clip;
+}
+
+.rules-list[hidden] {
+  display: none;
+}
+
+.rules-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  cursor: default;
+  transition: background-color 120ms ease-out;
+}
+
+.rules-row:last-child {
+  border-bottom: 0;
+}
+
+.rules-row:hover {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+.rules-row.selected {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.rules-row:focus-visible {
+  outline-offset: -2px;
+}
+
+/* Its place in the order: the first Rule a file fits wins. */
+.rules-order {
+  flex: none;
+  width: 1.5em;
+  font-size: var(--font-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+
+.rules-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--space-2);
+}
+
+.rules-arrow {
+  color: var(--muted);
+}
+
+.rules-goes {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.rules-row.off .rules-text {
+  color: var(--muted);
+}
+
+.rules-marks {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+}
+
+.rules-marks:empty {
+  display: none;
+}
+
+/* A file that fits this Rule and an earlier one goes by the earlier one: said in solid yellow. */
+.rules-overlaps {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2) 2px var(--space-1-5);
+  border-radius: var(--radius-pill);
+  background: var(--warning-fill);
+  color: var(--on-warning);
+  font-size: var(--font-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.rules-overlaps .icon {
+  width: 13px;
+  height: 13px;
+  stroke-width: 2.5;
+}
+
+.rules-editor {
+  max-width: 760px;
+}
+
+.rules-group-title {
+  margin: var(--space-5) 0 var(--space-1-5);
+  padding: 0 var(--space-1);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.rules-fields {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.rules-field {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--space-4);
+  min-height: 44px;
+  padding: var(--space-1-5) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.rules-field:last-child {
+  border-bottom: 0;
+}
+
+.rules-field[hidden] {
+  display: none;
+}
+
+.rules-label {
+  color: var(--muted);
+  text-align: end;
+}
+
+.rules-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.rules-field input,
+.rules-field select {
+  font: inherit;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: inherit;
+}
+
+.rules-field input[type="text"] {
+  flex: 1;
+  min-width: 10rem;
+  max-width: 24rem;
+}
+
+.rules-field input:disabled,
+.rules-field select:disabled {
+  opacity: 0.5;
+}
+
+.rules-number {
+  width: 5em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The Rule as the controls make it, read back as its row in the list will. */
+.rules-readback {
+  margin: var(--space-5) 0 var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--text) 5%, var(--surface));
+}
+
+.rules-editor .actions {
+  justify-content: flex-end;
+}
+
+@media (max-width: 520px) {
+  .rules-field {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: var(--space-1);
+  }
+
+  .rules-label {
+    text-align: start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rules-row {
+    transition: none;
+  }
+}

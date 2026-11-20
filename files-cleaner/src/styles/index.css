@@ -12,3 +12,4 @@
 @import url("../screens/history/history.css") layer(screens);
 @import url("../screens/review/review.css") layer(screens);
 @import url("../screens/settings/settings.css") layer(screens);
+@import url("../screens/rules/rules.css") layer(screens);

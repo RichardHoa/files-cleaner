@@ -1,4 +1,4 @@
-// Settings: the Never-Touch Paths, the Default Copy Rule, how files are grouped,
+// Settings: the Never-Touch Paths, the Default Copy Rule, how files are grouped, the way to the Rules,
 // notifications, the Grouping Models, deleting all Sessions, and help. The headings say these in plain
 // words ("Folders to leave alone"); the glossary and the code keep the exact terms.
 // This is the only way settings change: the config file behind them is never edited by hand. Each change
@@ -57,7 +57,7 @@ export function render(root, nav) {
     helpSection(),
     iconCredit(),
   );
-  showConfigSections(configSections);
+  showConfigSections(configSections, nav);
 }
 
 /** Replays the introduction. */
@@ -75,7 +75,7 @@ function iconCredit() {
 }
 
 /** The sections kept in the config, or why it can't be read, with "Reset settings" to start again from the defaults. */
-async function showConfigSections(node) {
+async function showConfigSections(node, nav) {
   let config;
   try {
     ({ config } = await loadConfig());
@@ -90,7 +90,7 @@ async function showConfigSections(node) {
       reset.disabled = true;
       try {
         await resetSettings();
-        showConfigSections(node);
+        showConfigSections(node, nav);
       } catch (e) {
         showStatus(status, describeError(e), true);
         reset.disabled = false;
@@ -107,6 +107,7 @@ async function showConfigSections(node) {
     neverTouchSection(config.neverTouch),
     duplicatesSection(config.defaultCopyRule),
     groupingSection(config.grouping),
+    rulesSection(config.rules, nav),
     notificationsSection(config.notifications),
   );
 }
@@ -187,6 +188,13 @@ function neverTouchSection(initial) {
     el("div", { className: "actions" }, add),
     status,
   );
+}
+
+/** How many Rules there are, and the way to the Rules screen. */
+function rulesSection(rules, nav) {
+  const open = el("button", { type: "button" }, "Edit Rules…");
+  open.addEventListener("click", () => nav.rules("settings"));
+  return section("Rules", el("p", { className: "muted" }, plural(rules.length, "Rule")), el("div", { className: "actions" }, open));
 }
 
 function groupingSection(grouping) {

@@ -3,6 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -89,7 +90,9 @@ pub fn build_suggested_folders_plan(
 
 /// Proposes the whole review as one Plan. Each Duplicate Group's copies to
 /// trash are trashed, naming its Kept Copy, if any. Each Suggested Folder's
-/// choice is a new folder (with a Clash Suffix if its name is taken) and a
+/// choice is a new folder (with a Clash Suffix if its name is taken; a `/`
+/// in its name puts it inside a folder of that name, which is made if it
+/// isn't there) and a
 /// Move per file into it, a Move per file into an existing folder, or a Trash
 /// per file. A file the user trashes on its own is trashed whatever the
 /// folder's choice; a file taken out, or already in that folder, stays put.
@@ -130,19 +133,45 @@ pub fn build_review_plan(
         name
     };
     let mut created = Vec::new();
+    // The folder each `parent/name` before a `/` in a name stands for: one
+    // already there, or made once for every Suggested Folder inside it.
+    let mut outer: HashMap<(PathBuf, String), PathBuf> = HashMap::new();
     for folder in folders {
-        let name =
-            safe_folder_name(&folder.name).ok_or_else(|| SuggestedFolderError::EmptyName {
-                name: folder.name.clone(),
-            })?;
+        let empty = || SuggestedFolderError::EmptyName {
+            name: folder.name.clone(),
+        };
+        let mut parts = folder
+            .name
+            .split('/')
+            .map(safe_folder_name)
+            .collect::<Option<Vec<String>>>()
+            .ok_or_else(empty)?;
+        let name = parts.pop().ok_or_else(empty)?;
         let destination = match &folder.choice {
             FolderChoice::TrashAll => None,
             FolderChoice::AddTo { folder } => Some(folder.clone()),
             FolderChoice::CreateHere | FolderChoice::CreateIn { .. } => {
-                let parent = match &folder.choice {
-                    FolderChoice::CreateIn { folder } => folder.as_path(),
-                    _ => root.as_path(),
+                let mut parent = match &folder.choice {
+                    FolderChoice::CreateIn { folder } => folder.clone(),
+                    _ => root.clone(),
                 };
+                for part in &parts {
+                    let key = (parent.clone(), part.to_lowercase());
+                    parent = match outer.get(&key) {
+                        Some(found) => found.clone(),
+                        None => {
+                            let found = existing_folder(&parent, part).unwrap_or_else(|| {
+                                let new =
+                                    parent.join(claim(&parent, part, clash::free_folder_name));
+                                created.push((new.clone(), suggested(&new, part)));
+                                new
+                            });
+                            outer.insert(key, found.clone());
+                            found
+                        }
+                    };
+                }
+                let parent = parent.as_path();
                 let new = parent.join(claim(parent, &name, clash::free_folder_name));
                 created.push((new.clone(), suggested(&new, &name)));
                 Some(new)
@@ -181,6 +210,19 @@ pub fn build_review_plan(
         }
     }
     Ok(finish(root, os_trash, operations, created))
+}
+
+/// The folder in `parent` named `name`, ignoring case, if there is one.
+fn existing_folder(parent: &Path, name: &str) -> Option<PathBuf> {
+    let wanted = name.to_lowercase();
+    fs::read_dir(parent)
+        .ok()?
+        .flatten()
+        .find(|child| {
+            child.file_name().to_string_lossy().to_lowercase() == wanted
+                && child.file_type().is_ok_and(|t| t.is_dir())
+        })
+        .map(|child| child.path())
 }
 
 /// The Reason for a Suggested Folder whose files go to `destination`: named

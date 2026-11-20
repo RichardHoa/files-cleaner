@@ -50,3 +50,32 @@ test("trashing every file of a folder grays it out in the sidebar and plans each
   state.trashAllFiles(ielts, false);
   assert.deepEqual(folderTally(ielts), { going: 2, trashed: false });
 });
+
+test("the folders read later join the Rules' folders shown first, keeping what the user did meanwhile", () => {
+  const paths = ["/d/trip.jpg", "/d/plan.pdf", "/d/a.pdf", "/d/b.pdf"];
+  const state = new ReviewState({ root: "/d", entries: paths.map((path) => ({ path, size: 1, modified: 0 })) }, []);
+  const rule = { groupBy: { type: "folder", name: "Trip" } };
+  const trip = { name: "Trip", files: ["/d/trip.jpg"], existing: null, basis: "rule", rule };
+  state.showRuled({ folders: [trip], ungrouped: ["/d/plan.pdf", "/d/a.pdf", "/d/b.pdf"], summaries: {}, kinds: {} });
+  const [ruled] = state.choices;
+  state.rename(ruled, "Da Lat");
+  state.trashLeft("/d/b.pdf", true);
+
+  const added = state.ready({
+    folders: [
+      { ...trip, files: ["/d/trip.jpg", "/d/plan.pdf"] },
+      { name: "IELTS", files: ["/d/a.pdf", "/d/b.pdf"], existing: null, basis: "topic" },
+    ],
+    ungrouped: [],
+    summaries: {},
+    kinds: {},
+  });
+
+  assert.equal(state.more, null);
+  assert.deepEqual(planChoices(state.choices, state.left), [
+    { name: "Da Lat", choice: { type: "createHere" }, files: [["/d/trip.jpg", "inFolder"], ["/d/plan.pdf", "inFolder"]] },
+    { name: "IELTS", choice: { type: "createHere" }, files: [["/d/a.pdf", "inFolder"]] },
+    { name: "Left where they are", choice: { type: "trashAll" }, files: [["/d/b.pdf", "inFolder"]] },
+  ]);
+  assert.deepEqual(added, [state.choices[1]]);
+});

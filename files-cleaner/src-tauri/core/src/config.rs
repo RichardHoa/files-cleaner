@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::atomic_file;
+use crate::rules::{rule_problem, Rule};
 
 /// The config written on first launch, as a working starting point.
 pub const EXAMPLE_CONFIG: &str = r#"{
@@ -27,6 +28,9 @@ pub struct Config {
     /// The Hugging Face link of the model the user picked to describe
     /// files, or `None` for the app's own.
     pub describing_model: Option<String>,
+    /// The user's Rules, in order: the first enabled one that matches a
+    /// Loose File decides its Suggested Folder.
+    pub rules: Vec<Rule>,
 }
 
 /// How the files are grouped into Suggested Folders: the `grouping` section,
@@ -67,6 +71,8 @@ pub enum SettingChange {
     /// The Hugging Face link of the model that describes files, or `None`
     /// for the app's own. Set by the app once the model has passed its check.
     DescribingModel(Option<String>),
+    /// The whole ordered list of Rules, from the Rules screen.
+    Rules(Vec<Rule>),
 }
 
 /// Which copy of a Duplicate Group starts out kept.
@@ -124,6 +130,9 @@ struct RawConfig {
     grouping: RawGrouping,
     notifications: Option<bool>,
     describing_model: Option<String>,
+    /// The Rules of ADR 0013, under a key of their own.
+    #[serde(default)]
+    sorting_rules: Vec<Rule>,
 }
 
 #[derive(Default, Deserialize)]
@@ -156,6 +165,10 @@ pub fn load_config(text: &str, home: &Path) -> Result<Config, ConfigError> {
     if let Some(link) = &raw.describing_model {
         crate::describing_model_link(link).map_err(|message| error_at(text, 0, link, message))?;
     }
+    if let Some(problem) = raw.sorting_rules.iter().find_map(rule_problem) {
+        let section = text.find("\"sortingRules\"").unwrap_or(0);
+        return Err(error_at(text, section, "sortingRules", problem));
+    }
     Ok(Config {
         home: home.to_path_buf(),
         never_touch,
@@ -163,6 +176,7 @@ pub fn load_config(text: &str, home: &Path) -> Result<Config, ConfigError> {
         grouping,
         notifications: raw.notifications,
         describing_model: raw.describing_model,
+        rules: raw.sorting_rules,
     })
 }
 
@@ -273,6 +287,13 @@ pub fn save_config(
         }
         SettingChange::DescribingModel(None) => {
             object.remove("describingModel");
+        }
+        SettingChange::Rules(rules) if rules.is_empty() => {
+            object.remove("sortingRules");
+        }
+        SettingChange::Rules(rules) => {
+            let rules = serde_json::to_value(rules).map_err(|e| plain(&e))?;
+            object.insert("sortingRules".into(), rules);
         }
     }
     let mut saved = serde_json::to_string_pretty(&json).map_err(|e| plain(&e))?;

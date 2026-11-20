@@ -47,6 +47,9 @@
   --on-accent: #ffffff;
   --error: #c4162a;
   --warning: #9a5600;
+  /* A solid warning badge: macOS's caution yellow, with dark ink on it. */
+  --warning-fill: #ffcc00;
+  --on-warning: #3d2e00;
 
   /* One colour per Operation kind. Trash is red but always reversible ("moved to Trash"). */
 
@@ -74,6 +77,8 @@
     --on-accent: #111113;
     --error: #ff6b6b;
     --warning: #ffb340;
+    --warning-fill: #ffd60a;
+    --on-warning: #2a2000;
 
 
     --status-completed: #30a46c;

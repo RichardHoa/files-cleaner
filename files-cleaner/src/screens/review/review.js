@@ -2,7 +2,8 @@
 // lists the Duplicates, then the Suggested Folders and New folder, then the files left where they are (shown
 // as Unsorted), and the pane beside it lists the one picked. The Duplicate Groups show at once. The loose
 // files are read in the background meanwhile, which needs the Grouping Models (without them, they're
-// offered in the Suggested Folders' place), and the Suggested Folders are filled in once that's done.
+// offered in the Suggested Folders' place); the Rules' folders show at once, and the other Suggested Folders
+// are added once that's done.
 // Rows have no buttons: files, and copies, are selected as in Finder, by clicking, by dragging a rectangle
 // over them or with the arrow keys, then trashed or put back (or kept, for copies) from the toolbar always
 // shown above the list, their right-click menu or ⌘⌫. Files are moved by dragging them by the name onto a

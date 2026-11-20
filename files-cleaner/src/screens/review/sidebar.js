@@ -60,7 +60,13 @@ export function sidebar(ctx) {
       sidebarItem("duplicates", "Duplicates", trashedCopiesIn(state.duplicates), "", "copies"),
       el("h2", { className: "folder-sidebar-section" }, "Suggested Folders"),
       ...(state.phase === "ready"
-        ? [...state.choices.map(choiceItem), newFolder, sidebarItem("left", UNSORTED, state.left.size - state.left.trashed.size)]
+        ? [
+            ...state.choices.map(choiceItem),
+            // The rest of the files are still read, beside the Rules' folders.
+            ...(state.more ? [sidebarItem("folders", state.more === "reading" ? "Reading…" : "Reading failed", null)] : []),
+            newFolder,
+            sidebarItem("left", UNSORTED, state.left.size - state.left.trashed.size),
+          ]
         : [sidebarItem("folders", state.phase === "reading" ? "Reading…" : "Suggested Folders", null)]),
     );
     view.redrawing = false;

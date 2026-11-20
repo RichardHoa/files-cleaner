@@ -15,6 +15,7 @@ mod os_trash;
 mod planner;
 mod protection;
 mod recent;
+mod rules;
 mod scanner;
 mod session_id;
 mod session_journal;
@@ -46,6 +47,7 @@ pub use planner::{
 pub use recent::{
     recent_scan_roots, record_recent_scan_root, remove_recent_scan_root, RecentScanRoot,
 };
+pub use rules::{DateField, DateGrouping, DateMatch, GroupBy, NameHow, NameMatch, Rule, RuleMatch};
 pub use scanner::{
     scan, scan_root_warning, scan_with_progress, ScanEntry, ScanError, ScanProgress, ScanResult,
 };

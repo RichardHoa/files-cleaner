@@ -10,6 +10,10 @@
 //! without OCR's languages, are a kind too: each kind is one group, unless the
 //! file's name ties it to a group of read files.
 //!
+//! The user's Rules go first: the Loose Files a Rule matches go where it
+//! says, by code alone, and only the rest are read and grouped. A Rule's
+//! folder of one name is offered to the LLM too, for read files left out.
+//!
 //! Everything that needs llama.cpp, PDFium or Tesseract lives in this crate, so `core`
 //! stays pure Rust. `analyse` is the entry point; `Analysis::regroup` groups
 //! again with new settings and runs no model.
@@ -22,6 +26,7 @@ mod marks;
 mod ocr;
 mod place;
 mod read;
+mod rules;
 mod store;
 mod trace;
 
@@ -31,7 +36,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use files_cleaner_core::{ScanEntry, ScanResult};
+use files_cleaner_core::{GroupBy, Rule, ScanEntry, ScanResult};
 use serde::Serialize;
 
 pub use card::Card;
@@ -39,6 +44,7 @@ pub use cluster::Vector;
 pub use llama::{check_describing_model, LlamaModels};
 pub use place::{Choice, Question};
 pub use read::{pdf_child_main, read, Content};
+pub use rules::overlaps as rule_overlaps;
 pub use store::CardStore;
 pub use trace::{clear_trace, trace_to};
 
@@ -88,6 +94,9 @@ pub struct Input<'a> {
     /// The folder of OCR's language files bundled with the app; without it,
     /// scanned PDFs are read by name.
     pub tessdata: Option<&'a Path>,
+    /// The user's Rules, in order: the Loose Files they match go where they
+    /// say, and only the rest are read and grouped.
+    pub rules: &'a [Rule],
 }
 
 /// How far an analysis has got.
@@ -160,6 +169,9 @@ pub struct SuggestedFolder {
     /// The existing subfolder of the Scan Root it matches, if any.
     pub existing: Option<PathBuf>,
     pub basis: Basis,
+    /// The Rule that made it, for `Basis::Rule`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rule: Option<Rule>,
 }
 
 /// What a Suggested Folder's files have in common, for the user to see why
@@ -174,6 +186,8 @@ pub enum Basis {
     Kind,
     /// The LLM placed each in the existing subfolder it goes into.
     Existing,
+    /// A Rule of the user's put them there.
+    Rule,
 }
 
 /// Everything the models said about a Scan Root, enough to group again
@@ -190,6 +204,12 @@ pub struct Analysis {
     fixed: BTreeMap<&'static str, Vec<PathBuf>>,
     /// The loose files left unread because reading was stopped.
     unread: Vec<PathBuf>,
+    /// The Suggested Folders the Rules made, of files never read.
+    ruled: Vec<SuggestedFolder>,
+    /// For each of `ruled` that files left out may be placed in, its
+    /// centroid and topics: those of the subfolder it goes into, or else
+    /// its name's vector and none.
+    rule_places: Vec<Option<(Vector, Vec<String>)>>,
     subfolders: Vec<Subfolder>,
     /// What the LLM answered for each placing question, by its prompt: the
     /// folder's label, or none.
@@ -242,12 +262,19 @@ pub fn analyse(
     mut on_progress: impl FnMut(Progress),
 ) -> Result<Analysis, Stopped> {
     let scan = input.scan;
+    let ruled = rules::apply(scan, input.rules, chrono::Local::now().date_naive());
+    let matched: HashSet<&Path> = ruled
+        .iter()
+        .flat_map(|f| &f.files)
+        .map(PathBuf::as_path)
+        .collect();
     let mut fixed: BTreeMap<&'static str, Vec<PathBuf>> = BTreeMap::new();
     let mut to_read: Vec<&ScanEntry> = Vec::new();
     let mut inside: BTreeMap<&str, Vec<&ScanEntry>> = BTreeMap::new();
     for entry in &scan.entries {
         // A file without an extension is never a Loose File nor a sample.
-        if entry.is_package || entry.extension.is_empty() {
+        if entry.is_package || entry.extension.is_empty() || matched.contains(entry.path.as_path())
+        {
             continue;
         }
         let fixed_kind = kinds::fixed_kind(&entry.extension.to_lowercase());
@@ -444,7 +471,8 @@ pub fn analyse(
     stored.retain(|_| !flags.next().unwrap());
 
     // Every file is carded before any is embedded, then the cards missing a
-    // vector and the names of subfolders with nothing to sample are embedded.
+    // vector, the names of subfolders with nothing to sample and the names
+    // of the Rules' folders offered for placing are embedded.
     let missing: Vec<usize> = (0..stored.len())
         .filter(|&i| stored[i].1.embedding.is_none())
         .collect();
@@ -457,6 +485,12 @@ pub fn analyse(
         .iter()
         .map(|&i| stored[i].1.card.text(&read::name_words(&all[i].name)))
         .chain(unsampled.iter().map(|f| f.to_string()))
+        .chain(
+            ruled
+                .iter()
+                .filter(|f| offered(f))
+                .map(|f| f.name.replace('/', " ")),
+        )
         .collect();
     let mut vectors = Vec::with_capacity(texts.len());
     let started = Instant::now();
@@ -477,7 +511,8 @@ pub fn analyse(
         texts.len(),
         trace::secs(started.elapsed())
     ));
-    let name_vectors = vectors.split_off(missing.len());
+    let mut name_vectors = vectors.split_off(missing.len());
+    let rule_vectors = name_vectors.split_off(unsampled.len());
     for (&i, vector) in missing.iter().zip(vectors) {
         let (hash, entry) = &mut stored[i];
         entry.embedding = Some(vector);
@@ -491,7 +526,7 @@ pub fn analyse(
         .map(|(_, s)| (s.card, s.embedding.unwrap_or_default()));
     let (cards, vectors): (Vec<Card>, Vec<Vector>) = stored.by_ref().take(to_read.len()).unzip();
     let mut name_vectors = name_vectors.into_iter();
-    let subfolders = samples
+    let subfolders: Vec<Subfolder> = samples
         .iter()
         .filter_map(|(folder, sample)| {
             let sampled: Vec<(Card, Vector)> = stored.by_ref().take(sample.len()).collect();
@@ -511,6 +546,24 @@ pub fn analyse(
             })
         })
         .collect();
+    let mut rule_vectors = rule_vectors.into_iter();
+    let rule_places = ruled
+        .iter()
+        .map(|folder| {
+            if !offered(folder) {
+                return None;
+            }
+            let named = rule_vectors.next()?;
+            let subfolder = folder
+                .existing
+                .as_ref()
+                .and_then(|path| subfolders.iter().find(|s| &s.path == path));
+            Some(match subfolder {
+                Some(s) => (s.centroid.clone(), s.topics.clone()),
+                None => (named, Vec::new()),
+            })
+        })
+        .collect();
     let mut analysis = Analysis {
         grouping: Grouping {
             folders: Vec::new(),
@@ -524,6 +577,8 @@ pub fn analyse(
         vectors,
         fixed,
         unread,
+        ruled,
+        rule_places,
         subfolders,
         answers: HashMap::new(),
     };
@@ -594,6 +649,48 @@ pub fn analyse(
     Ok(analysis)
 }
 
+/// Whether the LLM may place files left out in `folder`, a Rule's: only
+/// when the Rule puts its files into one named folder, as grouping by date
+/// or kind has nothing to do with what a file is about.
+fn offered(folder: &SuggestedFolder) -> bool {
+    matches!(
+        folder.rule.as_ref().map(|rule| &rule.group_by),
+        Some(GroupBy::Folder { .. })
+    )
+}
+
+/// The Suggested Folders `rules` make of the Loose Files of `scan`, with no
+/// Grouping Models: every file no Rule matches stays where it is.
+pub fn group_by_rules(scan: &ScanResult, rules: &[Rule]) -> Grouping {
+    let mut folders = rules::apply(scan, rules, chrono::Local::now().date_naive());
+    let matched: HashSet<&PathBuf> = folders.iter().flat_map(|f| &f.files).collect();
+    let mut ungrouped: Vec<PathBuf> = scan
+        .entries
+        .iter()
+        .filter(|e| rules::is_loose(e) && !matched.contains(&e.path))
+        .map(|e| e.path.clone())
+        .collect();
+    ungrouped.sort();
+    folders.sort_by(|a, b| {
+        b.files
+            .len()
+            .cmp(&a.files.len())
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    let kinds = folders
+        .iter()
+        .flat_map(|f| &f.files)
+        .chain(&ungrouped)
+        .map(|p| (p.clone(), kinds::kind(&extension(p))))
+        .collect();
+    Grouping {
+        folders,
+        ungrouped,
+        kinds,
+        summaries: BTreeMap::new(),
+    }
+}
+
 impl Analysis {
     /// The Suggested Folders by `settings`, from what the models already
     /// said: no model runs. A file left out goes where the LLM placed it
@@ -605,9 +702,11 @@ impl Analysis {
     /// The grouping, and the placing questions that have no answer yet.
     fn grouped(&self, settings: &Settings) -> (Grouping, Vec<Unanswered>) {
         let folder_names: Vec<String> = self.subfolders.iter().map(|f| f.name.clone()).collect();
-        let mut folders = Vec::new();
+        // A Rule's folders come first: no other folder takes their names.
+        let mut folders = self.ruled.clone();
         let mut ungrouped = Vec::new();
-        let mut used_names: HashSet<String> = HashSet::new();
+        let mut used_names: HashSet<String> =
+            folders.iter().map(|f| f.name.to_lowercase()).collect();
 
         let topics: Vec<Option<String>> = self.cards.iter().map(Card::topic_key).collect();
         // The same topic, or topics sharing a mark: "IELTS Speaking" and "IELTS Writing".
@@ -634,8 +733,17 @@ impl Analysis {
             }
         }
         let mut named: Vec<(String, &[usize])> = Vec::new();
-        // Each Suggested Folder of read files, by its place in `folders`, with its centroid and topics.
-        let mut topical: Vec<(usize, Vector, Vec<String>)> = Vec::new();
+        // Each Suggested Folder files left out may be placed in, by its place in `folders`, with its
+        // centroid and topics: a Rule's offered folders (first in `folders`), then those of read files.
+        let mut topical: Vec<(usize, Vector, Vec<String>)> = self
+            .rule_places
+            .iter()
+            .enumerate()
+            .filter_map(|(k, place)| {
+                let (centre, topics) = place.as_ref()?;
+                Some((k, centre.clone(), topics.clone()))
+            })
+            .collect();
 
         // A file that is never read joins the first group with a file name
         // sharing a mark with its own: `Lab5_StudentID.zip` with `Lab5_Report.docx`.
@@ -668,15 +776,18 @@ impl Analysis {
                 ungrouped.extend(files);
                 continue;
             }
-            used_names.insert(kind.to_lowercase());
+            // A Rule's folder may have the kind's name, or go into its subfolder.
+            let name = unused_name(&mut used_names, kind);
             let existing = kinds::matching_folder(kind, &folder_names)
                 .and_then(|name| self.subfolders.iter().find(|f| f.name == name))
-                .map(|f| f.path.clone());
+                .map(|f| f.path.clone())
+                .filter(|path| !self.ruled.iter().any(|r| r.existing.as_ref() == Some(path)));
             folders.push(SuggestedFolder {
-                name: kind.to_string(),
+                name,
                 files,
                 existing,
                 basis: Basis::Kind,
+                rule: None,
             });
         }
 
@@ -711,6 +822,7 @@ impl Analysis {
                 files,
                 existing,
                 basis: Basis::Topic,
+                rule: None,
             });
         }
 
@@ -749,6 +861,7 @@ impl Analysis {
                         files: Vec::new(),
                         existing: Some(subfolder.path.clone()),
                         basis: Basis::Existing,
+                        rule: None,
                     });
                     folders.len() - 1
                 }),

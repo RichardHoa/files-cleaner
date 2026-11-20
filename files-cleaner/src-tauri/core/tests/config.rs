@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 
 use common::scan_root;
 use files_cleaner_core::{
-    load_config, reset_config, save_config, ConfigError, DefaultCopyRule, SettingChange,
-    EXAMPLE_CONFIG,
+    load_config, reset_config, save_config, ConfigError, DateField, DateGrouping, DefaultCopyRule,
+    GroupBy, NameHow, NameMatch, Rule, RuleMatch, SettingChange, EXAMPLE_CONFIG,
 };
 
 fn error(text: &str) -> ConfigError {
@@ -168,4 +168,45 @@ fn an_unreadable_config_resets_to_the_example() {
     reset_config(&path, Path::new("/Users/me")).unwrap();
 
     assert_eq!(fs::read_to_string(&path).unwrap(), EXAMPLE_CONFIG);
+}
+
+#[test]
+fn saved_rules_read_back_unchanged_beside_old_rules() {
+    let folder = scan_root();
+    let path = folder.path().join("config.json");
+    let old = r#"[{ "name": "Installers", "match": { "extensions": ["dmg"] }, "then": { "trash": true } }]"#;
+    fs::write(&path, format!(r#"{{ "rules": {old} }}"#)).unwrap();
+    let home = Path::new("/Users/me");
+    let rules = vec![
+        Rule {
+            enabled: true,
+            words: None,
+            matches: RuleMatch {
+                name: Some(NameMatch {
+                    how: NameHow::Pattern,
+                    words: vec!["Screenshot*".into()],
+                }),
+                extensions: vec!["png".into()],
+                ..RuleMatch::default()
+            },
+            group_by: GroupBy::Folder {
+                name: "Screenshots/{month}".into(),
+                date: DateField::Changed,
+            },
+        },
+        Rule {
+            enabled: true,
+            words: Some("sort by date".into()),
+            matches: RuleMatch::default(),
+            group_by: GroupBy::Date {
+                date: DateField::Added,
+                by: DateGrouping::Buckets,
+            },
+        },
+    ];
+
+    save_config(&path, &SettingChange::Rules(rules.clone()), home).unwrap();
+
+    let config = load_config(&fs::read_to_string(&path).unwrap(), home).unwrap();
+    assert_eq!(config.rules, rules);
 }
