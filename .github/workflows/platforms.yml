@@ -101,6 +101,11 @@ jobs:
         working-directory: files-cleaner/src-tauri
         run: cargo test --workspace
 
+      # Ignored by a plain `cargo test`, so it never fills a developer's Trash.
+      - name: Rust tests on the real System Trash
+        working-directory: files-cleaner/src-tauri
+        run: cargo test -p files-cleaner-core --test system_trash -- --ignored
+
       - name: JavaScript tests
         working-directory: files-cleaner
         run: npm test
@@ -108,6 +113,50 @@ jobs:
       - name: Package the app
         working-directory: files-cleaner
         run: npm run tauri build
+
+      # Installs each installer and starts the installed app with
+      # --self-check: it finds its bundled PDFium and OCR files and reads a PDF.
+      - name: Check the installed app (.deb, AppImage)
+        if: runner.os == 'Linux'
+        timeout-minutes: 10
+        working-directory: files-cleaner/src-tauri/target/release/bundle
+        run: |
+          sudo apt-get install -y xvfb ./deb/*.deb
+          xvfb-run -a files-cleaner --self-check
+          chmod +x appimage/*.AppImage
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a appimage/*.AppImage --self-check
+
+      - name: Check the installed app (.dmg)
+        if: runner.os == 'macOS'
+        timeout-minutes: 10
+        working-directory: files-cleaner/src-tauri/target/release/bundle
+        run: |
+          hdiutil attach dmg/*.dmg -nobrowse -mountpoint "$RUNNER_TEMP/dmg"
+          cp -R "$RUNNER_TEMP/dmg/files-cleaner.app" "$RUNNER_TEMP/"
+          hdiutil detach "$RUNNER_TEMP/dmg"
+          "$RUNNER_TEMP/files-cleaner.app/Contents/MacOS/files-cleaner" --self-check
+
+      # The NSIS installer first: it would ask to remove an MSI install.
+      - name: Check the installed app (.exe, .msi)
+        if: runner.os == 'Windows'
+        timeout-minutes: 10
+        shell: pwsh
+        working-directory: files-cleaner/src-tauri/target/release/bundle
+        run: |
+          function Test-Installed($folder) {
+            $exe = Get-ChildItem $folder -Recurse -Filter files-cleaner.exe | Select-Object -First 1
+            if (-not $exe) { throw "files-cleaner.exe isn't in $folder" }
+            $log = "$env:RUNNER_TEMP\self-check.txt"
+            $run = Start-Process $exe.FullName -ArgumentList '--self-check' -Wait -PassThru -RedirectStandardError $log
+            Get-Content $log
+            if ($run.ExitCode -ne 0) { throw "$($exe.FullName) --self-check exited with $($run.ExitCode)" }
+          }
+          $nsis = Get-ChildItem nsis\*.exe | Select-Object -First 1
+          Start-Process $nsis.FullName -ArgumentList '/S' -Wait
+          Test-Installed "$env:LOCALAPPDATA\files-cleaner"
+          $msi = Get-ChildItem msi\*.msi | Select-Object -First 1
+          Start-Process msiexec -ArgumentList '/i', "`"$($msi.FullName)`"", '/qn' -Wait
+          Test-Installed "$env:ProgramFiles\files-cleaner"
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
