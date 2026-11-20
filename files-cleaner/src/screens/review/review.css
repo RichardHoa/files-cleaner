@@ -1,7 +1,7 @@
-/* Review: laid out like Mail, a sidebar of the Plan's sections beside a pane listing the one picked.
-   The sidebar stays in view while the pane scrolls, so a file is never dragged further than across
+/* Review: laid out like Finder or Mail, a sidebar of the Plan's sections beside a pane listing the one
+   picked. The sidebar stays in view while the pane scrolls, so a file is never dragged further than across
    it. Flat surfaces and hairline dividers; the name field looks like text until it's edited. The
-   sidebar row a file would drop into gets an accent outline. */
+   sidebar row a file would drop into gets an accent outline. Rows have no buttons. */
 .reading-estimate {
   margin: var(--space-1) 0 var(--space-3);
   font-variant-numeric: tabular-nums;
@@ -118,15 +118,18 @@
   font-size: var(--font-sm);
 }
 
-.folder-sidebar-divider {
-  width: 100%;
-  margin: var(--space-1) 0;
-  border: 0;
-  border-top: 1px solid var(--border);
+/* A section of the sidebar, named in small grey type as in Finder. */
+.folder-sidebar-section {
+  margin: var(--space-3) 0 var(--space-0-5);
+  padding: 0 var(--space-2);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--muted);
 }
 
 .folder-pane {
   position: relative;
+  min-width: 0;
 }
 
 /* The rectangle drawn while drag-selecting. */
@@ -142,15 +145,37 @@
   margin-top: 0;
 }
 
-.selection-bar {
+/* Always shown above the list, its buttons disabled with nothing selected, so the list never moves. */
+.review-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-3);
-  margin-bottom: var(--space-2);
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
 }
 
-.selection-bar[hidden] {
+.review-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.review-toolbar [hidden] {
+  display: none;
+}
+
+.review-toolbar-count {
+  font-size: var(--font-sm);
+}
+
+.review-toolbar-status {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.review-toolbar-status:empty {
   display: none;
 }
 
@@ -192,57 +217,20 @@
   display: none;
 }
 
-/* A Suggested Folder's buttons running its moves, and its trashes, on their own. */
-.folder-panel-run {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin-bottom: var(--space-2);
-}
-
-.folder-panel-run:empty {
-  display: none;
-}
-
-.folder-panel-choice {
+.folder-location {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2) var(--space-3);
-  margin: var(--space-2) 0;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 var(--space-3);
 }
 
-/* Like a macOS segmented control: one bordered strip, the chosen segment filled. */
-.segmented {
-  display: inline-flex;
-  border: 1px solid var(--border-control);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
+.folder-location-error {
+  margin: calc(-1 * var(--space-2)) 0 var(--space-2);
 }
 
-.segment {
-  padding: var(--space-1) var(--space-2-5);
-  border: 0;
-  border-radius: 0;
-  background: var(--surface);
-  white-space: nowrap;
-}
-
-.segment + .segment {
-  border-left: 1px solid var(--border);
-}
-
-.segment[aria-checked="true"] {
-  background: color-mix(in srgb, var(--text) 14%, var(--surface));
-}
-
-.segment:focus-visible {
-  outline-offset: -2px;
-}
-
-.folder-where {
-  margin: 0;
-  overflow-wrap: anywhere;
+.folder-location-error:empty {
+  display: none;
 }
 
 .folder-pane select {
@@ -295,14 +283,21 @@
   margin: 0;
 }
 
-.folder-file-actions {
+.folder-file-end {
   display: flex;
   align-items: center;
   flex-shrink: 0;
   gap: var(--space-1-5);
 }
 
-.folder-file.out .folder-file-name {
+/* A trashed file: dimmed, with a small trash icon. */
+.folder-file-trashed {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.folder-file.out .folder-file-text {
   color: var(--muted);
 }
 
@@ -343,14 +338,6 @@
   margin-bottom: var(--space-2);
 }
 
-/* The Duplicates pane's heading, with the button trashing the copies beside it. */
-.duplicates-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
 .duplicates-bulk {
   display: flex;
   flex-wrap: wrap;
@@ -358,106 +345,176 @@
   margin-top: var(--space-2);
 }
 
-.duplicates-bulk select {
+/* A select is as wide as its longest option: a long folder path must shrink it to the pane, not widen the pane. */
+.duplicates-prefer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
   max-width: 100%;
 }
 
-/* A Duplicate Group: its name and totals, then each copy under it with Keep or Trash before its name, its folder and date after. */
+.duplicates-prefer > span {
+  flex-shrink: 0;
+}
+
+.duplicates-bulk select {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  text-overflow: ellipsis;
+}
+
+/*
+ * The Duplicate Groups as one table: a "Keep" header over the copies' Keep boxes, then each group's name and
+ * warning, then its copies, each on the same columns: Keep box, folder, modified date.
+ */
+.duplicate-columns,
+.duplicate-copy {
+  display: grid;
+  grid-template-columns: var(--space-7) minmax(0, 1fr) 10rem;
+  align-items: center;
+  column-gap: var(--space-2);
+}
+
+.duplicate-columns {
+  margin-top: var(--space-4);
+  padding: 0 var(--space-2) var(--space-1);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--font-xs);
+  font-weight: 600;
+}
+
+.duplicate-columns > :last-child {
+  text-align: right;
+}
+
 .duplicate-groups {
   list-style: none;
-  margin: var(--space-2) 0 0;
+  margin: 0;
   padding: 0;
-  border-top: 1px solid var(--border);
 }
 
 .duplicate-group {
-  padding: var(--space-2) var(--space-1);
+  padding: var(--space-3) 0 var(--space-2);
   border-bottom: 1px solid var(--border);
 }
 
 .duplicate-group-head {
   display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
   min-width: 0;
+  margin: 0 var(--space-2) var(--space-1) calc(var(--space-7) + var(--space-2) + var(--space-2));
   white-space: nowrap;
 }
 
 .duplicate-group-name {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   font-weight: 600;
 }
 
+.duplicate-group-tally {
+  flex-shrink: 0;
+  font-size: var(--font-sm);
+}
+
 .duplicate-copies {
   list-style: none;
-  margin: var(--space-1) 0 0;
+  margin: 0;
   padding: 0;
 }
 
 .duplicate-copy {
   user-select: none;
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-0-5) 0;
+  min-height: 28px;
+  padding: var(--space-0-5) var(--space-2);
+  border-radius: var(--radius-sm);
 }
 
 .duplicate-copy:focus-visible {
   outline-offset: -2px;
 }
 
-.duplicate-copy .segmented {
-  flex-shrink: 0;
-  font-size: var(--font-sm);
-}
-
-.duplicate-copy .segment {
-  padding: 0 var(--space-2);
-}
-
-.duplicate-copy.trash .duplicate-copy-name {
-  color: var(--muted);
-}
-
-.duplicate-copy-name {
-  min-width: 0;
-  overflow-wrap: anywhere;
+.duplicate-copy-keep {
+  justify-self: center;
+  margin: 0;
 }
 
 .duplicate-copy-folder {
   min-width: 0;
-  margin-inline-start: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.emptied-folder {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
+.duplicate-copy.trash .duplicate-copy-folder {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent);
 }
 
-/* The header's button, with what it covers under it. */
+.duplicate-copy .folder-file-date {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The header's button, with "Also trash N emptied folders" beside it and what it's doing, or why it did nothing, under it. */
 .review-run .actions {
-  justify-content: flex-end;
-  margin-bottom: var(--space-1);
-}
-
-.review-run-scope {
-  margin: 0;
-  text-align: end;
-  font-size: var(--font-sm);
-}
-
-/* What the scan left out of the Suggested Folders, under its summary: a chip each, the detail on hover. */
-.skipped-chips {
-  display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-1);
-  margin: var(--space-1) 0 0;
+  justify-content: flex-end;
 }
 
-.skipped-chips .pill {
-  font-weight: 400;
-  cursor: default;
+.review-emptied {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+}
+
+.review-emptied[hidden] {
+  display: none;
+}
+
+.review-run-status {
+  margin: var(--space-1) 0 0;
+  text-align: end;
+}
+
+.review-run-status:empty {
+  display: none;
+}
+
+/* Shown only when this scan skipped something: a click opens the detail under it. */
+.skipped {
+  position: relative;
+}
+
+.skipped-line {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.skipped-detail {
+  top: calc(100% + var(--space-1));
+  left: 0;
+  width: max-content;
+  max-width: min(420px, 80vw);
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: var(--space-2) var(--space-2-5);
+  color: var(--text);
+  font-size: var(--font-sm);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
 }

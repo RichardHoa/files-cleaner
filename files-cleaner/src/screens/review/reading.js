@@ -1,7 +1,7 @@
 // The Review screen's reading: the loose files are read in the background, which needs the Grouping Models
 // (without them, they're offered in the Suggested Folders' place), with a counter, an estimate and a wait
-// note, and the Suggested Folders are filled in once that's done. The reading can be stopped early to group
-// only what was read; Cancel stops it and goes Home.
+// note, and how far it is on the sidebar, and the Suggested Folders are filled in once that's done. The
+// reading can be stopped early to group only what was read; Cancel stops it and goes Home.
 import {
   analyseLooseFiles,
   answerNotifications,
@@ -111,7 +111,7 @@ function waitNote() {
  * until they're ready, `footer`, saying where the files were read, `start()` and `cancel()`.
  */
 export function reading(ctx) {
-  const { nav, state, view, status } = ctx;
+  const { nav, state, view } = ctx;
   const footer = el("div");
   // Until the Suggested Folders are ready, their pane shows `waiting`: the reading, the offer or the error.
   let waiting = [el("h2", {}, "Suggested Folders"), el("p", { className: "status" }, "Reading the files…")];
@@ -131,6 +131,8 @@ export function reading(ctx) {
       return false;
     }
     cancelled = true;
+    // Said under the header's button, beside Cancel.
+    const { status } = ctx.sessions;
     showStatus(status, "Stopping…");
     cancelAnalysis().catch((error) => showStatus(status, describeError(error), true));
     return true;
@@ -139,6 +141,7 @@ export function reading(ctx) {
   /** Shows `nodes` in the Suggested Folders' pane until they're ready, with `phase` as their phase. */
   function waitFor(phase, nodes) {
     state.waitFor(phase);
+    if (phase !== "reading") ctx.sidebar.showProgress("");
     waiting = [el("h2", {}, "Suggested Folders"), ...nodes];
     ctx.redraw.section("folders");
   }
@@ -170,6 +173,7 @@ export function reading(ctx) {
         // Moves back and forth while the models load, as nothing is read meanwhile.
         bar.set(update.finished, update.phase === "loading" ? 0 : update.total);
         estimate.update(update);
+        ctx.sidebar.showProgress(update.phase === "reading" && update.total > 0 ? `${Math.floor((100 * update.finished) / update.total)}%` : "");
       });
       if (cancelled) return nav.home();
       // A stopped run says nothing of this computer's pace, and the user is there to see it end.

@@ -12,7 +12,6 @@ import {
   mergeFolder,
   moveFile,
   moveToOtherFolder,
-  partChoices,
   planChoices,
   planDuplicates,
   removeFolder,
@@ -115,14 +114,9 @@ test("the count leaves out a file already in the folder it goes to, and takes in
   assert.deepEqual(totals(choices, left, "/"), { moved: 1, trashed: 1 });
 });
 
-test("the header and button say what will happen to the files", () => {
-  assert.deepEqual(describeChange({ moved: 0, trashed: 0 }), { heading: "Nothing will change", button: "Nothing to apply", scope: "" });
-  assert.deepEqual(describeChange({ moved: 2, trashed: 1 }), {
-    heading: "2 files will move, 1 will be trashed",
-    button: "Apply everything",
-    scope: "2 moves and 1 trash in the whole Plan.",
-  });
-  assert.equal(describeChange({ moved: 30, trashed: 12 }, 0, true).scope, "Some parts already done. 30 moves and 12 trashes left.");
+test("the button counts the moves and trashes, and says when there's nothing to apply", () => {
+  assert.equal(describeChange({ moved: 2, trashed: 1 }), "Move 2, Trash 1");
+  assert.equal(describeChange({ moved: 0, trashed: 0 }), "Nothing to apply");
 });
 
 test("files left where they are go by kind, Other last, each kind newest first", () => {
@@ -217,52 +211,9 @@ test("trashing every copy takes the group out of its folder, and keeping one aga
 });
 
 test("a folder counts only the files going into it, and is trashed once every file is", () => {
-  const [folder] = initialChoices([{ name: "Labs", files: ["/d/a.pdf", "/d/b.pdf", "/d/c.pdf"], existing: null }]);
+  const [folder] = initialChoices([{ name: "Labs", files: ["/d/a.pdf", "/d/b.pdf"], existing: null }]);
   folder.files.set("/d/a.pdf", "trash");
-  folder.files.set("/d/b.pdf", "takeOut");
   assert.deepEqual(folderTally(folder), { going: 1, trashed: false });
   folder.files.set("/d/b.pdf", "trash");
-  folder.files.set("/d/c.pdf", "trash");
   assert.deepEqual(folderTally(folder), { going: 0, trashed: true });
-  folder.files.set("/d/c.pdf", "takeOut");
-  assert.deepEqual(folderTally(folder), { going: 0, trashed: false });
-  folder.files.set("/d/c.pdf", "inFolder");
-  folder.choice = "trashAll";
-  assert.deepEqual(folderTally(folder), { going: 0, trashed: true });
-});
-
-test("a folder's Move sends only the files going into it, and its Trash only those marked Trash and not yet trashed", () => {
-  const [labs] = initialChoices([{ name: "Labs", files: ["/d/a.pdf", "/d/b.pdf", "/d/c.pdf", "/d/e.pdf"], existing: null }]);
-  labs.files.set("/d/b.pdf", "trash");
-  labs.files.set("/d/c.pdf", "takeOut");
-  labs.files.set("/d/e.pdf", "trash");
-  const ran = new Set(["/d/e.pdf"]);
-  assert.deepEqual(partChoices(labs, "move", ran), [{ name: "Labs", choice: { type: "createHere" }, files: [["/d/a.pdf", "inFolder"]] }]);
-  assert.deepEqual(partChoices(labs, "trash", ran), [{ name: "Labs", choice: { type: "trashAll" }, files: [["/d/b.pdf", "inFolder"]] }]);
-});
-
-test("once a folder's moves ran, the rest of the Plan has only its trashes left, and lists what already left", () => {
-  const [labs, ielts] = initialChoices([
-    { name: "Labs", files: ["/d/a.pdf", "/d/b.pdf"], existing: null },
-    { name: "IELTS", files: ["/d/c.pdf"], existing: null },
-  ]);
-  labs.files.set("/d/b.pdf", "trash");
-  labs.moved = true;
-  const left = new LeftFiles(["/d/e.pdf", "/d/f.pdf"]);
-  left.trashed.add("/d/e.pdf").add("/d/f.pdf");
-  const ran = new Set(["/d/a.pdf", "/d/f.pdf", "/d/x/copy.pdf"]);
-  assert.deepEqual(planChoices([labs, ielts], left, ran), [
-    { name: "Labs", choice: { type: "trashAll" }, files: [["/d/b.pdf", "inFolder"]] },
-    { name: "IELTS", choice: { type: "createHere" }, files: [["/d/c.pdf", "inFolder"]] },
-    { name: "Left where they are", choice: { type: "trashAll" }, files: [["/d/e.pdf", "inFolder"]] },
-    {
-      name: "Already run",
-      choice: { type: "trashAll" },
-      files: [
-        ["/d/a.pdf", "inFolder"],
-        ["/d/f.pdf", "inFolder"],
-        ["/d/x/copy.pdf", "inFolder"],
-      ],
-    },
-  ]);
 });

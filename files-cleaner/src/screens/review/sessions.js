@@ -1,11 +1,17 @@
-// The Review screen's Sessions and header: the header's button, carrying out the rest of the Plan as one
-// Session, Cancel, and each part carried out on its own from its pane, with what it did and a link to its
-// Session.
-import { buildReviewPlan, pathSeparator, runPlan } from "../../shared/api.js";
+// The Review screen's header and its one Session: the Scan Root's name, what was scanned, the button carrying
+// out the whole Plan as one Session, Cancel, and "Also trash N emptied folders". The Emptied Folders depend on
+// everything the Plan moves, so they are worked out by the backend again a moment after each change. What the
+// button is doing, or why it did nothing, shows under it.
+import { buildReviewPlan, pathSeparator, previewReviewPlan, runPlan } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";
-import { describeNothingDone, describeRunProgress, describeSummary, describeWarning, notDoneSections, warningBlock } from "../../shared/outcomes.js";
+import { formatSize, plural } from "../../shared/format.js";
+import { describeNothingDone, describeRunProgress } from "../../shared/outcomes.js";
 import { busy, showStatus, showWarning } from "../../shared/status.js";
-import { describeChange, nameMissing, partChoices, planChoices, totals } from "./review-choices.js";
+import { describeChange, nameMissing, planChoices, planDuplicates, totals } from "./review-choices.js";
+import { skippedLine } from "./skipped.js";
+
+/** How long the Emptied Folders wait after a change before they're worked out again, in ms. */
+const EMPTIED_DELAY = 300;
 
 /**
  * Whether a Run is given `op`: it's ticked, or it's a Trash or a Suggested Folder's Move blocked up front, which
@@ -14,51 +20,90 @@ import { describeChange, nameMissing, partChoices, planChoices, totals } from ".
 const runsOrIsListed = (op) => op.ticked || (Boolean(op.error) && (op.kind === "trash" || op.reason.type === "suggestedFolder"));
 
 /**
- * The Sessions of the Review screen with context `ctx`: `header`, its heading, button, scope and Cancel,
- * `drawHeader()`, `runPart`, `moveFolder` and `trashPart` carrying out a part on its own, and `outcome` and
- * `trashOutcomes` saying what one did.
+ * The header of the Review screen with context `ctx`, for the scan `result`: `node`, `drawHeader()`,
+ * `status`, the line under the button, and `refreshEmptied()` working out the Emptied Folders again a moment
+ * later, unless the button is clicked first.
  */
-export function sessions(ctx) {
-  const { nav, state, view, status } = ctx;
-  const header = {
-    heading: el("h1", {}),
-    run: el("button", { type: "button", className: "primary" }),
-    // What the header's button covers: every part not yet run, in every folder.
-    scope: el("p", { className: "review-run-scope muted" }),
-    cancel: el("button", { type: "button" }, "Cancel"),
-  };
-  const { heading, run, scope, cancel } = header;
+export function sessions(ctx, result) {
+  const { nav, state, view } = ctx;
+  const run = el("button", { type: "button", className: "primary" });
+  const cancel = el("button", { type: "button" }, "Cancel");
+  const status = el("p", { className: "status review-run-status" });
+  const emptiedBox = el("input", { type: "checkbox" });
+  const emptiedText = el("span");
+  const emptied = el("label", { className: "review-emptied" }, emptiedBox, emptiedText);
+  const skipped = skippedLine(result);
+  const totalSize = result.entries.reduce((sum, entry) => sum + entry.size, 0);
+
+  const node = el(
+    "header",
+    { className: "plan-head" },
+    el(
+      "div",
+      {},
+      el("h1", { title: result.root }, ctx.rootName),
+      el(
+        "p",
+        { className: "lead" },
+        `${plural(result.entries.length, "item")} · ${formatSize(totalSize)}`,
+        ...(skipped ? [" · ", skippedPopover(skipped)] : []),
+      ),
+    ),
+    el("div", { className: "review-run" }, el("div", { className: "actions" }, emptied, cancel, run), status),
+  );
+
+  /** "Some files skipped", opening its detail under it on a click; a click anywhere else, or Esc, closes it. */
+  function skippedPopover({ label, detail: text }) {
+    const toggle = el("button", { type: "button", className: "skipped-line", ariaExpanded: "false" }, label);
+    const detail = el("div", { className: "row-menu skipped-detail", hidden: true }, text);
+    const wrap = el("span", { className: "skipped" }, toggle, detail);
+    const show = (open) => {
+      detail.hidden = !open;
+      toggle.ariaExpanded = String(open);
+    };
+    toggle.addEventListener("click", () => show(detail.hidden));
+    document.addEventListener("click", (event) => wrap.contains(event.target) || show(false));
+    wrap.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || detail.hidden) return;
+      show(false);
+      toggle.focus();
+    });
+    return wrap;
+  }
 
   cancel.addEventListener("click", () => {
     if (ctx.reading.cancel()) cancel.disabled = true;
   });
+  emptiedBox.addEventListener("change", () => {
+    state.tickEmptied(emptiedBox.checked);
+    drawHeader();
+  });
 
-  const drawHeader = () => {
-    cancel.textContent = state.ran.size > 0 ? "Done" : "Cancel";
-    const change = totals(state.choices, state.left, pathSeparator, [], state.ran);
+  /** The emptied-folders checkbox, and the button saying what it will do, disabled while there's nothing to do, a folder has no name, or the files are still read. */
+  function drawHeader() {
+    const possible = state.emptied.filter((op) => !op.error);
+    emptied.hidden = possible.length === 0;
+    emptied.title = possible.map((op) => `${op.relativePath.join("/")}/`).join("\n");
+    emptiedText.textContent = `Also trash ${plural(possible.length, "emptied folder")}`;
+    const ticked = possible.filter((op) => state.emptiedTicked.has(op.id)).length;
+    emptiedBox.checked = ticked > 0;
     if (state.phase === "reading") {
-      heading.textContent = ctx.rootName;
       run.textContent = "Waiting for folders…";
       run.disabled = true;
-      scope.textContent = "";
       return;
     }
-    const emptiedLeft = state.emptied.filter((op) => state.emptiedTicked.has(op.id) && !op.error).length;
-    const words = describeChange(change, emptiedLeft, state.ran.size > 0);
-    heading.textContent = words.heading;
-    run.textContent = words.button;
-    scope.textContent = words.scope;
-    run.disabled = view.running || change.moved + change.trashed + emptiedLeft === 0 || state.choices.some(nameMissing);
-  };
+    const change = totals(state.choices, state.left, pathSeparator, state.duplicates);
+    run.textContent = describeChange(change, ticked);
+    run.disabled = view.running || change.moved + change.trashed + ticked === 0 || state.choices.some(nameMissing);
+  }
 
   run.addEventListener("click", async () => {
-    ctx.folders.holdEmptied();
+    clearTimeout(emptiedTimer);
     view.running = true;
     const session = await busy(status, [run, cancel], "Planning…", async () => {
-      const plan = await buildReviewPlan([], planChoices(state.choices, state.left, state.ran));
-      // What already ran is only there to work out the Emptied Folders.
+      const plan = await buildReviewPlan(planDuplicates(state.duplicates), planChoices(state.choices, state.left));
       const approved = plan.operations
-        .filter((op) => (op.reason.type === "emptiedFolder" ? state.emptiedTicked.has(op.id) && !op.error : runsOrIsListed(op) && !state.ran.has(op.source)))
+        .filter((op) => (op.reason.type === "emptiedFolder" ? state.emptiedTicked.has(op.id) && !op.error : runsOrIsListed(op)))
         .map((op) => op.id);
       return runPlan(approved, (progress) => showStatus(status, describeRunProgress(progress)));
     });
@@ -69,61 +114,24 @@ export function sessions(ctx) {
     drawHeader();
   });
 
-  /**
-   * Carries out one part of the Plan, the copies in `duplicates` and the Suggested Folders in `choices` as
-   * `buildReviewPlan` takes them, as a Session of its own, saying `label` meanwhile and what wasn't `done`
-   * ("moved" or "trashed") if nothing was. Resolves to what it did, or null if it made no Session.
-   */
-  async function runPart(button, { duplicates = [], choices = [] }, label, done) {
-    view.running = true;
-    const summary = await busy(status, [button, run, cancel], label, async () => {
-      const plan = await buildReviewPlan(duplicates, choices);
-      const approved = plan.operations.filter((op) => op.reason.type !== "emptiedFolder" && runsOrIsListed(op)).map((op) => op.id);
-      return runPlan(approved, (progress) => showStatus(status, describeRunProgress(progress)));
-    });
-    view.running = false;
-    if (!summary?.sessionId) {
-      if (summary) showWarning(status, describeNothingDone(summary, done, pathSeparator));
-      return null;
-    }
-    showStatus(status, "");
-    return summary;
-  }
+  /** Works out the Emptied Folders again a moment after a change, with the duplicates; only the latest answer counts. */
+  let emptiedTimer = 0;
+  let emptiedAsked = 0;
+  const refreshEmptied = () => {
+    clearTimeout(emptiedTimer);
+    emptiedTimer = setTimeout(async () => {
+      if (!node.isConnected) return;
+      const asked = ++emptiedAsked;
+      try {
+        const plan = await previewReviewPlan(planDuplicates(state.duplicates), planChoices(state.choices, state.left));
+        if (asked !== emptiedAsked || !node.isConnected) return;
+        state.setEmptied(plan.operations.filter((op) => op.reason.type === "emptiedFolder"));
+        drawHeader();
+      } catch {
+        // A name that can't be a folder name: the Emptied Folders stay as they were until it's fixed.
+      }
+    }, EMPTIED_DELAY);
+  };
 
-  /** Moves the files going into the Suggested Folder `choice`, which is then finished: only its trashes can still run. */
-  async function moveFolder(choice, button) {
-    const summary = await runPart(button, { choices: partChoices(choice, "move", state.ran) }, "Moving the files…", "moved");
-    if (summary) state.ranMoves(choice, summary);
-    ctx.redraw.pane();
-  }
-
-  /** Trashes the files of `choices`, a Suggested Folder's or those left where they are, keeping what it did under `key`. */
-  async function trashPart(key, choices, button) {
-    const summary = await runPart(button, { choices }, "Trashing the files…", "trashed");
-    if (summary) state.ranTrashes(key, summary);
-    ctx.redraw.pane();
-  }
-
-  /**
-   * What a part carried out on its own did, as `summary`: the warning if it left any, its counts with what was
-   * `done` ("moved" or "trashed"), the files it left with why, then a link to its Session's screen, where
-   * what it did can be checked or undone.
-   */
-  function outcome(summary, done) {
-    const sections = notDoneSections(summary);
-    const text = describeWarning(summary, { action: "run", done, separator: pathSeparator });
-    const link = el("button", { type: "button", className: "link" }, "Open this Session");
-    link.addEventListener("click", () => nav.session(summary.sessionId));
-    return [
-      text ? warningBlock(text, () => sections[0]?.scrollIntoView({ behavior: "smooth", block: "start" })) : "",
-      el("p", {}, describeSummary(summary, done)),
-      ...sections,
-      el("p", {}, link),
-    ];
-  }
-
-  /** What each Session of the trashes kept under `key`, a Suggested Folder or "left", did. */
-  const trashOutcomes = (key) => (state.trashesDone.get(key) ?? []).flatMap((summary) => outcome(summary, "trashed"));
-
-  return { header, drawHeader, runPart, moveFolder, trashPart, outcome, trashOutcomes };
+  return { node, drawHeader, status, refreshEmptied };
 }

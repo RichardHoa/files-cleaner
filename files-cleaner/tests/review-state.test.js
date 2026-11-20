@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { folderTally, planChoices } from "../src/screens/review/review-choices.js";
 import { ReviewState } from "../src/screens/review/review-state.js";
 
 /** A Review state whose files were read into the folders "IELTS", holding a.pdf and b.pdf, and "Labs", holding c.pdf. */
@@ -18,32 +19,34 @@ function twoFolders() {
   return state;
 }
 
-/** What a Session that trashed `paths` did. */
-const trashed = (paths) => ({ sessionId: "s1", done: paths.map((source) => ({ source })), unrecoverable: [] });
-
-test("merging a folder moves its files into the other, which takes over what its trashes did", () => {
+test("taking a file out of a folder leaves it where it is in the Plan", () => {
   const state = twoFolders();
-  const [ielts, labs] = state.choices;
-  state.setFile(ielts, "/d/a.pdf", "trash");
-  const summary = trashed(["/d/a.pdf"]);
-  state.ranTrashes(ielts, summary);
 
-  state.merge(ielts, labs);
+  state.move(["/d/a.pdf"], null);
 
-  assert.deepEqual(state.choices, [labs]);
-  assert.deepEqual([...labs.files.keys()], ["/d/c.pdf", "/d/a.pdf", "/d/b.pdf"]);
-  assert.deepEqual(state.trashesDone.get(labs), [summary]);
+  assert.deepEqual([...state.left], ["/d/a.pdf"]);
+  assert.deepEqual(planChoices(state.choices, state.left), [
+    { name: "IELTS", choice: { type: "createHere" }, files: [["/d/b.pdf", "inFolder"]] },
+    { name: "Labs", choice: { type: "createHere" }, files: [["/d/c.pdf", "inFolder"]] },
+  ]);
 });
 
-test("removing a folder leaves its files where they are, except those it already trashed", () => {
+test("trashing every file of a folder grays it out in the sidebar and plans each file as a Trash, with no folder made", () => {
   const state = twoFolders();
   const [ielts] = state.choices;
-  state.setFile(ielts, "/d/a.pdf", "trash");
-  const summary = trashed(["/d/a.pdf"]);
-  state.ranTrashes(ielts, summary);
 
-  state.remove(ielts);
+  state.trashAllFiles(ielts);
 
-  assert.deepEqual([...state.left], ["/d/b.pdf"]);
-  assert.deepEqual(state.trashesDone.get("left"), [summary]);
+  assert.deepEqual(folderTally(ielts), { going: 0, trashed: true });
+  assert.deepEqual(planChoices(state.choices, state.left)[0], {
+    name: "IELTS",
+    choice: { type: "trashAll" },
+    files: [
+      ["/d/a.pdf", "trash"],
+      ["/d/b.pdf", "trash"],
+    ],
+  });
+
+  state.trashAllFiles(ielts, false);
+  assert.deepEqual(folderTally(ielts), { going: 2, trashed: false });
 });

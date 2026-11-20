@@ -1,29 +1,22 @@
-// What the scan leaves out of the Suggested Folders, as chips under the review's scan summary: a short
-// label each, with the detail in its tooltip.
+// What the scan leaves out of the Suggested Folders, as one line under the review's scan summary, with the
+// detail opening under it on a click.
 import { count } from "../../shared/format.js";
 
+/** What every scan leaves out, said in the detail but never showing the line on its own. */
+const ALWAYS = [
+  "Only files directly in the folder are sorted into folders. Files deeper down are checked for duplicates.",
+  "Hidden files and symlinks are left alone.",
+];
+
 /**
- * The chips for the scan `result`, each `{ label, title }`: subfolders and hidden files always, as every
- * scan skips them, and the others only when the scan met some.
+ * The line for the scan `result`, `{ label, detail }`, or null when it skipped nothing: no files without an
+ * extension, no Protected Paths and nothing unreadable. The detail lists each with its count.
  */
-export function skippedChips({ skipped, noExtension, unreadable }) {
-  return [
-    {
-      label: "Subfolders: duplicates only",
-      title: "Only files directly in the folder are sorted into folders. Files deeper down are checked for duplicates.",
-    },
-    noExtension > 0 && {
-      label: `No extension ${count(noExtension)}`,
-      title: "Files without an extension, like the .pdf in report.pdf, are checked for duplicates but not sorted.",
-    },
-    skipped > 0 && {
-      label: `Protected folders ${count(skipped)}`,
-      title: "Folders the system and your apps need, and your Never-Touch Paths, are left alone.",
-    },
-    { label: "Hidden files & links", title: "Hidden files and symlinks are left alone." },
-    unreadable.length > 0 && {
-      label: `Unreadable ${count(unreadable.length)}`,
-      title: unreadable.join("\n"),
-    },
+export function skippedLine({ skipped, noExtension, unreadable }) {
+  const lines = [
+    noExtension > 0 && `Files without an extension: ${count(noExtension)}. They're checked for duplicates but not sorted.`,
+    skipped > 0 && `Protected folders: ${count(skipped)}. Folders the system and your apps need, and your Never-Touch Paths, are left alone.`,
+    unreadable.length > 0 && `Unreadable: ${count(unreadable.length)}\n${unreadable.join("\n")}`,
   ].filter(Boolean);
+  return lines.length > 0 ? { label: "Some files skipped", detail: [...lines, "", ...ALWAYS].join("\n") } : null;
 }
