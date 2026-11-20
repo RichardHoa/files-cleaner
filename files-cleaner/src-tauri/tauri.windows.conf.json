@@ -2,6 +2,7 @@
   "bundle": {
     "resources": {
       "pdfium/*": "pdfium/",
+      "tessdata/*": "tessdata/",
       "vulkan/vulkan-1.dll": "vulkan-1.dll"
     }
   }

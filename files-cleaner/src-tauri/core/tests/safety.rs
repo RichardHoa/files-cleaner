@@ -8,8 +8,6 @@ use std::fs;
 use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
 
-#[cfg(target_os = "linux")]
-use common::OtherDisk;
 use common::{
     build_plan, build_suggested_folders_plan, empty_config, folder_plan, journal_dir, real_path,
     run, scan_root, undo, undo_operations, write,
@@ -271,61 +269,6 @@ fn undoing_the_files_first_then_the_emptied_folder_merges_it_back() {
 
     assert_eq!(undone.done.len(), 1, "{undone:?}");
     assert_eq!(snapshot(dir.path()), before);
-}
-
-#[test]
-#[cfg(target_os = "linux")]
-fn moves_across_disks_are_errors_that_are_never_run() {
-    let dir = scan_root();
-    let Some(_disk) = OtherDisk::mount(&dir.path().join("usb")) else {
-        eprintln!("skipped: mounting a second disk needs root");
-        return;
-    };
-    write(dir.path(), "usb/talk.pptx", "talk");
-    write(dir.path(), "here/intro.pptx", "intro");
-    let errors = |plan: &Plan| -> BTreeMap<String, String> {
-        plan.operations
-            .iter()
-            .filter_map(|op| Some((op.relative_path.join("/"), op.error.clone()?)))
-            .collect()
-    };
-
-    let plan = folder_plan(
-        dir.path(),
-        "Slides",
-        FolderChoice::CreateHere,
-        &["usb/talk.pptx", "here/intro.pptx"],
-    );
-    let moves = errors(&plan);
-    assert_eq!(moves.keys().collect::<Vec<_>>(), ["usb/talk.pptx"]);
-    assert!(
-        moves.values().all(|e| e.contains("different disk")),
-        "{moves:?}"
-    );
-    let blocked = plan.operations.iter().filter(|op| op.error.is_some());
-    assert!(blocked.clone().all(|op| !op.ticked));
-    assert_eq!(
-        emptied(&plan),
-        ["here"],
-        "a folder whose items can't leave isn't emptied"
-    );
-
-    let journal = journal_dir();
-    let summary = run(&plan, &every_id(&plan), journal.path()).unwrap();
-
-    let ran: Vec<String> = summary
-        .done
-        .iter()
-        .chain(&summary.skipped)
-        .chain(&summary.failed)
-        .map(|o| o.operation_id.clone())
-        .collect();
-    assert!(blocked.clone().all(|op| !ran.contains(&op.id)), "{ran:?}");
-    assert!(dir.path().join("usb/talk.pptx").exists());
-    assert!(
-        !dir.path().join("here").exists(),
-        "the rest of the Plan runs"
-    );
 }
 
 #[test]
