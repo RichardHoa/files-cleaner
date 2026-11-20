@@ -9,7 +9,7 @@ The app doesn't remember what the user decided on the Review screen (renames, de
 ## Considered Options
 
 - **Remember renames and outside destinations of Suggested Folders that ran**, matched to new clusters by the centroid of their files' embeddings and shown as "Like last time": rejected as not worth building, for the reason above.
-- **Also learn trash decisions** ("content like this gets trashed"): rejected because it would bring Rules back (ADR 0008).
+- **Also learn trash decisions** ("content like this gets trashed"): rejected because a Rule should be something the user wrote and can read (ADR 0013), not something inferred from their past choices.
 - **Learn merges and removals as signals to clustering:** rejected because they would change the Suggested Folders in ways the user can't see or explain.
 
 ## Consequences

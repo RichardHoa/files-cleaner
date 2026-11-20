@@ -10,7 +10,7 @@ The app takes one folder (the Scan Root) and, after the user approves it, change
 flowchart LR
     pick[Pick Scan Root] --> scan[Scan] --> dups[Find duplicates] --> review[Review screen]
     scan -. loose files .-> group[Read and group<br/>in the background] -.-> review
-    review -- approve a part --> plan[Build Plan] --> run[Run as a Session]
+    review -- approve the Plan --> plan[Build Plan] --> run[Run as a Session]
     run --> journal[(Journal)]
     journal --> undo[Undo / Redo / Retry]
 ```
@@ -78,7 +78,7 @@ The safety-critical part. Its public functions (re-exported from `lib.rs`) are t
 
 **Architecture Invariant:** the core never deletes permanently and never edits file contents. It only moves, creates folders, and sends to the System Trash, which it never empties.
 
-**Architecture Invariant:** nothing acts on files except an approved Plan. There are no Rules (ADR 0008) and no learning from past Plans (ADR 0011).
+**Architecture Invariant:** nothing acts on files except an approved Plan. Rules only shape the Plan, never act on their own (ADR 0013), and there's no learning from past Plans (ADR 0011).
 
 ### `src-tauri/grouping`
 

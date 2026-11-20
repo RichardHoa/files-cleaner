@@ -65,7 +65,7 @@ _Avoid_: keeper rule, preference
 ### Planning
 
 **Plan**:
-The full list of proposed Operations for one Scan Root, shown grouped by Reason, one line per Operation, with the selected Operation's Reason beside it, for the user to approve (all at once or a part at a time), untick, or cancel.
+The full list of proposed Operations for one Scan Root, shown grouped by Reason, one line per Operation, with the selected Operation's Reason beside it, for the user to approve, untick, or cancel. The Review screen approves the whole Plan at once, from one button; nothing happens to the files before that.
 _Avoid_: preview, proposal
 
 **Operation**:
@@ -95,8 +95,12 @@ _Avoid_: Finder-style suffix, copy suffix
 ### Grouping
 
 **Suggested Folder**:
-A folder the Plan gathers Loose Files into: proposed by the tool, or added by the user. The tool proposes one only for files that share a topic (at least half of them, and at least two) or for files of one kind it never reads, such as images (or of any kind, without the Grouping Models), and names it after that topic or kind; read files that share no topic are left where they are. It goes into the existing folder it matched or the user picked, a new folder in the Scan Root (the default) or somewhere else the user picks on the same disk, or all its files are trashed. The user can merge one into another, or remove it, which leaves its files where they are. A Suggested Folder always has a name: leaving the name empty never means "trash".
+A folder the Plan gathers Loose Files into: proposed by the tool, or added by the user. The tool proposes one only for files that share a topic (at least half of them, and at least two) or for files of one kind it never reads, such as images (or of any kind, without the Grouping Models), and names it after that topic or kind; read files that share no topic are left where they are. It goes into the existing folder it matched or the user picked, a new folder in the Scan Root (the default) or somewhere else the user picks on the same disk. Trashing all its files is done file by file, never as where it goes. The user can merge one into another, or remove it, which leaves its files where they are. A Suggested Folder always has a name: leaving the name empty never means "trash".
 _Avoid_: cluster, group, category, proposed folder
+
+**Rule**:
+A saved instruction for how Loose Files are sorted into Suggested Folders at every scan, written by the user in plain words, drafted into a structured form by the Grouping Models and corrected by the user before it's saved. Some Rules group by fields (date, kind, name); others group by meaning ("by project"). A Rule only shapes the Plan: its Operations are reviewed and approved like any other.
+_Avoid_: automation, filter, preset, instruction
 
 **Grouping Models**:
 The two models the app downloads once, with the user's consent, to read inside files and suggest folders from what they're about. They are the only thing the app ever downloads. Without them, Suggested Folders come from file kind, name and date only. The user may swap the model that describes each file for one they pick; the model that compares the descriptions is always the app's own.
@@ -105,7 +109,7 @@ _Avoid_: AI, smart features, LLM
 ### History
 
 **Session**:
-One approved part of a Plan being carried out, from the first Operation to the last; the unit that Undo reverses. A part is the duplicates, one Suggested Folder's moves or its trashes, the trashes among the files left where they are, or everything not yet carried out. Every Operation that can happen does: one that can't is skipped with a Note and the rest carry on. Any approved part that changes something on disk is a Session, even if some of its Operations were skipped; one where nothing happened is not. Trying a skipped or failed Operation again later adds it to the same Session.
+One approved Plan being carried out, from the first Operation to the last; the unit that Undo reverses. A Session from the Review screen is the whole approved Plan. Every Operation that can happen does: one that can't is skipped with a Note and the rest carry on. Any approved Plan that changes something on disk is a Session, even if some of its Operations were skipped; one where nothing happened is not. Trying a skipped or failed Operation again later adds it to the same Session.
 _Avoid_: run, job, cleanup
 
 **Journal**:
