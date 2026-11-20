@@ -7,10 +7,12 @@
 //! Windows leaves that flag off a real recycle, items are refused and stay in
 //! place: the safe way to be wrong.
 
-use std::ffi::c_void;
-use std::os::windows::ffi::OsStrExt;
-use std::path::{Path, PathBuf};
+use std::ffi::{c_void, OsString};
+use std::fs;
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
+use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use windows::Win32::Foundation::E_ABORT;
 use windows::Win32::System::Com::{
@@ -218,6 +220,8 @@ pub fn trash(path: &Path) -> Result<PathBuf, String> {
     if let Some(reason) = path.parent().and_then(blocked) {
         return Err(reason);
     }
+    // A second early: a FILETIME is finer than some disks keep.
+    let started = SystemTime::now() - Duration::from_secs(1);
     let observed = Arc::new(Mutex::new(Observed::default()));
     let sink: IFileOperationProgressSink = Sink {
         observed: observed.clone(),
@@ -235,8 +239,101 @@ pub fn trash(path: &Path) -> Result<PathBuf, String> {
     performed.map_err(|e| format!("The Recycle Bin refused it: {e}"))?;
     match &observed.landing {
         Some(Ok(landing)) => Ok(landing.clone()),
+        // It may have left all the same: its record in the Recycle Bin says where to.
+        _ if fs::symlink_metadata(path).is_err() => {
+            find_landing(path, started).ok_or_else(|| match &observed.landing {
+                Some(Err(error)) => format!("The Recycle Bin gave no file path for it: {error}"),
+                _ => "The Recycle Bin didn't say where it landed".to_string(),
+            })
+        }
         Some(Err(error)) => Err(format!("The Recycle Bin gave no file path for it: {error}")),
         None => Err("The Recycle Bin didn't say where it landed".to_string()),
+    }
+}
+
+/// Seconds from 1601, where a FILETIME starts, to 1970.
+const FILETIME_TO_UNIX_SECS: u64 = 11_644_473_600;
+
+/// `time` as a FILETIME: 100 ns steps since 1601.
+fn filetime(time: SystemTime) -> u64 {
+    let since_1970 = time.duration_since(UNIX_EPOCH).unwrap_or_default();
+    (since_1970.as_secs() + FILETIME_TO_UNIX_SECS) * 10_000_000
+        + u64::from(since_1970.subsec_nanos()) / 100
+}
+
+/// What a `$I` file in the Recycle Bin records of its `$R` item: where it
+/// was, and when it was deleted, as a FILETIME. Version 1 (Vista to 8)
+/// keeps the path in 260 characters; version 2 gives its length first.
+fn parse_deleted_record(bytes: &[u8]) -> Option<(PathBuf, u64)> {
+    let u64_at = |at: usize| Some(u64::from_le_bytes(bytes.get(at..at + 8)?.try_into().ok()?));
+    let deleted = u64_at(16)?;
+    let (start, chars) = match u64_at(0)? {
+        1 => (24, 260),
+        2 => (
+            28,
+            u32::from_le_bytes(bytes.get(24..28)?.try_into().ok()?) as usize,
+        ),
+        _ => return None,
+    };
+    let units: Vec<u16> = bytes
+        .get(start..start + chars * 2)?
+        .chunks_exact(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .take_while(|&unit| unit != 0)
+        .collect();
+    Some((PathBuf::from(OsString::from_wide(&units)), deleted))
+}
+
+/// Where the Recycle Bin put `source`, when Windows didn't say: the `$R`
+/// item whose `$I` record names `source`, deleted no earlier than `since`
+/// (so never an older item from the same path), the latest if several.
+/// Only the user's own folder in `$Recycle.Bin` can be read.
+fn find_landing(source: &Path, since: SystemTime) -> Option<PathBuf> {
+    let drive: PathBuf = source
+        .components()
+        .take_while(|c| matches!(c, Component::Prefix(_) | Component::RootDir))
+        .collect();
+    let since = filetime(since);
+    let wanted = source.to_string_lossy().to_lowercase();
+    let users = fs::read_dir(drive.join("$Recycle.Bin")).ok()?;
+    let records = users
+        .flatten()
+        .filter_map(|user| fs::read_dir(user.path()).ok())
+        .flat_map(|entries| entries.flatten());
+    records
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let rest = name.strip_prefix("$I")?;
+            let (was, deleted) = parse_deleted_record(&fs::read(entry.path()).ok()?)?;
+            let matches = was.to_string_lossy().to_lowercase() == wanted && deleted >= since;
+            matches.then(|| (deleted, entry.path().with_file_name(format!("$R{rest}"))))
+        })
+        .filter(|(_, landing)| fs::symlink_metadata(landing).is_ok())
+        .max_by_key(|(deleted, _)| *deleted)
+        .map(|(_, landing)| landing)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_where_a_version_2_record_says_its_item_was() {
+        let path: Vec<u16> = r"C:\Users\me\copy.txt".encode_utf16().chain([0]).collect();
+        let mut record = Vec::new();
+        record.extend(2u64.to_le_bytes());
+        record.extend(5u64.to_le_bytes());
+        record.extend(133_000_000_000_000_000u64.to_le_bytes());
+        record.extend((path.len() as u32).to_le_bytes());
+        record.extend(path.iter().flat_map(|unit| unit.to_le_bytes()));
+
+        assert_eq!(
+            parse_deleted_record(&record),
+            Some((
+                PathBuf::from(r"C:\Users\me\copy.txt"),
+                133_000_000_000_000_000
+            ))
+        );
     }
 }
 

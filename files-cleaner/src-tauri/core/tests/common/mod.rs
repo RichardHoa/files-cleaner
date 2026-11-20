@@ -244,3 +244,43 @@ pub fn build_suggested_folders_plan(
 ) -> Result<Plan, SuggestedFolderError> {
     core::build_suggested_folders_plan(scan, &no_trash(), folders)
 }
+
+/// Mounts a fresh empty disk (tmpfs) at `folder` and unmounts it when
+/// dropped. `None` if that isn't allowed: it needs root, or `sudo` without
+/// a password, as on CI.
+#[cfg(target_os = "linux")]
+pub struct OtherDisk(PathBuf);
+
+#[cfg(target_os = "linux")]
+impl OtherDisk {
+    pub fn mount(folder: &Path) -> Option<OtherDisk> {
+        fs::create_dir_all(folder).unwrap();
+        let mut args = vec!["mount", "-t", "tmpfs", "-o", "size=1m,mode=1777", "tmpfs"];
+        args.push(folder.to_str().unwrap());
+        as_root(&args).then(|| OtherDisk(folder.to_path_buf()))
+    }
+
+    pub fn folder(&self) -> &Path {
+        &self.0
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for OtherDisk {
+    fn drop(&mut self) {
+        as_root(&["umount", self.0.to_str().unwrap()]);
+    }
+}
+
+/// Runs `args` as root: as is, or else through `sudo` if it needs no password.
+#[cfg(target_os = "linux")]
+fn as_root(args: &[&str]) -> bool {
+    let succeeds = |program: &str, args: &[&str]| {
+        std::process::Command::new(program)
+            .args(args)
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    };
+    succeeds(args[0], &args[1..]) || succeeds("sudo", &[&["-n"], args].concat())
+}

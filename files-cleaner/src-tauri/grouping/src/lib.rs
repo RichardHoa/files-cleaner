@@ -38,7 +38,7 @@ pub use card::Card;
 pub use cluster::Vector;
 pub use llama::{check_describing_model, LlamaModels};
 pub use place::{Choice, Question};
-pub use read::{pdf_child_main, Content};
+pub use read::{pdf_child_main, read, Content};
 pub use store::CardStore;
 pub use trace::{clear_trace, trace_to};
 

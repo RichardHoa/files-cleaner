@@ -11,12 +11,12 @@ use std::sync::{Arc, Mutex};
 mod downloads;
 mod models;
 
+use files_cleaner_core::write_atomically;
 use files_cleaner_core::{
     self as core, Config, DuplicateChoice, DuplicateGroup, DuplicateProgress, Plan, RecentScanRoot,
     RunProgress, ScanProgress, ScanResult, SessionDetails, SessionPage, SettingChange,
     SuggestedFolderChoice, Summary, SystemTrash, EXAMPLE_CONFIG,
 };
-use files_cleaner_core::write_atomically;
 use files_cleaner_grouping::{self as grouping, CardStore, Grouping, LlamaModels};
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
@@ -428,6 +428,58 @@ fn bundled(app: &AppHandle, path: &str) -> Option<PathBuf> {
     path.exists().then_some(path)
 }
 
+/// Started with this flag, the app checks what it was installed with, says
+/// how that went on stderr and exits: 0 if all is well. CI runs it on each
+/// installer it builds.
+const SELF_CHECK_FLAG: &str = "--self-check";
+
+/// A one-page PDF with a line of text, for PDFium to read in the self-check.
+const SELF_CHECK_PDF: &[u8] = b"%PDF-1.4
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 600 100]/Resources<</Font<</F1 4 0 R>>>>/Contents 5 0 R>>endobj
+4 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj
+5 0 obj<</Length 73>>stream
+BT /F1 18 Tf 20 40 Td (Files Cleaner checks that PDFium reads this) Tj ET
+endstream endobj
+trailer<</Root 1 0 R>>
+%%EOF
+";
+
+/// Whether the installed app has its bundled resources and can use them:
+/// PDFium reads a PDF, through the same child process an analysis uses, and
+/// OCR's language files are there.
+fn self_check(app: &AppHandle) -> Result<(), String> {
+    let pdfium = bundled(app, PDFIUM_LIBRARY)
+        .ok_or_else(|| format!("{PDFIUM_LIBRARY} isn't in the app's resources"))?;
+    let tessdata = bundled(app, TESSDATA_FOLDER)
+        .ok_or_else(|| format!("{TESSDATA_FOLDER} isn't in the app's resources"))?;
+    let languages = fs::read_dir(&tessdata)
+        .map_err(|e| format!("{}: {e}", tessdata.display()))?
+        .flatten()
+        .filter(|entry| {
+            entry
+                .path()
+                .extension()
+                .is_some_and(|ext| ext == "traineddata")
+        })
+        .count();
+    if languages == 0 {
+        return Err(format!("{} has no language files", tessdata.display()));
+    }
+    let pdf = std::env::temp_dir().join("files-cleaner-self-check.pdf");
+    fs::write(&pdf, SELF_CHECK_PDF).map_err(|e| format!("{}: {e}", pdf.display()))?;
+    let content = grouping::read(&pdf, "self-check.pdf", Some(&pdfium), Some(&tessdata));
+    let _ = fs::remove_file(&pdf);
+    if !content.body.contains("PDFium reads this") {
+        return Err(format!(
+            "PDFium at {} couldn't read a PDF",
+            pdfium.display()
+        ));
+    }
+    Ok(())
+}
+
 /// What an analysis found, for the review screen.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -745,6 +797,19 @@ pub fn run() {
         .manage(Latest::default())
         .manage(Analysing::default())
         .setup(|app| {
+            if std::env::args().any(|arg| arg == SELF_CHECK_FLAG) {
+                let code = match self_check(app.handle()) {
+                    Ok(()) => {
+                        eprintln!("self-check passed");
+                        0
+                    }
+                    Err(problem) => {
+                        eprintln!("self-check failed: {problem}");
+                        1
+                    }
+                };
+                std::process::exit(code);
+            }
             let folder = app.path().app_data_dir()?.join(MODELS_FOLDER_NAME);
             app.manage(Arc::new(GroupingModels::new(app.handle().clone(), folder)));
             Ok(())

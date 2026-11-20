@@ -8,6 +8,8 @@ use std::fs;
 use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
 
+#[cfg(target_os = "linux")]
+use common::OtherDisk;
 use common::{
     build_plan, build_suggested_folders_plan, empty_config, folder_plan, journal_dir, real_path,
     run, scan_root, undo, undo_operations, write,
@@ -269,32 +271,6 @@ fn undoing_the_files_first_then_the_emptied_folder_merges_it_back() {
 
     assert_eq!(undone.done.len(), 1, "{undone:?}");
     assert_eq!(snapshot(dir.path()), before);
-}
-
-/// Mounts a fresh empty disk (tmpfs) at `folder` and unmounts it when
-/// dropped. `None` if that isn't allowed (it needs root).
-#[cfg(target_os = "linux")]
-struct OtherDisk(std::path::PathBuf);
-
-#[cfg(target_os = "linux")]
-impl OtherDisk {
-    fn mount(folder: &Path) -> Option<OtherDisk> {
-        fs::create_dir_all(folder).unwrap();
-        let mounted = std::process::Command::new("mount")
-            .args(["-t", "tmpfs", "-o", "size=1m", "tmpfs"])
-            .arg(folder)
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success());
-        mounted.then(|| OtherDisk(folder.to_path_buf()))
-    }
-}
-
-#[cfg(target_os = "linux")]
-impl Drop for OtherDisk {
-    fn drop(&mut self) {
-        let _ = std::process::Command::new("umount").arg(&self.0).status();
-    }
 }
 
 #[test]
