@@ -144,7 +144,9 @@ jobs:
         working-directory: files-cleaner/src-tauri/target/release/bundle
         run: |
           function Test-Installed($folder) {
-            $exe = Get-ChildItem $folder -Recurse -Filter files-cleaner.exe | Select-Object -First 1
+            # A missing folder would make Get-ChildItem -Recurse search its parent instead.
+            if (-not (Test-Path -LiteralPath $folder)) { throw "$folder doesn't exist" }
+            $exe = Get-ChildItem -LiteralPath $folder -Recurse -Filter files-cleaner.exe | Select-Object -First 1
             if (-not $exe) { throw "files-cleaner.exe isn't in $folder" }
             $log = "$env:RUNNER_TEMP\self-check.txt"
             $run = Start-Process $exe.FullName -ArgumentList '--self-check' -Wait -PassThru -RedirectStandardError $log
@@ -155,7 +157,12 @@ jobs:
           Start-Process $nsis.FullName -ArgumentList '/S' -Wait
           Test-Installed "$env:LOCALAPPDATA\files-cleaner"
           $msi = Get-ChildItem msi\*.msi | Select-Object -First 1
-          Start-Process msiexec -ArgumentList '/i', "`"$($msi.FullName)`"", '/qn' -Wait
+          $msiLog = "$env:RUNNER_TEMP\msi.log"
+          $install = Start-Process msiexec -ArgumentList '/i', "`"$($msi.FullName)`"", '/qn', '/l*v', "`"$msiLog`"" -Wait -PassThru
+          if ($install.ExitCode -ne 0) {
+            Get-Content $msiLog -Tail 80
+            throw "msiexec exited with $($install.ExitCode)"
+          }
           Test-Installed "$env:ProgramFiles\files-cleaner"
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
