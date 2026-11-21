@@ -13,6 +13,9 @@
 //! The user's Rules go first: the Loose Files a Rule matches go where it
 //! says, by code alone, and only the rest are read and grouped. A Rule's
 //! folder of one name is offered to the LLM too, for read files left out.
+//! A Rule by meaning's files are read like the rest but sorted apart: each
+//! into the folder the user named that its card is most like, the LLM
+//! breaking close ties, or into folders proposed from them alone.
 //!
 //! Everything that needs llama.cpp, PDFium or Tesseract lives in this crate, so `core`
 //! stays pure Rust. `analyse` is the entry point; `Analysis::regroup` groups
@@ -20,6 +23,7 @@
 
 mod card;
 mod cluster;
+mod draft;
 mod kinds;
 mod llama;
 mod marks;
@@ -36,11 +40,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use files_cleaner_core::{GroupBy, Rule, ScanEntry, ScanResult};
+use files_cleaner_core::{GroupBy, MeaningFolder, Rule, ScanEntry, ScanResult};
 use serde::Serialize;
 
 pub use card::Card;
 pub use cluster::Vector;
+pub use draft::{draft_rule, draft_rule_with_models};
 pub use llama::{check_describing_model, LlamaModels};
 pub use place::{Choice, Question};
 pub use read::{pdf_child_main, read, Content};
@@ -68,6 +73,11 @@ pub trait Models {
     fn place(&mut self, question: &Question) -> Result<Option<usize>, String>;
     /// One vector per text, in order.
     fn embed(&mut self, texts: &[String]) -> Result<Vec<Vector>, String>;
+    /// The describing model's reply when asked for the Rule the user's
+    /// `words` describe, held to `draft::grammar()` so it reads as one.
+    fn draft(&mut self, _words: &str) -> Result<String, String> {
+        Err("this model can't draft Rules".to_string())
+    }
     /// Where the models ran, such as "Metal GPU" or "CPU"; `None` if they
     /// haven't run.
     fn device(&self) -> Option<String>;
@@ -206,6 +216,8 @@ pub struct Analysis {
     unread: Vec<PathBuf>,
     /// The Suggested Folders the Rules made, of files never read.
     ruled: Vec<SuggestedFolder>,
+    /// The Rules by meaning, with the read files each takes.
+    meaning: Vec<Meaning>,
     /// For each of `ruled` that files left out may be placed in, its
     /// centroid and topics: those of the subfolder it goes into, or else
     /// its name's vector and none.
@@ -215,6 +227,40 @@ pub struct Analysis {
     /// folder's label, or none.
     answers: HashMap<String, Option<String>>,
 }
+
+/// A Rule by meaning and what it sorts.
+struct Meaning {
+    rule: Rule,
+    /// Its files, by their place in the read files.
+    files: Vec<usize>,
+    /// The folders the user named; none to propose them from the files.
+    folders: Vec<Named>,
+}
+
+/// A folder the user named for a Rule by meaning.
+struct Named {
+    folder: MeaningFolder,
+    /// The existing folder of its name below the Scan Root, if any.
+    existing: Option<PathBuf>,
+    /// The vector of its name and description.
+    vector: Vector,
+}
+
+/// Where a Rule by meaning's file goes among its named folders.
+enum Fit {
+    /// The folder it's clearly most like, by its place in the folders.
+    Folder(usize),
+    /// Too close to call between several, each by its place: the LLM picks
+    /// one or none.
+    Tie(Question, Vec<usize>),
+    /// Like none of them enough: it stays where it is.
+    Stays,
+}
+
+/// How like a named folder a file must be to go into it.
+const MEANING_THRESHOLD: f32 = 0.5;
+/// Folders this close to the most like one are a tie the LLM breaks.
+const TIE_MARGIN: f32 = 0.03;
 
 /// An existing subfolder of the Scan Root, a place a group may go.
 struct Subfolder {
@@ -262,7 +308,8 @@ pub fn analyse(
     mut on_progress: impl FnMut(Progress),
 ) -> Result<Analysis, Stopped> {
     let scan = input.scan;
-    let ruled = rules::apply(scan, input.rules, chrono::Local::now().date_naive());
+    let (ruled, by_meaning) =
+        rules::apply(scan, input.rules, chrono::Local::now().date_naive(), true);
     let matched: HashSet<&Path> = ruled
         .iter()
         .flat_map(|f| &f.files)
@@ -471,8 +518,9 @@ pub fn analyse(
     stored.retain(|_| !flags.next().unwrap());
 
     // Every file is carded before any is embedded, then the cards missing a
-    // vector, the names of subfolders with nothing to sample and the names
-    // of the Rules' folders offered for placing are embedded.
+    // vector, the names of subfolders with nothing to sample, the names of
+    // the Rules' folders offered for placing and the folders named for
+    // Rules by meaning are embedded.
     let missing: Vec<usize> = (0..stored.len())
         .filter(|&i| stored[i].1.embedding.is_none())
         .collect();
@@ -481,15 +529,21 @@ pub fn analyse(
         .filter(|(_, s)| s.is_empty())
         .map(|(f, _)| *f)
         .collect();
+    let offered_names: Vec<String> = ruled
+        .iter()
+        .filter(|f| offered(f))
+        .map(|f| f.name.replace('/', " "))
+        .collect();
     let texts: Vec<String> = missing
         .iter()
         .map(|&i| stored[i].1.card.text(&read::name_words(&all[i].name)))
         .chain(unsampled.iter().map(|f| f.to_string()))
+        .chain(offered_names.iter().cloned())
         .chain(
-            ruled
+            by_meaning
                 .iter()
-                .filter(|f| offered(f))
-                .map(|f| f.name.replace('/', " ")),
+                .flat_map(|taken| named_folders(&taken.rule))
+                .map(folder_text),
         )
         .collect();
     let mut vectors = Vec::with_capacity(texts.len());
@@ -512,7 +566,8 @@ pub fn analyse(
         trace::secs(started.elapsed())
     ));
     let mut name_vectors = vectors.split_off(missing.len());
-    let rule_vectors = name_vectors.split_off(unsampled.len());
+    let mut rule_vectors = name_vectors.split_off(unsampled.len());
+    let meaning_vectors = rule_vectors.split_off(offered_names.len());
     for (&i, vector) in missing.iter().zip(vectors) {
         let (hash, entry) = &mut stored[i];
         entry.embedding = Some(vector);
@@ -564,6 +619,37 @@ pub fn analyse(
             })
         })
         .collect();
+    let read_at: HashMap<&Path, usize> = to_read
+        .iter()
+        .enumerate()
+        .map(|(i, e)| (e.path.as_path(), i))
+        .collect();
+    let mut meaning_vectors = meaning_vectors.into_iter();
+    let meaning = by_meaning
+        .into_iter()
+        .map(|taken| {
+            let folders = named_folders(&taken.rule)
+                .iter()
+                .zip(meaning_vectors.by_ref())
+                .map(|(folder, vector)| Named {
+                    existing: rules::existing_folder(&scan.root, folder.name.trim()),
+                    folder: folder.clone(),
+                    vector,
+                })
+                .collect();
+            // A file not read, or read as a scan, isn't sorted by meaning.
+            let files = taken
+                .files
+                .iter()
+                .filter_map(|p| read_at.get(p.as_path()).copied())
+                .collect();
+            Meaning {
+                rule: taken.rule,
+                files,
+                folders,
+            }
+        })
+        .collect();
     let mut analysis = Analysis {
         grouping: Grouping {
             folders: Vec::new(),
@@ -578,6 +664,7 @@ pub fn analyse(
         fixed,
         unread,
         ruled,
+        meaning,
         rule_places,
         subfolders,
         answers: HashMap::new(),
@@ -649,6 +736,22 @@ pub fn analyse(
     Ok(analysis)
 }
 
+/// The folders `rule` names, if it groups by meaning.
+fn named_folders(rule: &Rule) -> &[MeaningFolder] {
+    match &rule.group_by {
+        GroupBy::Meaning { folders } => folders,
+        _ => &[],
+    }
+}
+
+/// What is embedded for a folder named for a Rule by meaning.
+fn folder_text(folder: &MeaningFolder) -> String {
+    match folder.description.as_deref().map(str::trim) {
+        Some(about) if !about.is_empty() => format!("{}. {about}", folder.name.trim()),
+        _ => folder.name.trim().to_string(),
+    }
+}
+
 /// Whether the LLM may place files left out in `folder`, a Rule's: only
 /// when the Rule puts its files into one named folder, as grouping by date
 /// or kind has nothing to do with what a file is about.
@@ -660,9 +763,11 @@ fn offered(folder: &SuggestedFolder) -> bool {
 }
 
 /// The Suggested Folders `rules` make of the Loose Files of `scan`, with no
-/// Grouping Models: every file no Rule matches stays where it is.
-pub fn group_by_rules(scan: &ScanResult, rules: &[Rule]) -> Grouping {
-    let mut folders = rules::apply(scan, rules, chrono::Local::now().date_naive());
+/// Grouping Models: every file no Rule matches stays where it is. The files
+/// a Rule by meaning takes stay too when `by_meaning`, waiting for the
+/// models; otherwise that Rule is passed over, as without the models.
+pub fn group_by_rules(scan: &ScanResult, rules: &[Rule], by_meaning: bool) -> Grouping {
+    let (mut folders, _) = rules::apply(scan, rules, chrono::Local::now().date_naive(), by_meaning);
     let matched: HashSet<&PathBuf> = folders.iter().flat_map(|f| &f.files).collect();
     let mut ungrouped: Vec<PathBuf> = scan
         .entries
@@ -708,30 +813,34 @@ impl Analysis {
         let mut used_names: HashSet<String> =
             folders.iter().map(|f| f.name.to_lowercase()).collect();
 
+        let mut unanswered = Vec::new();
+
         let topics: Vec<Option<String>> = self.cards.iter().map(Card::topic_key).collect();
-        // The same topic, or topics sharing a mark: "IELTS Speaking" and "IELTS Writing".
-        let same_topic = |i: usize, j: usize| match (&topics[i], &topics[j]) {
-            (Some(a), Some(b)) => {
-                a == b || marks::share_mark(&self.cards[i].topic, &self.cards[j].topic)
-            }
-            _ => false,
-        };
-        let clusters = cluster::cluster(
-            &self.vectors,
-            same_topic,
-            settings.folder_threshold,
-            settings.smallest_folder,
-        );
+        let same_topic = |i: usize, j: usize| self.same_topic(&topics, i, j);
+        // Then each Rule by meaning's folders, before any other takes their names.
+        for meaning in &self.meaning {
+            self.sort_by_meaning(
+                meaning,
+                &topics,
+                settings,
+                &mut folders,
+                &mut used_names,
+                &mut ungrouped,
+                &mut unanswered,
+            );
+        }
+        let taken: HashSet<usize> = self
+            .meaning
+            .iter()
+            .flat_map(|m| &m.files)
+            .copied()
+            .collect();
+        let rest: Vec<usize> = (0..self.files.len())
+            .filter(|i| !taken.contains(i))
+            .collect();
         // A group whose files share no topic is no folder: its files are left out of every group,
         // to be placed one by one like the others left out.
-        let mut groups: Vec<(&[usize], String)> = Vec::new();
-        let mut left_out = clusters.ungrouped.clone();
-        for members in &clusters.groups {
-            match self.shared_topic(members, &topics) {
-                Some(topic) => groups.push((members, topic)),
-                None => left_out.extend(members),
-            }
-        }
+        let (groups, left_out) = self.topic_groups(&rest, &topics, settings);
         let mut named: Vec<(String, &[usize])> = Vec::new();
         // Each Suggested Folder files left out may be placed in, by its place in `folders`, with its
         // centroid and topics: a Rule's offered folders (first in `folders`), then those of read files.
@@ -791,7 +900,7 @@ impl Analysis {
             });
         }
 
-        for (&(members, ref topic), joined) in groups.iter().zip(joined) {
+        for ((members, topic), joined) in groups.iter().zip(joined) {
             let centre = centroid(members.iter().map(|&i| &self.vectors[i])).unwrap_or_default();
             let existing = self
                 .subfolders
@@ -834,7 +943,6 @@ impl Analysis {
                 Some((i, place::prompt(&question), question, targets))
             })
             .collect();
-        let mut unanswered = Vec::new();
         let mut placed: BTreeMap<usize, String> = BTreeMap::new();
         // The Suggested Folder made for each subfolder a file was placed in.
         let mut made: HashMap<usize, usize> = HashMap::new();
@@ -912,6 +1020,176 @@ impl Analysis {
             },
             unanswered,
         )
+    }
+
+    /// Whether read files `i` and `j` share a topic, or topics sharing a
+    /// mark: "IELTS Speaking" and "IELTS Writing". `topics` are the cards'
+    /// topic keys.
+    fn same_topic(&self, topics: &[Option<String>], i: usize, j: usize) -> bool {
+        match (&topics[i], &topics[j]) {
+            (Some(a), Some(b)) => {
+                a == b || marks::share_mark(&self.cards[i].topic, &self.cards[j].topic)
+            }
+            _ => false,
+        }
+    }
+
+    /// The read files `members` clustered by `settings`, each by its place
+    /// in the read files: the groups whose files share a topic, each with
+    /// that topic, and the files in no such group.
+    fn topic_groups(
+        &self,
+        members: &[usize],
+        topics: &[Option<String>],
+        settings: &Settings,
+    ) -> (Vec<(Vec<usize>, String)>, Vec<usize>) {
+        let vectors: Vec<Vector> = members.iter().map(|&i| self.vectors[i].clone()).collect();
+        let clusters = cluster::cluster(
+            &vectors,
+            |a, b| self.same_topic(topics, members[a], members[b]),
+            settings.folder_threshold,
+            settings.smallest_folder,
+        );
+        let mut groups = Vec::new();
+        let mut left_out: Vec<usize> = clusters.ungrouped.iter().map(|&a| members[a]).collect();
+        for group in clusters.groups {
+            let group: Vec<usize> = group.into_iter().map(|a| members[a]).collect();
+            match self.shared_topic(&group, topics) {
+                Some(topic) => groups.push((group, topic)),
+                None => left_out.extend(group),
+            }
+        }
+        (groups, left_out)
+    }
+
+    /// Sorts the files `meaning` takes into `folders`, or `ungrouped` where
+    /// they stay. With named folders, each file goes into the one it's most
+    /// like, a close tie going to the LLM's answer (or into `unanswered`
+    /// when it has none yet); with none, into folders proposed by clustering
+    /// them and named after their topics.
+    #[allow(clippy::too_many_arguments)]
+    fn sort_by_meaning(
+        &self,
+        meaning: &Meaning,
+        topics: &[Option<String>],
+        settings: &Settings,
+        folders: &mut Vec<SuggestedFolder>,
+        used_names: &mut HashSet<String>,
+        ungrouped: &mut Vec<PathBuf>,
+        unanswered: &mut Vec<Unanswered>,
+    ) {
+        let made = |name: String, files: Vec<PathBuf>, existing: Option<PathBuf>| SuggestedFolder {
+            name,
+            files,
+            existing,
+            basis: Basis::Rule,
+            rule: Some(meaning.rule.clone()),
+        };
+        if meaning.folders.is_empty() {
+            let (groups, left_out) = self.topic_groups(&meaning.files, topics, settings);
+            for (members, topic) in groups {
+                let name = unused_name(used_names, &topic);
+                let existing = self
+                    .subfolders
+                    .iter()
+                    .find(|f| f.name.eq_ignore_ascii_case(&name))
+                    .map(|f| f.path.clone());
+                let files = members.iter().map(|&i| self.files[i].clone()).collect();
+                folders.push(made(name, files, existing));
+            }
+            ungrouped.extend(left_out.iter().map(|&i| self.files[i].clone()));
+            return;
+        }
+        let mut filled: Vec<Vec<PathBuf>> = vec![Vec::new(); meaning.folders.len()];
+        for &i in &meaning.files {
+            let chosen = match self.meaning_fit(i, meaning) {
+                Fit::Folder(k) => Some(k),
+                Fit::Stays => None,
+                Fit::Tie(question, places) => {
+                    let prompt = place::prompt(&question);
+                    match self.answers.get(&prompt) {
+                        None => {
+                            unanswered.push((i, prompt, question));
+                            None
+                        }
+                        Some(answer) => answer.as_ref().and_then(|name| {
+                            let c = question
+                                .folders
+                                .iter()
+                                .position(|f| &place::label(f) == name)?;
+                            Some(places[c])
+                        }),
+                    }
+                }
+            };
+            match chosen {
+                Some(k) => filled[k].push(self.files[i].clone()),
+                None => ungrouped.push(self.files[i].clone()),
+            }
+        }
+        for (named, files) in meaning.folders.iter().zip(filled) {
+            if files.is_empty() {
+                continue;
+            }
+            let name = named.folder.name.trim();
+            // A folder of the same name an earlier Rule made is the same folder.
+            match folders
+                .iter()
+                .position(|f| f.name.eq_ignore_ascii_case(name))
+            {
+                Some(k) => folders[k].files.extend(files),
+                None => {
+                    used_names.insert(name.to_lowercase());
+                    folders.push(made(name.to_string(), files, named.existing.clone()));
+                }
+            }
+        }
+    }
+
+    /// Where read file `i` goes among the folders `meaning` names. A tie
+    /// with an empty card can't be asked about, so the file stays.
+    fn meaning_fit(&self, i: usize, meaning: &Meaning) -> Fit {
+        let mut scores: Vec<(f32, usize)> = meaning
+            .folders
+            .iter()
+            .enumerate()
+            .map(|(k, named)| (cosine(&self.vectors[i], &named.vector), k))
+            .collect();
+        scores.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let Some(&(top, best)) = scores.first().filter(|(s, _)| *s >= MEANING_THRESHOLD) else {
+            return Fit::Stays;
+        };
+        let close: Vec<usize> = scores
+            .iter()
+            .take_while(|(s, _)| top - s < TIE_MARGIN)
+            .take(place::CHOICES)
+            .map(|&(_, k)| k)
+            .collect();
+        if close.len() == 1 {
+            return Fit::Folder(best);
+        }
+        let card = &self.cards[i];
+        if card.topic.is_empty() && card.summary.is_empty() {
+            return Fit::Stays;
+        }
+        let choices = close
+            .iter()
+            .map(|&k| {
+                let folder = &meaning.folders[k].folder;
+                Choice {
+                    name: folder.name.trim().to_string(),
+                    topics: folder.description.iter().cloned().collect(),
+                    files: Vec::new(),
+                    existing: false,
+                }
+            })
+            .collect();
+        let question = Question {
+            file_name: file_name(&self.files[i]),
+            card: card.clone(),
+            folders: choices,
+        };
+        Fit::Tie(question, close)
     }
 
     /// The placing question for read file `i`, left out of every folder,

@@ -21,7 +21,7 @@ The Grouping Models are small (a 1.5B describing model), so a Rule is never trus
 ## Consequences
 
 - ARCHITECTURE.md's invariant stays: nothing acts on files except an approved Plan. Rules feed the Plan and don't bypass it.
-- Without the Grouping Models, Rules still work, but they have to be built from the structured fields instead of from plain words, and grouping by meaning isn't available.
+- Without the Grouping Models, Rules still work, but only common phrasings are read from plain words; anything else is built from the structured fields, and grouping by meaning isn't available.
 - Rules are edited only on their own Rules screen, never by hand in `config.json`. They're saved in the config under a new key. The old frozen `rules` value is still read and ignored, since it uses the old format.
 - A Rule replaces automatic grouping for the files it matches: the Rule alone decides their folder, and automatic grouping only sorts the files no Rule matched.
 - Rules only sort Loose Files into Suggested Folders. They don't trash files, and reaching into subfolders would be a separate decision.

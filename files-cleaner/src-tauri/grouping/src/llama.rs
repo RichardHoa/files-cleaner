@@ -1,7 +1,7 @@
 //! The Grouping Models on llama.cpp: Qwen2.5-1.5B-Instruct, or the model
-//! the user picked, writes the cards and places the files left
-//! out of every folder, and Qwen3-Embedding-0.6B embeds the cards, on the
-//! GPU through Metal on macOS or Vulkan elsewhere, or on the CPU when
+//! the user picked, writes the cards, places the files left out of every
+//! folder and drafts Rules from the user's words, and
+//! Qwen3-Embedding-0.6B embeds the cards, on the GPU through Metal on macOS or Vulkan elsewhere, or on the CPU when
 //! there's no usable GPU. File contents never leave the machine.
 
 use std::num::NonZeroU32;
@@ -18,6 +18,7 @@ use llama_cpp_2::{list_llama_ggml_backend_devices, LlamaBackendDeviceType};
 
 use crate::card::{self, parse_card, prompt_id, Card, Chat};
 use crate::cluster::Vector;
+use crate::draft;
 use crate::place::{self, Question};
 use crate::read::Content;
 use crate::{trace, Models};
@@ -88,9 +89,15 @@ impl LlamaModels {
             .map_err(|_| "llama.cpp can't use its chat template".to_string())
     }
 
-    /// The LLM's greedy reply to `prompt`, at most `max_new` tokens, and
-    /// whether the prompt was cut to fit the context.
-    fn generate(&mut self, prompt: &str, max_new: usize) -> Result<(String, bool), String> {
+    /// The LLM's greedy reply to `prompt`, at most `max_new` tokens and
+    /// held to the GBNF `grammar` if there is one, and whether the prompt
+    /// was cut to fit the context.
+    fn generate(
+        &mut self,
+        prompt: &str,
+        max_new: usize,
+        grammar: Option<&str>,
+    ) -> Result<(String, bool), String> {
         let backend = backend()?;
         let model = &self.llm()?.model;
         let vocab = model.vocab();
@@ -119,7 +126,13 @@ impl LlamaModels {
         }
         context.decode(&mut batch).map_err(|e| e.to_string())?;
         // Greedy, so the same prompt always gets the same reply.
-        let mut sampler = LlamaSampler::greedy();
+        let mut sampler = match grammar {
+            Some(grammar) => LlamaSampler::chain_simple([
+                LlamaSampler::grammar(model, grammar, "root").map_err(|e| e.to_string())?,
+                LlamaSampler::greedy(),
+            ]),
+            None => LlamaSampler::greedy(),
+        };
         let mut reply = Vec::new();
         for position in tokens.len()..tokens.len() + max_new {
             let token = sampler.sample(&context, batch.n_tokens() - 1);
@@ -152,7 +165,7 @@ impl Models for LlamaModels {
 
     fn card(&mut self, content: &Content) -> Result<Card, String> {
         let prompt = self.format(&card::chat(content))?;
-        let (reply, cut) = self.generate(&prompt, MAX_NEW_TOKENS)?;
+        let (reply, cut) = self.generate(&prompt, MAX_NEW_TOKENS, None)?;
         let card = parse_card(&reply);
         if trace::enabled() {
             trace::write(
@@ -166,7 +179,7 @@ impl Models for LlamaModels {
 
     fn place(&mut self, question: &Question) -> Result<Option<usize>, String> {
         let prompt = self.format(&place::chat(question))?;
-        let (reply, cut) = self.generate(&prompt, place::MAX_NEW_TOKENS)?;
+        let (reply, cut) = self.generate(&prompt, place::MAX_NEW_TOKENS, None)?;
         let chosen = place::parse(&reply, question);
         if trace::enabled() {
             let folder = chosen.map_or("none", |i| question.folders[i].name.as_str());
@@ -177,6 +190,23 @@ impl Models for LlamaModels {
             );
         }
         Ok(chosen)
+    }
+
+    fn draft(&mut self, words: &str) -> Result<String, String> {
+        let prompt = self.format(&draft::chat(words))?;
+        let (reply, cut) =
+            self.generate(&prompt, draft::MAX_NEW_TOKENS, Some(&draft::grammar()))?;
+        if trace::enabled() {
+            trace::write(
+                trace::DRAFTS,
+                "draft.txt",
+                &format!(
+                    "=== PROMPT ===\n{prompt}{}\n=== REPLY ===\n{reply}\n",
+                    cut_note(cut)
+                ),
+            );
+        }
+        Ok(reply)
     }
 
     fn embed(&mut self, texts: &[String]) -> Result<Vec<Vector>, String> {
@@ -252,7 +282,7 @@ pub fn check_describing_model(path: &Path) -> Result<(), String> {
         scanned: false,
     };
     let prompt = models.format(&card::chat(&sample))?;
-    let (reply, _) = models.generate(&prompt, MAX_NEW_TOKENS)?;
+    let (reply, _) = models.generate(&prompt, MAX_NEW_TOKENS, None)?;
     if parse_card(&reply).summary.is_empty() {
         let start: String = reply.trim().chars().take(80).collect();
         return Err(format!(
