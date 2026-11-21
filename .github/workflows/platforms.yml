@@ -156,7 +156,10 @@ jobs:
           $nsis = Get-ChildItem nsis\*.exe | Select-Object -First 1
           Start-Process $nsis.FullName -ArgumentList '/S' -Wait
           Test-Installed "$env:LOCALAPPDATA\files-cleaner"
-          $msi = Get-ChildItem msi\*.msi | Select-Object -First 1
+          # The MSI reuses the folder NSIS saved under HKCU\Software\<publisher>\files-cleaner,
+          # so without this it installs over the NSIS copy, not into Program Files.
+          Remove-Item -Path "HKCU:\Software\*\files-cleaner" -Recurse
+          $msi =Get-ChildItem msi\*.msi | Select-Object -First 1
           $msiLog = "$env:RUNNER_TEMP\msi.log"
           $install = Start-Process msiexec -ArgumentList '/i', "`"$($msi.FullName)`"", '/qn', '/l*v', "`"$msiLog`"" -Wait -PassThru
           if ($install.ExitCode -ne 0) {
