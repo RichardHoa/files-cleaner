@@ -17,7 +17,8 @@ import {
 
 export class ReviewState {
   /**
-   * The Suggested Folders' phase: "reading", "offer" (without the Grouping Models), "failed" or "ready", and
+   * The Suggested Folders' phase: "reading", "offer" (without the Grouping Models), "ask" (reading would take
+   * long, so it waits for the user to say so), "failed" or "ready", and
    * once they're ready, the grouping they came from.
    */
   phase = "reading";

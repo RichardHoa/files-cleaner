@@ -8,6 +8,7 @@ use std::fs::File;
 use std::hash::Hash;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{self, AtomicBool};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -74,28 +75,33 @@ pub struct DuplicateCopy {
     pub created: Option<i64>,
 }
 
-/// Every Duplicate Group in `scan`, as `find` finds them.
+/// Every Duplicate Group in `scan`, as `find` finds them; None once `cancel`
+/// is set.
 pub fn duplicate_groups(
     scan: &ScanResult,
     rule: DefaultCopyRule,
+    cancel: &AtomicBool,
     on_progress: impl FnMut(DuplicateProgress),
-) -> Vec<DuplicateGroup> {
+) -> Option<Vec<DuplicateGroup>> {
     let copy = |entry: &ScanEntry| DuplicateCopy {
         path: entry.path.clone(),
         relative_path: entry.relative_path.clone(),
         modified: entry.modified,
         created: entry.created,
     };
-    find(&scan.entries, rule, on_progress)
-        .into_iter()
-        .map(|found| DuplicateGroup {
-            size: found.kept.size,
-            copies: std::iter::once(found.kept)
-                .chain(found.copies)
-                .map(copy)
-                .collect(),
-        })
-        .collect()
+    let found = find(&scan.entries, rule, cancel, on_progress)?;
+    Some(
+        found
+            .into_iter()
+            .map(|found| DuplicateGroup {
+                size: found.kept.size,
+                copies: std::iter::once(found.kept)
+                    .chain(found.copies)
+                    .map(copy)
+                    .collect(),
+            })
+            .collect(),
+    )
 }
 
 /// Every Duplicate Group among `entries`, its copies ordered by `rule`,
@@ -103,11 +109,15 @@ pub fn duplicate_groups(
 /// out too. Calls `on_progress` at most every `PROGRESS_INTERVAL` in each
 /// `DuplicatePhase`: first while comparing the start and end of every file
 /// that shares its size, then while reading in full those that still match.
-pub fn find(
-    entries: &[ScanEntry],
+/// `cancel` is checked before each file is read; once it is set, the rest
+/// are passed over and None is returned.
+pub fn find<'a>(
+    entries: &'a [ScanEntry],
     rule: DefaultCopyRule,
+    cancel: &AtomicBool,
     on_progress: impl FnMut(DuplicateProgress),
-) -> Vec<Found<'_>> {
+) -> Option<Vec<Found<'a>>> {
+    let cancelled = || cancel.load(atomic::Ordering::Relaxed);
     let candidates: Vec<&ScanEntry> = entries
         .iter()
         .filter(|e| !e.is_package && e.size > 0)
@@ -127,11 +137,17 @@ pub fn find(
         .into_iter()
         .flat_map(|group| {
             split(group, |e| {
+                if cancelled() {
+                    return None;
+                }
                 progress.advance(&e.path, 1);
                 partial_hash(&e.path, e.size).ok()
             })
         })
         .collect();
+    if cancelled() {
+        return None;
+    }
 
     progress.start(
         DuplicatePhase::Checking,
@@ -140,6 +156,9 @@ pub fn find(
     let mut groups = Vec::new();
     for group in same_start_and_end {
         for mut same in split(group, |e| {
+            if cancelled() {
+                return None;
+            }
             full_hash(&e.path, |read| progress.advance(&e.path, read)).ok()
         }) {
             // Created dates are compared only if every copy has one, so the
@@ -150,8 +169,11 @@ pub fn find(
             groups.push(Found { kept, copies: same });
         }
     }
+    if cancelled() {
+        return None;
+    }
     groups.sort_by(|a, b| a.kept.path.cmp(&b.kept.path));
-    groups
+    Some(groups)
 }
 
 /// Reports progress through one phase at a time, at most every `PROGRESS_INTERVAL`.

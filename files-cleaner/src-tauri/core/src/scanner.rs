@@ -2,6 +2,7 @@ use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -64,12 +65,15 @@ const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 #[derive(Debug)]
 pub enum ScanError {
     Io(io::Error),
+    /// The user cancelled the scan; nothing is listed.
+    Cancelled,
 }
 
 impl fmt::Display for ScanError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             ScanError::Io(e) => write!(f, "Couldn't read the folder: {e}"),
+            ScanError::Cancelled => write!(f, "The scan was cancelled"),
         }
     }
 }
@@ -93,14 +97,16 @@ pub fn scan_root_warning(scan_root: &Path, config: &Config) -> Option<String> {
 /// skipping hidden entries, symlinks and Protected Paths inside it. Protected
 /// Paths covering `scan_root` itself are waived: see `scan_root_warning`.
 pub fn scan(scan_root: &Path, config: &Config) -> Result<ScanResult, ScanError> {
-    scan_with_progress(scan_root, config, |_| {})
+    scan_with_progress(scan_root, config, &AtomicBool::new(false), |_| {})
 }
 
 /// Like `scan`, calling `on_progress` every `PROGRESS_INTERVAL` or so while it
-/// runs, and once more at the end with the final counts.
+/// runs, and once more at the end with the final counts. `cancel` is checked
+/// between items; once it is set, the scan ends with `ScanError::Cancelled`.
 pub fn scan_with_progress(
     scan_root: &Path,
     config: &Config,
+    cancel: &AtomicBool,
     mut on_progress: impl FnMut(ScanProgress),
 ) -> Result<ScanResult, ScanError> {
     let root = canonical(scan_root)?;
@@ -136,6 +142,9 @@ pub fn scan_with_progress(
         };
         folders_walked += 1;
         for child in children {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(ScanError::Cancelled);
+            }
             if last_report.elapsed() >= PROGRESS_INTERVAL {
                 report(&result, folders_walked, &folder);
                 last_report = Instant::now();

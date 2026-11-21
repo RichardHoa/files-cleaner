@@ -34,12 +34,20 @@ export const resetSettings = () => invoke("reset_settings");
 /** Why the user should think twice before scanning `scanRoot` (it is, or is inside, a Protected Path), or null. */
 export const scanRootWarning = (scanRoot) => invoke("scan_root_warning", { scanRoot });
 
+// Names the latest scan, so a Cancel that reaches the app before that scan has started still stops it.
+// Starts from the time, so a reloaded page never reuses the ID of a scan cancelled before.
+let scanId = Date.now();
+
 /** Scans `scanRoot`, calling `onProgress({ found, folders, skipped, current })` as it goes. */
 export function scan(scanRoot, onProgress) {
+  scanId += 1;
   const channel = new Channel();
   channel.onmessage = onProgress;
-  return invoke("scan", { scanRoot, onProgress: channel });
+  return invoke("scan", { scanRoot, scanId, onProgress: channel });
 }
+
+/** Stops the latest scan, or the search for duplicates after it: that one rejects, and nothing is kept. */
+export const cancelScan = () => invoke("cancel_scan", { scanId });
 
 /**
  * The Duplicate Groups of the latest scan: `[{ size, copies }]`, each copy `{ path, relativePath, modified,
@@ -166,13 +174,20 @@ export const draftRule = (words) => invoke("draft_rule", { words });
  * then its `grouping` settings (without the models, only the Rules group files, and nothing is read), calling `onProgress({ finished, total, current, placing, loading })` as it goes:
  * `total` counts only the files not read before, `loading` is set until the first of them is read, and
  * `placing` once the files left out of every folder are being placed. Resolves to `{ grouping, device }`,
- * `device` where the models ran or null. Rejects once `cancelAnalysis` stops it.
+ * `device` where the models ran or null. Rejects once `cancelAnalysis` stops it. Unless `read`, nothing is
+ * read: the files read before are grouped and the rest left where they are, as if stopped at once.
  */
-export function analyseLooseFiles(onProgress) {
+export function analyseLooseFiles(onProgress, { read = true } = {}) {
   const channel = new Channel();
   channel.onmessage = onProgress;
-  return invoke("analyse_loose_files", { onProgress: channel });
+  return invoke("analyse_loose_files", { read, onProgress: channel });
 }
+
+/**
+ * How many loose files of the latest scan `analyseLooseFiles` would read, leaving out those read before; 0
+ * without the Grouping Models. Rejects once `cancelAnalysis` stops it.
+ */
+export const filesToRead = () => invoke("files_to_read");
 
 /** Stops the running analysis; the files read so far aren't read again next time. */
 export const cancelAnalysis = () => invoke("cancel_analysis");

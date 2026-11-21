@@ -14,7 +14,16 @@ test("the introduction offers the Grouping Models last, and leaves that card out
 });
 
 test("each introduction card's caption is a few words, the drawing saying the rest", () => {
-  for (const card of introductionCards(false, "1.8 GB")) {
+  // The download card says in full what is downloaded and why.
+  for (const card of introductionCards(false, "1.8 GB").filter((card) => card.drawing !== "download")) {
     assert.ok(card.text.split(/\s+/).length <= 6, card.text);
+  }
+});
+
+test("the download card says which models are downloaded, how big they are and what they're for", () => {
+  const card = introductionCards(false, "1.8 GB", "Mac").at(-1);
+  const details = card.details.join("\n");
+  for (const fact of ["Qwen2.5-1.5B", "Qwen3-Embedding-0.6B", "1.8 GB", "Hugging Face", "this Mac", "Settings"]) {
+    assert.ok(details.includes(fact), fact);
   }
 });

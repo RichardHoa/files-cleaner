@@ -9,6 +9,7 @@
 use std::env;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 use files_cleaner_core::{load_config, scan_root_warning, scan_with_progress};
@@ -29,8 +30,10 @@ fn main() -> ExitCode {
     for run in 1..=runs {
         let mut folders = 0;
         let start = Instant::now();
-        let result = match scan_with_progress(&root, &config, |progress| folders = progress.folders)
-        {
+        let never = AtomicBool::new(false);
+        let result = match scan_with_progress(&root, &config, &never, |progress| {
+            folders = progress.folders
+        }) {
             Ok(result) => result,
             Err(e) => {
                 eprintln!("{e}");

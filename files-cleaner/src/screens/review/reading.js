@@ -2,12 +2,14 @@
 // (without them, they're offered in the Suggested Folders' place, or the user's Rules alone sort the files), with a counter, an estimate and a wait
 // note, and how far it is on the sidebar. The Rules' folders need no reading, so they're shown at once, and the
 // other Suggested Folders are added once that's done. The reading can be stopped early to group only what was
-// read; Cancel stops it and goes Home.
+// read; Cancel stops it and goes Home. Reading that would take long waits for the user to say so: until then,
+// or instead, the files read before are grouped and the rest left where they are.
 import {
   analyseLooseFiles,
   answerNotifications,
   cancelAnalysis,
   describeError,
+  filesToRead,
   groupingModelsStatus,
   loadConfig,
   notifications,
@@ -19,16 +21,16 @@ import {
 } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";
 import { count, plural } from "../../shared/format.js";
-import { groupingModelsPanel } from "../../shared/grouping-models/models-panel.js";
+import { groupingModelsPanel, thisComputer } from "../../shared/grouping-models/models-panel.js";
 import { warningBlock } from "../../shared/outcomes.js";
 import { progressBar } from "../../shared/progress-bar.js";
 import { showStatus } from "../../shared/status.js";
-import { describeEstimate, readingEstimate, updatedAverage } from "./reading-estimate.js";
+import { describeEstimate, readingEstimate, readingNeedsAsking, readingTime, updatedAverage } from "./reading-estimate.js";
 
 /** What the reading screen says about the wait. */
 const WAIT_TEXT = "This takes a while. Feel free to switch apps.";
 /** What the reading estimate calls this computer. */
-const COMPUTER = /Mac/.test(navigator.userAgent) ? "Mac" : "computer";
+const COMPUTER = thisComputer();
 
 /**
  * The analysis's `{ finished, total, current, phase }` progress as "Reading 12 of 85 files…", or what comes
@@ -41,6 +43,12 @@ const describeAnalysisProgress = ({ finished, total, current, phase }) =>
     reading: () => `Reading ${count(finished)} of ${plural(total, "file")}…\n${current}`,
     placing: () => `Finding folders for files left out: ${count(finished)} of ${count(total)}…\n${current}`,
   })[phase]();
+
+/** "about 50 min" or "about 2 h" for `seconds`, a time over 10 minutes. */
+function aboutTime(seconds) {
+  const minutes = Math.round(seconds / 60);
+  return minutes < 90 ? `about ${minutes} min` : `about ${Math.round(minutes / 60)} h`;
+}
 
 /**
  * The line saying how long a file takes to read on this computer and how long until the folders are shown,
@@ -214,17 +222,69 @@ export function reading(ctx) {
     showFolders(added);
   }
 
+  /**
+   * Counts the files that need reading and reads them, once the user says so if that takes over 10 minutes
+   * on this computer.
+   */
+  async function readOrAsk() {
+    waitFor("reading", [el("p", { className: "status" }, "Checking which files were read before…")]);
+    analysing = true;
+    let toRead;
+    let average;
+    // Both while `analysing`, so a Cancel meanwhile is seen here rather than leaving the reading to start.
+    try {
+      toRead = await filesToRead();
+      // No history to go by: the first guess.
+      average = await readingPace().catch(() => null);
+    } catch (error) {
+      if (cancelled) return nav.home();
+      return waitFor("failed", [warningBlock(describeError(error))]);
+    } finally {
+      analysing = false;
+    }
+    if (cancelled) return nav.home();
+    if (!readingNeedsAsking({ average, toRead })) return analyse();
+    const read = el("button", { type: "button", className: "primary" }, "Read");
+    const skip = el("button", { type: "button" }, "Don't read");
+    read.addEventListener("click", () => analyse());
+    skip.addEventListener("click", () => groupWithoutReading());
+    const time = aboutTime(readingTime({ average, toRead }));
+    waitFor("ask", [el("p", {}, `Reading ${plural(toRead, "file")} takes ${time} on this ${COMPUTER}`), el("div", { className: "actions" }, read, skip)]);
+  }
+
+  /** Groups the files read before, the Rules' and the kinds never read, leaving the rest where they are, with a button to read them after all. */
+  async function groupWithoutReading() {
+    waitFor("reading", [el("p", { className: "status" }, "Sorting the files…")]);
+    analysing = true;
+    try {
+      const analysis = await analyseLooseFiles(() => {}, { read: false });
+      if (cancelled) return nav.home();
+      ready(analysis);
+      const read = el("button", { type: "button", className: "small" }, "Read files");
+      read.addEventListener("click", () => {
+        footer.replaceChildren();
+        analyse();
+      });
+      footer.replaceChildren(el("p", { className: "note" }, "Files not read. ", read));
+    } catch (error) {
+      if (cancelled) return nav.home();
+      waitFor("failed", [warningBlock(describeError(error))]);
+    } finally {
+      analysing = false;
+    }
+  }
+
   /** Reads the files if the Grouping Models are installed; without them, sorts by the Rules alone if there are any, or else offers the models. */
   async function start() {
     try {
       const models = await groupingModelsStatus();
-      if (models.state === "installed") analyse();
+      if (models.state === "installed") readOrAsk();
       else if ((await loadConfig()).config.rules.some((rule) => rule.enabled)) {
         // Nothing is read: the Rules' folders come back at once.
         ready(await analyseLooseFiles(() => {}));
         footer.replaceChildren(el("p", { className: "note" }, "Sorted by your Rules only."));
       } else {
-        waitFor("offer", [groupingModelsPanel(analyse)]);
+        waitFor("offer", [groupingModelsPanel(readOrAsk)]);
       }
     } catch (error) {
       waitFor("failed", [el("p", { className: "status error" }, describeError(error))]);

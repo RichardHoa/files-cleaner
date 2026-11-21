@@ -7,6 +7,8 @@
 const FIRST_GUESS = 4;
 /** How many files are read before this run's own pace is blended in. */
 const SETTLED = 5;
+/** Reading that takes longer than this, in seconds, waits for the user to say so. */
+const LONG_READ = 10 * 60;
 
 /**
  * `{ perFile, left }` in seconds, from the stored `average` (or null), the `total` files to read,
@@ -18,6 +20,16 @@ export function readingEstimate({ average, total, finished, elapsed }) {
   const stored = average ?? FIRST_GUESS;
   const perFile = finished < SETTLED ? stored : (stored * SETTLED + elapsed) / (SETTLED + finished);
   return { perFile, left: Math.max(0, perFile * total - elapsed) };
+}
+
+/** The seconds reading `toRead` files takes, from the stored `average` (or null). */
+export function readingTime({ average, toRead }) {
+  return (average ?? FIRST_GUESS) * toRead;
+}
+
+/** Whether reading `toRead` files takes long enough to ask the user first, from the stored `average` (or null). */
+export function readingNeedsAsking({ average, toRead }) {
+  return readingTime({ average, toRead }) > LONG_READ;
 }
 
 /**

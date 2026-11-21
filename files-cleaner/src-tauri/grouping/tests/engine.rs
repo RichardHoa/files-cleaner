@@ -8,8 +8,8 @@ use files_cleaner_core::{
     RuleMatch,
 };
 use files_cleaner_grouping::{
-    analyse, group_by_rules, rule_overlaps, Basis, Card, CardStore, Content, Input, Models,
-    Question, Settings, Vector,
+    analyse, files_to_read, group_by_rules, rule_overlaps, Basis, Card, CardStore, Content, Input,
+    Models, Question, Settings, Vector,
 };
 
 /// Cards and vectors fixed by what each file says.
@@ -326,6 +326,42 @@ fn a_cleared_store_reads_every_file_again() {
     assert_eq!(embedded(&mut models), 0);
     store.clear().unwrap();
     assert_eq!(embedded(&mut models), 2);
+}
+
+#[test]
+fn files_already_read_are_not_counted_as_files_to_read() {
+    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("test-tmp");
+    fs::create_dir_all(&base).unwrap();
+    let dir = tempfile::Builder::new()
+        .prefix("scan-")
+        .tempdir_in(&base)
+        .unwrap();
+    let root = dir.path();
+    fs::write(root.join("writing.txt"), "IELTS Writing | band descriptors").unwrap();
+    fs::write(
+        root.join("speaking.txt"),
+        "IELTS Speaking | band descriptors",
+    )
+    .unwrap();
+    fs::write(root.join("photo.jpg"), "never read").unwrap();
+    let store_dir = tempfile::tempdir().unwrap();
+    let config = load_config("{}", root).unwrap();
+    let scan = scan(root, &config).unwrap();
+    let store = CardStore::open(store_dir.path());
+    let input = Input {
+        scan: &scan,
+        settings: Settings::default(),
+        store: &store,
+        pdfium: None,
+        tessdata: None,
+        rules: &[],
+    };
+    let mut models = TopicModels { embedded: 0 };
+    let never = AtomicBool::new(false);
+
+    assert_eq!(files_to_read(&input, &models, &never).unwrap(), 2);
+    analyse(&input, &mut models, &never, &never, |_| {}).unwrap();
+    assert_eq!(files_to_read(&input, &models, &never).unwrap(), 0);
 }
 
 #[test]

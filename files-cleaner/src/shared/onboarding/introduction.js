@@ -3,6 +3,7 @@
 import { describeError, downloadGroupingModels, groupingModelsStatus } from "../api.js";
 import { el } from "../dom.js";
 import { formatSize } from "../format.js";
+import { thisComputer } from "../grouping-models/models-panel.js";
 import { showStatus } from "../status.js";
 import { drawing } from "./drawings.js";
 import { introductionCards } from "./onboarding.js";
@@ -22,15 +23,17 @@ export async function showIntroduction() {
     // The download card is left out: the Suggested Folders step still offers the models.
   }
   // A download already started counts as installed here: the Suggested Folders step shows its progress.
-  const cards = introductionCards(models?.state !== "notInstalled", models && formatSize(models.total));
+  const cards = introductionCards(models?.state !== "notInstalled", models && formatSize(models.total), thisComputer());
 
   let index = 0;
   const picture = el("div", { className: "intro-picture" });
   const text = el("p", { className: "intro-text" });
+  // Only the download card says more: what is downloaded and why.
+  const details = el("div", { className: "intro-details" });
   const dots = el("div", { className: "intro-dots", ariaHidden: "true" }, ...cards.map(() => el("span")));
   const error = el("p", { className: "status error" });
   const buttons = el("div", { className: "actions" });
-  const sheet = el("dialog", { className: "sheet intro", ariaLabel: "Introduction" }, picture, text, dots, error, buttons);
+  const sheet = el("dialog", { className: "sheet intro", ariaLabel: "Introduction" }, picture, text, details, dots, error, buttons);
 
   const close = () => {
     updateSeen((state) => ({ ...state, introductionSeen: true }));
@@ -65,6 +68,7 @@ export async function showIntroduction() {
     const card = cards[index];
     picture.replaceChildren(drawing(card.drawing));
     text.textContent = card.text;
+    details.replaceChildren(...(card.details ?? []).map((paragraph) => el("p", {}, paragraph)));
     dots.childNodes.forEach((dot, i) => dot.classList.toggle("current", i === index));
     showStatus(error, "");
     const back = index > 0 ? [button("Back", go(-1))] : [];

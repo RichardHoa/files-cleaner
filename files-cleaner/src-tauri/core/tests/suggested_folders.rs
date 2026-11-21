@@ -1,5 +1,7 @@
 mod common;
 
+use std::sync::atomic::AtomicBool;
+
 use common::{
     build_review_plan, build_suggested_folders_plan, empty_config, real_path, scan_root, write,
 };
@@ -65,7 +67,13 @@ fn one_plan_trashes_copies_moves_folder_files_and_offers_the_folder_both_empty()
     let config = empty_config(root);
     let scan = scan(root, &config).unwrap();
 
-    let groups = duplicate_groups(&scan, config.default_copy_rule, |_| {});
+    let groups = duplicate_groups(
+        &scan,
+        config.default_copy_rule,
+        &AtomicBool::new(false),
+        |_| {},
+    )
+    .unwrap();
     assert_eq!(groups.len(), 1);
     let found: Vec<_> = groups[0].copies.iter().map(|c| c.path.clone()).collect();
     assert_eq!(

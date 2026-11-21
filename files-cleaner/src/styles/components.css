@@ -221,6 +221,16 @@ button.small {
   font-size: var(--font-lg);
 }
 
+/* The download card's account of what is downloaded and why; empty on the other cards. */
+.intro-details {
+  text-align: start;
+  color: var(--muted);
+}
+
+.intro-details p {
+  margin: var(--space-2) 0 0;
+}
+
 .intro-dots {
   display: flex;
   justify-content: center;

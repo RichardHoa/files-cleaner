@@ -12,12 +12,13 @@ import {
 } from "../api.js";
 import { el } from "../dom.js";
 import { formatSize } from "../format.js";
+import { groupingModelsDetails } from "./details.js";
 import { warningBlock } from "../outcomes.js";
 import { progressBar } from "../progress-bar.js";
 import { showStatus } from "../status.js";
 
 /** "Mac", "PC" or "computer": what the user calls this machine, for "nothing leaves your Mac". */
-function thisComputer() {
+export function thisComputer() {
   if (pathSeparator === "\\") return "PC";
   return /Mac/.test(navigator.userAgent) ? "Mac" : "computer";
 }
@@ -118,10 +119,10 @@ export function groupingModelsControls({ state, downloaded, total, error: failed
       ),
     ];
   }
-  return [
-    say(groupingModelsPitch(total)),
-    el("div", { className: "actions" }, button("Download", downloadGroupingModels, true)),
-  ];
+  // The full story, which the introduction tells, is the pitch's tooltip.
+  const pitch = say(groupingModelsPitch(total));
+  if (!failed) pitch.title = groupingModelsDetails(formatSize(total), thisComputer()).join("\n\n");
+  return [pitch, el("div", { className: "actions" }, button("Download", downloadGroupingModels, true))];
 }
 
 /** A button running the models `command`, disabled meanwhile; the next status redraws it, and a failure says why in `error`. */

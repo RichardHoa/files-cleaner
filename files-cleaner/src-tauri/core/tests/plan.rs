@@ -2,6 +2,7 @@ mod common;
 
 use std::fs;
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, UNIX_EPOCH};
 
 use common::{
@@ -40,6 +41,24 @@ fn trashed(plan: &Plan) -> Vec<String> {
 }
 
 #[test]
+fn a_cancelled_search_finds_no_duplicate_groups() {
+    let dir = scan_root();
+    write(dir.path(), "a.pdf", "same contents");
+    write(dir.path(), "b.pdf", "same contents");
+    let config = empty_config(dir.path());
+    let scan = scan(dir.path(), &config).unwrap();
+
+    let groups = duplicate_groups(
+        &scan,
+        config.default_copy_rule,
+        &AtomicBool::new(true),
+        |_| {},
+    );
+
+    assert!(groups.is_none());
+}
+
+#[test]
 fn with_the_oldest_rule_the_oldest_copy_comes_first() {
     let dir = scan_root();
     let newer = write(dir.path(), "newer.pdf", "same contents");
@@ -49,7 +68,13 @@ fn with_the_oldest_rule_the_oldest_copy_comes_first() {
     let config = config(r#"{ "defaultCopyRule": "oldest" }"#, dir.path());
     let scan = scan(dir.path(), &config).unwrap();
 
-    let groups = duplicate_groups(&scan, config.default_copy_rule, |_| {});
+    let groups = duplicate_groups(
+        &scan,
+        config.default_copy_rule,
+        &AtomicBool::new(false),
+        |_| {},
+    )
+    .unwrap();
 
     assert_eq!(groups.len(), 1);
     let names: Vec<_> = groups[0]

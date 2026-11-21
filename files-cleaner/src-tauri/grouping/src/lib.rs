@@ -291,23 +291,46 @@ const FOLDER_SAMPLE: usize = 5;
 /// Texts embedded between checks for cancel.
 const EMBED_CHUNK: usize = 16;
 
-/// Reads the loose files of `input.scan`, has `models` card and embed them
-/// (or takes their stored cards), groups them by `input.settings`, and has
-/// `models` place the files left out (or takes the stored answers). Cards
-/// and answers are stored as they're made, so a cancelled analysis keeps them.
-/// `cancel` is checked between files. Once `stop` is set, reading ends
-/// between files and the files read so far are grouped: the files not read
-/// are left where they are, and only stored answers place files left out.
-/// `on_progress` is called at most every `PROGRESS_INTERVAL` in each
-/// `Phase`, before the models load, and once at the end of reading.
-pub fn analyse(
+/// How many of the files `analyse` would read with `models` have no stored
+/// card, so reading them takes time. Every file is hashed to find out;
+/// `cancel` is checked between files.
+pub fn files_to_read(
     input: &Input,
-    models: &mut dyn Models,
+    models: &dyn Models,
     cancel: &AtomicBool,
-    stop: &AtomicBool,
-    mut on_progress: impl FnMut(Progress),
-) -> Result<Analysis, Stopped> {
-    let scan = input.scan;
+) -> Result<usize, Stopped> {
+    let sorted = sort_out(input);
+    let (card_id, embedding_id) = (models.card_model_id(), models.embedding_model_id());
+    let ids = ModelIds {
+        card: &card_id,
+        embedding: &embedding_id,
+    };
+    let mut count = 0;
+    for entry in files_to_check(&sorted.to_read, &sorted.samples) {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(Stopped::Cancelled);
+        }
+        let stored = content_hash(&entry.path).and_then(|h| input.store.get(&ids, &h));
+        if stored.is_none() {
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
+/// The loose files of a scan sorted out before any is read: those the
+/// Rules take, those of a kind never read, those to read, and a sample of
+/// each subfolder's files to describe it.
+struct SortedOut<'a> {
+    ruled: Vec<SuggestedFolder>,
+    by_meaning: Vec<rules::ByMeaning>,
+    fixed: BTreeMap<&'static str, Vec<PathBuf>>,
+    to_read: Vec<&'a ScanEntry>,
+    samples: Vec<(&'a str, Vec<&'a ScanEntry>)>,
+}
+
+fn sort_out<'a>(input: &Input<'a>) -> SortedOut<'a> {
+    let scan: &'a ScanResult = input.scan;
     let (ruled, by_meaning) =
         rules::apply(scan, input.rules, chrono::Local::now().date_naive(), true);
     let matched: HashSet<&Path> = ruled
@@ -337,7 +360,7 @@ pub fn analyse(
         }
     }
     // The files nearest each subfolder's top, so a deep tree doesn't crowd it out.
-    let mut samples: Vec<(&str, Vec<&ScanEntry>)> = inside
+    let samples: Vec<(&str, Vec<&ScanEntry>)> = inside
         .into_iter()
         .map(|(folder, mut entries)| {
             entries.sort_by(|a, b| {
@@ -349,16 +372,57 @@ pub fn analyse(
         })
         .collect();
 
+    SortedOut {
+        ruled,
+        by_meaning,
+        fixed,
+        to_read,
+        samples,
+    }
+}
+
+/// The files to read, then each subfolder's sample, in the order `analyse` reads them.
+fn files_to_check<'a>(
+    to_read: &[&'a ScanEntry],
+    samples: &[(&'a str, Vec<&'a ScanEntry>)],
+) -> Vec<&'a ScanEntry> {
+    to_read
+        .iter()
+        .copied()
+        .chain(samples.iter().flat_map(|(_, s)| s.iter().copied()))
+        .collect()
+}
+
+/// Reads the loose files of `input.scan`, has `models` card and embed them
+/// (or takes their stored cards), groups them by `input.settings`, and has
+/// `models` place the files left out (or takes the stored answers). Cards
+/// and answers are stored as they're made, so a cancelled analysis keeps them.
+/// `cancel` is checked between files. Once `stop` is set, reading ends
+/// between files and the files read so far are grouped: the files not read
+/// are left where they are, and only stored answers place files left out.
+/// `on_progress` is called at most every `PROGRESS_INTERVAL` in each
+/// `Phase`, before the models load, and once at the end of reading.
+pub fn analyse(
+    input: &Input,
+    models: &mut dyn Models,
+    cancel: &AtomicBool,
+    stop: &AtomicBool,
+    mut on_progress: impl FnMut(Progress),
+) -> Result<Analysis, Stopped> {
+    let SortedOut {
+        ruled,
+        by_meaning,
+        mut fixed,
+        mut to_read,
+        mut samples,
+    } = sort_out(input);
+    let scan = input.scan;
     let (card_id, embedding_id) = (models.card_model_id(), models.embedding_model_id());
     let ids = ModelIds {
         card: &card_id,
         embedding: &embedding_id,
     };
-    let mut all: Vec<&ScanEntry> = to_read
-        .iter()
-        .copied()
-        .chain(samples.iter().flat_map(|(_, s)| s.iter().copied()))
-        .collect();
+    let mut all = files_to_check(&to_read, &samples);
     // The stored cards first, so the files that need reading are counted up front.
     let mut stored: Vec<(Option<blake3::Hash>, Option<Stored>)> = Vec::with_capacity(all.len());
     let mut last_report: Option<Instant> = None;

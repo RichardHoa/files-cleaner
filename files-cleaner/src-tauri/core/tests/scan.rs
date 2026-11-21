@@ -2,9 +2,10 @@ mod common;
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 
 use common::{empty_config, real_path, scan_root, symlink, write};
-use files_cleaner_core::{scan, scan_with_progress, ScanResult};
+use files_cleaner_core::{scan, scan_with_progress, ScanError, ScanResult};
 
 /// Paths of the scanned entries relative to the Scan Root, `/`-separated
 /// and sorted. Also checks each entry's `relative_path` names the same path.
@@ -112,8 +113,13 @@ fn reports_progress_ending_with_the_final_counts() {
     write(dir.path(), "node_modules/x/index.js", "js");
     let mut reports = Vec::new();
 
-    let result =
-        scan_with_progress(dir.path(), &empty_config(dir.path()), |p| reports.push(p)).unwrap();
+    let result = scan_with_progress(
+        dir.path(),
+        &empty_config(dir.path()),
+        &AtomicBool::new(false),
+        |p| reports.push(p),
+    )
+    .unwrap();
 
     let last = reports.last().expect("at least one progress report");
     assert_eq!(last.found, 3);
@@ -121,6 +127,22 @@ fn reports_progress_ending_with_the_final_counts() {
     assert_eq!(last.skipped, 1);
     assert_eq!(last.current, result.root);
     assert_eq!(result.entries.len(), 3);
+}
+
+#[test]
+fn a_cancelled_scan_lists_nothing() {
+    let dir = scan_root();
+    write(dir.path(), "a.txt", "a");
+    write(dir.path(), "sub/b.txt", "b");
+
+    let result = scan_with_progress(
+        dir.path(),
+        &empty_config(dir.path()),
+        &AtomicBool::new(true),
+        |_| {},
+    );
+
+    assert!(matches!(result, Err(ScanError::Cancelled)));
 }
 
 #[test]

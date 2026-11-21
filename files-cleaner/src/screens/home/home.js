@@ -1,5 +1,6 @@
 // Home: rescan a Recent Scan Root or pick a folder, open Rules or Settings, and see the latest Sessions.
 import {
+  cancelScan,
   describeError,
   listSessions,
   loadConfig,
@@ -25,6 +26,8 @@ export function render(root, nav) {
   const configError = el("p", { className: "status error" });
   const tiles = el("div", { className: "tiles" });
   const status = el("p", { className: "status" });
+  const cancelButton = el("button", { type: "button", className: "small" }, "Cancel");
+  const scanActions = el("p", { hidden: true }, cancelButton);
   const sessions = el("div");
   const seeAll = el("button", { type: "button", className: "link", hidden: true });
   seeAll.addEventListener("click", () => nav.history(1));
@@ -35,12 +38,29 @@ export function render(root, nav) {
     el("p", { className: "lead" }, "Pick a folder to clean"),
     tiles,
     status,
+    scanActions,
     el("div", { className: "section-head" }, el("h2", {}, "Sessions"), seeAll),
     sessions,
   );
 
   let scanning = false;
-  /** Scans `folder`, after the protected-path warning if it has one, then shows the review. */
+  // Set once Cancel was clicked during the scan: Home stays as it was, with nothing kept.
+  let cancelled = false;
+  const cancel = () => {
+    if (cancelled) return;
+    cancelled = true;
+    cancelButton.disabled = true;
+    showStatus(status, "Stopping…");
+    cancelScan().catch((error) => showWarning(status, describeError(error)));
+  };
+  cancelButton.addEventListener("click", cancel);
+  const cancelOnEscape = (event) => {
+    // Home was left while scanning: Escape belongs to the screen shown now.
+    if (!cancelButton.isConnected) return document.removeEventListener("keydown", cancelOnEscape);
+    if (event.key === "Escape") cancel();
+  };
+
+  /** Scans `folder`, after the protected-path warning if it has one, then shows the review; Cancel or Escape stops it. */
   const startScan = async (folder) => {
     if (scanning) return;
     scanning = true;
@@ -51,13 +71,24 @@ export function render(root, nav) {
       if (warning && !(await confirmScan(status, warning))) {
         status.replaceChildren();
       } else {
+        cancelled = false;
+        cancelButton.disabled = false;
+        scanActions.hidden = false;
+        document.addEventListener("keydown", cancelOnEscape);
         showStatus(status, `Scanning ${folder}…`);
-        await nav.steps.scanFolder(folder, (line) => showStatus(status, line));
-        return;
+        try {
+          await nav.steps.scanFolder(folder, (line) => cancelled || showStatus(status, line), () => cancelled);
+          if (!cancelled) return;
+          status.replaceChildren();
+        } finally {
+          scanActions.hidden = true;
+          document.removeEventListener("keydown", cancelOnEscape);
+        }
       }
     } catch (error) {
-      // The scan or the search for duplicates failed as a whole.
-      showWarning(status, describeError(error));
+      // The scan or the search for duplicates failed as a whole, or was cancelled.
+      if (cancelled) status.replaceChildren();
+      else showWarning(status, describeError(error));
     }
     scanning = false;
     tiles.classList.remove("busy");

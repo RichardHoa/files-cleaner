@@ -3,6 +3,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 
 use serde::{Deserialize, Serialize};
 
@@ -122,7 +123,15 @@ pub fn build_plan_with_progress(
 ) -> Plan {
     let root = &scan.root;
     let mut operations = Vec::new();
-    for group in duplicates::find(&scan.entries, config.default_copy_rule, on_progress) {
+    // Never cancelled, so every group is found.
+    let found = duplicates::find(
+        &scan.entries,
+        config.default_copy_rule,
+        &AtomicBool::new(false),
+        on_progress,
+    )
+    .unwrap_or_default();
+    for group in found {
         for copy in group.copies {
             operations.push(trash(
                 copy,

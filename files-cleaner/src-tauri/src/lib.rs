@@ -60,6 +60,20 @@ struct Scanned {
     plan: Option<Plan>,
 }
 
+/// The latest scan, by the ID the UI gave it, with the cancel flag it and
+/// the search for duplicates after it share.
+#[derive(Default)]
+struct Scanning(Mutex<ScanFlag>);
+
+#[derive(Default)]
+struct ScanFlag {
+    id: u64,
+    cancel: Arc<AtomicBool>,
+    /// The scan last cancelled: a Cancel can reach the app before its scan
+    /// has started, and that scan then starts cancelled.
+    cancelled: u64,
+}
+
 /// The cancel and stop flags of the analysis running now, if any.
 #[derive(Default)]
 struct Analysing {
@@ -212,9 +226,17 @@ fn scan_root_warning(app: AppHandle, scan_root: PathBuf) -> Result<Option<String
 async fn scan(
     app: AppHandle,
     latest: State<'_, Latest>,
+    scanning: State<'_, Scanning>,
     scan_root: PathBuf,
+    scan_id: u64,
     on_progress: Channel<ScanProgress>,
 ) -> Result<ScanResult, CommandError> {
+    let cancel = {
+        let mut flag = scanning.0.lock().unwrap();
+        flag.id = scan_id;
+        flag.cancel = Arc::new(AtomicBool::new(flag.cancelled == scan_id));
+        Arc::clone(&flag.cancel)
+    };
     let loaded = read_config(&app)?;
     // A list that can't be saved only loses the shortcut; the scan goes on.
     let recorded = recent_store(&app).and_then(|store| {
@@ -225,7 +247,7 @@ async fn scan(
     }
     let result = blocking(move || {
         // A closed window can't receive progress; the scan carries on.
-        core::scan_with_progress(&scan_root, &loaded.config, |progress| {
+        core::scan_with_progress(&scan_root, &loaded.config, &cancel, |progress| {
             let _ = on_progress.send(progress);
         })
     })
@@ -240,21 +262,26 @@ async fn scan(
 
 /// Finds the Duplicate Groups of the latest scan, off the UI thread (it
 /// reads files), sending progress to `on_progress` as it goes. They are
-/// kept, so reading leaves out the copies to trash.
+/// kept, so reading leaves out the copies to trash. `cancel_scan` stops it,
+/// like the scan before it.
 #[tauri::command]
 async fn find_duplicates(
     app: AppHandle,
     latest: State<'_, Latest>,
+    scanning: State<'_, Scanning>,
     on_progress: Channel<DuplicateProgress>,
 ) -> Result<Vec<DuplicateGroup>, CommandError> {
+    // The scan's flag: a Cancel that came in since the scan ended stops this too.
+    let cancel = Arc::clone(&scanning.0.lock().unwrap().cancel);
     let rule = read_config(&app)?.config.default_copy_rule;
     let scan = latest_scan(&latest)?;
     let searched = Arc::clone(&scan);
     let groups = blocking(move || {
         // A closed window can't receive progress; the search carries on.
-        Ok::<_, Infallible>(core::duplicate_groups(&searched, rule, |progress| {
+        core::duplicate_groups(&searched, rule, &cancel, |progress| {
             let _ = on_progress.send(progress);
-        }))
+        })
+        .ok_or("The search for duplicates was cancelled")
     })
     .await?;
     // Kept only if no newer scan came in while searching.
@@ -268,6 +295,17 @@ async fn find_duplicates(
         scanned.duplicates = Some(Arc::new(groups.clone()));
     }
     Ok(groups)
+}
+
+/// Stops the scan `scan_id`, or the search for duplicates after it, between
+/// files, even if it hasn't started yet; nothing it found is kept.
+#[tauri::command]
+fn cancel_scan(scanning: State<'_, Scanning>, scan_id: u64) {
+    let mut flag = scanning.0.lock().unwrap();
+    flag.cancelled = scan_id;
+    if flag.id == scan_id {
+        flag.cancel.store(true, Ordering::Relaxed);
+    }
 }
 
 /// Where the Journals live: a folder in the app data folder.
@@ -548,18 +586,20 @@ async fn rule_folders(
 /// Group but its first is left out, as it is trashed by default (ADR
 /// 0007). The models are loaded for this analysis only. `cancel_analysis`
 /// stops it; `stop_reading` ends its reading early and groups what was read.
+/// Unless `read`, nothing is read: it groups as if stopped before the first file.
 #[tauri::command]
 async fn analyse_loose_files(
     app: AppHandle,
     latest: State<'_, Latest>,
     analysing: State<'_, Analysing>,
     models: State<'_, Arc<GroupingModels>>,
+    read: bool,
     on_progress: Channel<grouping::Progress>,
 ) -> Result<AnalysisResult, CommandError> {
     // Set first, so a Cancel or Stop that comes in while starting stops this analysis.
     let cancel = Arc::new(AtomicBool::new(false));
     *analysing.cancel.lock().unwrap() = Arc::clone(&cancel);
-    let stop = Arc::new(AtomicBool::new(false));
+    let stop = Arc::new(AtomicBool::new(!read));
     *analysing.stop.lock().unwrap() = Arc::clone(&stop);
     let config = read_config(&app)?.config;
     let settings = config.grouping;
@@ -599,6 +639,43 @@ async fn analyse_loose_files(
         grouping: analysis.grouping,
         device: analysis.device,
     })
+}
+
+/// How many loose files of the latest scan the Grouping Models would read,
+/// leaving out those read before; 0 without the models. It hashes every
+/// file, off the UI thread; `cancel_analysis` stops it.
+#[tauri::command]
+async fn files_to_read(
+    app: AppHandle,
+    latest: State<'_, Latest>,
+    analysing: State<'_, Analysing>,
+    models: State<'_, Arc<GroupingModels>>,
+) -> Result<usize, CommandError> {
+    let cancel = Arc::new(AtomicBool::new(false));
+    *analysing.cancel.lock().unwrap() = Arc::clone(&cancel);
+    if !models.installed() {
+        return Ok(0);
+    }
+    let config = read_config(&app)?.config;
+    let (llm, embedding) = models
+        .files(config.describing_model.as_deref())
+        .map_err(CommandError::new)?;
+    let scan = without_copies(&latest)?;
+    let store = CardStore::open(app_data_path(&app, CARDS_FOLDER_NAME)?);
+    blocking(move || {
+        // Never loaded: only their names are needed, to find the stored cards.
+        let models = LlamaModels::new(&llm, &embedding);
+        let input = grouping::Input {
+            scan: &scan,
+            settings: config.grouping,
+            store: &store,
+            pdfium: None,
+            tessdata: None,
+            rules: &config.rules,
+        };
+        grouping::files_to_read(&input, &models, &cancel)
+    })
+    .await
 }
 
 /// Stops the running analysis between files; the cards made so far are kept.
@@ -858,6 +935,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .manage(Latest::default())
         .manage(Analysing::default())
+        .manage(Scanning::default())
         .setup(|app| {
             if std::env::args().any(|arg| arg == SELF_CHECK_FLAG) {
                 let code = match self_check(app.handle()) {
@@ -883,6 +961,7 @@ pub fn run() {
             scan_root_warning,
             scan,
             find_duplicates,
+            cancel_scan,
             run_plan,
             undo,
             redo_operations,
@@ -906,6 +985,7 @@ pub fn run() {
             draft_rule,
             rule_folders,
             analyse_loose_files,
+            files_to_read,
             cancel_analysis,
             stop_reading,
             clear_grouping_cards,

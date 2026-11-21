@@ -11,12 +11,12 @@ export function stepFlow(api, nav) {
   return {
     /**
      * Scans `scanRoot` and finds its Duplicate Groups, calling `onProgress(line)` with a status line as
-     * each goes, then shows the review screen.
+     * each goes, then shows the review screen, unless `cancelled()` by then.
      */
-    async scanFolder(scanRoot, onProgress) {
+    async scanFolder(scanRoot, onProgress, cancelled = () => false) {
       const result = await api.scan(scanRoot, (progress) => onProgress(describeScanProgress(scanRoot, progress)));
       const duplicates = await api.findDuplicates((progress) => onProgress(describeDuplicateProgress(progress)));
-      nav.review(result, duplicates);
+      if (!cancelled()) nav.review(result, duplicates);
     },
   };
 }
