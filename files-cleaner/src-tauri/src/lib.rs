@@ -496,16 +496,49 @@ fn rule_overlaps(rules: Vec<core::Rule>) -> Vec<Option<usize>> {
     grouping::rule_overlaps(&rules)
 }
 
+/// The Rule the user's `words` ask for, drafted for the editor: read at once
+/// if they're a common phrasing, or else, off the UI thread, by the
+/// describing model when the Grouping Models are in. `None` when it couldn't
+/// be understood. The model is loaded for this draft only.
+#[tauri::command]
+async fn draft_rule(
+    app: AppHandle,
+    models: State<'_, Arc<GroupingModels>>,
+    words: String,
+) -> Result<Option<core::Rule>, CommandError> {
+    if let Some(rule) = grouping::draft_rule(&words) {
+        return Ok(Some(rule));
+    }
+    if !models.installed() {
+        return Ok(None);
+    }
+    let config = read_config(&app)?.config;
+    let (llm, embedding) = models
+        .files(config.describing_model.as_deref())
+        .map_err(CommandError::new)?;
+    blocking(move || {
+        let mut models = LlamaModels::new(&llm, &embedding);
+        grouping::draft_rule_with_models(&words, &mut models)
+    })
+    .await
+}
+
 /// The Suggested Folders the config's Rules make of the loose files of the
 /// latest scan, by code alone and so at once: shown while the rest are read.
 /// Every copy of a Duplicate Group but its first is left out, as for
 /// `analyse_loose_files`.
 #[tauri::command]
-async fn rule_folders(app: AppHandle, latest: State<'_, Latest>) -> Result<Grouping, CommandError> {
+async fn rule_folders(
+    app: AppHandle,
+    latest: State<'_, Latest>,
+    models: State<'_, Arc<GroupingModels>>,
+) -> Result<Grouping, CommandError> {
     let rules = read_config(&app)?.config.rules;
     let scan = without_copies(&latest)?;
+    // A Rule by meaning's files wait for the models, if they're in.
+    let by_meaning = models.installed();
     // Finding the existing folders the Rules' folders match reads the disk.
-    blocking(move || Ok::<_, Infallible>(grouping::group_by_rules(&scan, &rules))).await
+    blocking(move || Ok::<_, Infallible>(grouping::group_by_rules(&scan, &rules, by_meaning))).await
 }
 
 /// Reads the loose files of the latest scan with the Grouping Models, off
@@ -535,7 +568,7 @@ async fn analyse_loose_files(
     // Without the Grouping Models, only the Rules sort files.
     if !models.installed() {
         return Ok(AnalysisResult {
-            grouping: grouping::group_by_rules(&scan, &rules),
+            grouping: grouping::group_by_rules(&scan, &rules, false),
             device: None,
         });
     }
@@ -870,6 +903,7 @@ pub fn run() {
             onboarding,
             save_onboarding,
             rule_overlaps,
+            draft_rule,
             rule_folders,
             analyse_loose_files,
             cancel_analysis,

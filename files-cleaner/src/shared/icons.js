@@ -11,6 +11,8 @@ const PATHS = {
   folder: FOLDER,
   copies: "M8 8h11v12H8z M5 16V4h11",
   plus: "M12 5v14 M5 12h14",
+  up: "M6 15l6-6 6 6",
+  down: "M6 9l6 6 6-6",
   alert: "M10.3 3.9 2.4 17.5a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z M12 9v4 M12 17h.01",
   close: "M6 6l12 12 M18 6L6 18",
   settings:

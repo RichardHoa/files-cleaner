@@ -128,6 +128,23 @@ pub enum GroupBy {
     },
     /// One folder per file kind, named as the grouping engine names kinds.
     Kind,
+    /// By what the files are about: each into the most like of `folders`,
+    /// or, when there are none, into folders proposed from the files
+    /// themselves. Needs the Grouping Models.
+    Meaning {
+        #[serde(default)]
+        folders: Vec<MeaningFolder>,
+    },
+}
+
+/// A folder the user named for a Rule that groups by meaning.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MeaningFolder {
+    pub name: String,
+    /// What belongs in it, in the user's words, compared along with its name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -142,7 +159,7 @@ pub enum DateGrouping {
 }
 
 /// Why `rule` can't be saved, if it can't.
-pub(crate) fn rule_problem(rule: &Rule) -> Option<String> {
+pub fn rule_problem(rule: &Rule) -> Option<String> {
     let m = &rule.matches;
     if let (Some(min), Some(max)) = (m.min_size, m.max_size) {
         if min > max {
@@ -178,6 +195,18 @@ pub(crate) fn rule_problem(rule: &Rule) -> Option<String> {
             .any(|part| safe_folder_name(part).is_none())
         {
             return Some(format!("\u{201c}{name}\u{201d} can't be a folder name"));
+        }
+    }
+    if let GroupBy::Meaning { folders } = &rule.group_by {
+        let mut seen = std::collections::HashSet::new();
+        for folder in folders {
+            let name = folder.name.trim();
+            if safe_folder_name(name).is_none() {
+                return Some(format!("\u{201c}{name}\u{201d} can't be a folder name"));
+            }
+            if !seen.insert(name.to_lowercase()) {
+                return Some(format!("\u{201c}{name}\u{201d} is named twice"));
+            }
         }
     }
     None

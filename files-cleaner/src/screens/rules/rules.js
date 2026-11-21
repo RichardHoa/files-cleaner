@@ -1,13 +1,30 @@
 // Rules: the user's Rules (ADR 0013), in order, each read back in one line. A Rule is picked by clicking its
-// row, then edited or deleted from the toolbar, by double-clicking or pressing Return, or by ⌘⌫; rows have no
-// buttons. The editor builds a Rule from ordinary controls, read back as it changes. Every change saves the
-// whole list at once; a Rule that can't be saved says why and isn't saved. Rules apply at the next scan. A Rule
-// that some file could share with an earlier one is marked, since that file goes by the earlier one (ADR 0014).
-import { changeSetting, describeError, loadConfig, ruleOverlaps } from "../../shared/api.js";
+// row, then edited, turned off or on, moved or deleted from the toolbar, by double-clicking or pressing Return,
+// Space, ⌥⌘↑/↓ or ⌘⌫; rows have no buttons. A file goes by the first enabled Rule it fits, so the order is
+// the priority. The editor builds a Rule from ordinary controls, read back as it changes; a line of plain words
+// above the list fills it with a draft, read by hand when they're a common phrasing or else by the describing
+// model when the Grouping Models are in, saved only when the user saves it. Grouping by meaning needs the
+// models too, so without them it isn't offered for a new Rule. Every
+// change saves the whole list at once; a Rule that can't be saved says why and isn't saved. Rules apply at the
+// next scan. A Rule that some file could share with an earlier one is marked, since that file goes by the
+// earlier one (ADR 0014).
+import { changeSetting, describeError, draftRule, groupingModelsStatus, loadConfig, ruleOverlaps } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";
 import { icon } from "../../shared/icons.js";
 import { showStatus } from "../../shared/status.js";
-import { describeGroupBy, describeMatch, describeRule, KINDS, MEGABYTE, NAME_HOW, newRule, parseExtensions, parseWords } from "./rule-text.js";
+import {
+  describeGroupBy,
+  describeMatch,
+  describeRule,
+  formatMeaningFolders,
+  KINDS,
+  MEGABYTE,
+  NAME_HOW,
+  newRule,
+  parseExtensions,
+  parseMeaningFolders,
+  parseWords,
+} from "./rule-text.js";
 
 /**
  * `rule` in one row's words: what files it picks, then an arrow and where they go, set apart so the eye finds
@@ -22,13 +39,14 @@ const ruleText = (rule) =>
     el("span", { className: "rules-goes" }, describeGroupBy(rule.groupBy)),
   );
 
-/** The group-by choices: one folder, a date grouping (`by`) or by kind. */
+/** The group-by choices: one folder, a date grouping (`by`), by kind or by meaning. */
 const GROUP_BY = [
   { value: "folder", label: "Into one folder" },
   { value: "buckets", label: "Today, Yesterday, Older…" },
   { value: "month", label: "By month" },
   { value: "year", label: "By year" },
   { value: "kind", label: "By kind" },
+  { value: "meaning", label: "By meaning" },
 ];
 
 /** `render(root, nav, from)`: `from` is "settings" when opened from Settings, so Back returns there. */
@@ -42,15 +60,19 @@ export function render(root, nav, from = "home") {
 
 async function load(body) {
   try {
-    const { config } = await loadConfig();
-    rulesList(body, config.rules);
+    // Without the models' status, the Rules are still shown, as if they weren't in.
+    const [{ config }, models] = await Promise.all([loadConfig(), groupingModelsStatus().catch(() => null)]);
+    rulesList(body, config.rules, models?.state === "installed");
   } catch (error) {
     body.replaceChildren(el("p", { className: "status error" }, `The Rules couldn't be read: ${describeError(error)}`));
   }
 }
 
-/** The list of `initial` Rules in `body`, with its toolbar, or the editor in its place while one is edited. */
-function rulesList(body, initial) {
+/**
+ * The list of `initial` Rules in `body`, with its toolbar, or the editor in its place while one is edited. `withModels`
+ * is whether the Grouping Models are in, to draft other phrasings and group by meaning.
+ */
+function rulesList(body, initial, withModels) {
   let rules = initial;
   let overlaps = [];
   let selected = null;
@@ -58,8 +80,18 @@ function rulesList(body, initial) {
   const list = el("ul", { className: "rules-list", role: "listbox", ariaLabel: "Rules" });
   const add = el("button", { type: "button", className: "primary" }, icon("plus"), "Add Rule");
   const edit = el("button", { type: "button" }, "Edit");
+  const toggle = el("button", { type: "button", title: "Space" }, "Turn Off");
+  const up = el("button", { type: "button", title: "Move Up ⌥⌘↑", ariaLabel: "Move Up" }, icon("up"));
+  const down = el("button", { type: "button", title: "Move Down ⌥⌘↓", ariaLabel: "Move Down" }, icon("down"));
   const remove = el("button", { type: "button", title: "⌘⌫" }, icon("trash"), "Delete");
-  const toolbar = el("div", { className: "rules-toolbar" }, add, edit, remove);
+  const toolbar = el("div", { className: "rules-toolbar" }, add, edit, toggle, up, down, remove);
+  const phraseInput = el("input", {
+    type: "text",
+    placeholder: withModels ? "Put my files in folders by project…" : "Sort by month, .pdf into Papers…",
+    ariaLabel: "Rule in plain words",
+  });
+  const draftButton = el("button", { type: "submit" }, "Draft");
+  const phrase = el("form", { className: "rules-phrase" }, phraseInput, draftButton);
   const empty = el("p", { className: "empty" }, "No Rules yet.");
 
   /** Saves `next` as the whole list; resolves to whether it was saved, saying why not in `where`. */
@@ -84,10 +116,11 @@ function rulesList(body, initial) {
     draw();
   };
 
-  const openEditor = (index) => {
-    const editing = index === null ? newRule() : rules[index];
+  /** Opens the editor on the Rule at `index`, or on `drafted` (a new Rule when null) to add one. */
+  const openEditor = (index, drafted = null) => {
+    const editing = index === null ? (drafted ?? newRule()) : rules[index];
     body.replaceChildren(
-      editor(editing, {
+      editor(editing, withModels, {
         save: (rule, where) =>
           save(index === null ? [...rules, rule] : rules.map((r, i) => (i === index ? rule : r)), where),
         done: (saved) => {
@@ -104,13 +137,57 @@ function rulesList(body, initial) {
     draw();
   };
 
+  const toggleSelected = async () => {
+    if (selected === null) return;
+    await save(rules.map((r, i) => (i === selected ? { ...r, enabled: !r.enabled } : r)));
+    draw();
+    list.children[selected]?.focus();
+  };
+
+  /** Moves the selected Rule `by` places, so it wins over (or yields to) the Rules it passes. */
+  const moveSelected = async (by) => {
+    if (selected === null) return;
+    const to = selected + by;
+    if (to < 0 || to >= rules.length) return;
+    const next = [...rules];
+    [next[selected], next[to]] = [next[to], next[selected]];
+    if (await save(next)) selected = to;
+    draw();
+    list.children[selected]?.focus();
+  };
+
   add.addEventListener("click", () => openEditor(null));
   edit.addEventListener("click", () => selected !== null && openEditor(selected));
+  toggle.addEventListener("click", toggleSelected);
+  up.addEventListener("click", () => moveSelected(-1));
+  down.addEventListener("click", () => moveSelected(1));
   remove.addEventListener("click", deleteSelected);
+  phrase.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!phraseInput.value.trim()) return;
+    draftButton.disabled = true;
+    // The model takes a few seconds to draft.
+    draftButton.textContent = "Drafting…";
+    try {
+      const drafted = await draftRule(phraseInput.value);
+      if (drafted) {
+        phraseInput.value = "";
+        openEditor(null, drafted);
+      } else showStatus(status, "Couldn't understand that; try “by month” or “.pdf into Papers”, or add the Rule.", true);
+    } catch (error) {
+      showStatus(status, describeError(error), true);
+    } finally {
+      draftButton.disabled = false;
+      draftButton.textContent = "Draft";
+    }
+  });
 
   function draw() {
     if (selected !== null && selected >= rules.length) selected = null;
-    edit.disabled = remove.disabled = selected === null;
+    edit.disabled = toggle.disabled = remove.disabled = selected === null;
+    up.disabled = selected === null || selected === 0;
+    down.disabled = selected === null || selected === rules.length - 1;
+    toggle.textContent = selected !== null && !rules[selected].enabled ? "Turn On" : "Turn Off";
     list.replaceChildren(
       ...rules.map((rule, index) => {
         // Its place in the order, since a file goes by the first Rule it fits.
@@ -145,7 +222,15 @@ function rulesList(body, initial) {
         row.addEventListener("dblclick", () => openEditor(index));
         row.addEventListener("keydown", (event) => {
           if (event.key === "Enter") openEditor(index);
-          else if ((event.key === "Backspace" && event.metaKey) || event.key === "Delete") {
+          else if (event.key === " ") {
+            event.preventDefault();
+            selected = index;
+            toggleSelected();
+          } else if (event.altKey && event.metaKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+            event.preventDefault();
+            selected = index;
+            moveSelected(event.key === "ArrowUp" ? -1 : 1);
+          } else if ((event.key === "Backspace" && event.metaKey) || event.key === "Delete") {
             selected = index;
             deleteSelected();
           }
@@ -158,7 +243,7 @@ function rulesList(body, initial) {
   }
 
   const show = () => {
-    body.replaceChildren(toolbar, list, empty, status);
+    body.replaceChildren(phrase, toolbar, list, empty, status);
     draw();
   };
   show();
@@ -176,10 +261,11 @@ const select = (options, value) =>
 const megabytes = (bytes) => (bytes == null ? "" : String(bytes / MEGABYTE));
 
 /**
- * The editor for `rule`, its match and group-by as controls and read back in one line below. `save(rule,
- * where)` resolves to whether it was saved, saying why not in `where`; `done(saved)` goes back to the list.
+ * The editor for `rule`, its match and group-by as controls and read back in one line below. Grouping by meaning
+ * is offered only `withModels`, or when `rule` already does. `save(rule, where)` resolves to whether it was saved,
+ * saying why not in `where`; `done(saved)` goes back to the list.
  */
-function editor(rule, { save, done }) {
+function editor(rule, withModels, { save, done }) {
   const match = rule.match ?? {};
   const date = match.date ?? null;
   const kind = select([["", "Any kind"], ...KINDS.map((k) => [k, k])], match.kind ?? "");
@@ -196,12 +282,19 @@ function editor(rule, { save, done }) {
 
   const groupBy = rule.groupBy;
   const groupChoice = select(
-    GROUP_BY.map(({ value, label }) => [value, label]),
+    GROUP_BY.filter(({ value }) => value !== "meaning" || withModels || groupBy.type === "meaning").map(({ value, label }) => [value, label]),
     groupBy.type === "date" ? groupBy.by : groupBy.type,
   );
   const folder = el("input", { type: "text", placeholder: "Screenshots/{month}", value: groupBy.name ?? "", title: "{year}, {month} and {day} are the file's date; / makes a folder inside" });
   const groupDate = select([["changed", "date changed"], ["added", "date added"]], groupBy.date ?? "changed");
   const folderField = field("Folder", folder);
+  const meaningFolders = el("textarea", {
+    rows: 3,
+    placeholder: "Thesis: chapters and drafts\nTaxes",
+    title: "One folder a line, what goes in it after a colon; none to propose folders from the files",
+    value: formatMeaningFolders(groupBy.folders ?? []),
+  });
+  const meaningField = field("Folders", meaningFolders);
   const groupDateField = field("Using", groupDate);
   const readBack = el("p", { className: "rules-readback" });
   const status = el("p", { className: "status" });
@@ -228,7 +321,9 @@ function editor(rule, { save, done }) {
         ? { type: "folder", name: folder.value.trim(), date: groupDate.value }
         : choice === "kind"
           ? { type: "kind" }
-          : { type: "date", date: groupDate.value, by: choice };
+          : choice === "meaning"
+            ? { type: "meaning", folders: parseMeaningFolders(meaningFolders.value) }
+            : { type: "date", date: groupDate.value, by: choice };
     return { enabled: rule.enabled ?? true, ...(rule.words ? { words: rule.words } : {}), match: m, groupBy: g };
   };
 
@@ -240,7 +335,8 @@ function editor(rule, { save, done }) {
     name.title = pattern ? "* is any characters, ? is one" : "Any of these, separated by commas";
     daysLabel.textContent = dateMode.value === "older" ? "days ago" : "days";
     folderField.hidden = groupChoice.value !== "folder";
-    groupDateField.hidden = groupChoice.value === "kind";
+    meaningField.hidden = groupChoice.value !== "meaning";
+    groupDateField.hidden = groupChoice.value === "kind" || groupChoice.value === "meaning";
     readBack.replaceChildren(ruleText(read()));
   };
 
@@ -275,7 +371,7 @@ function editor(rule, { save, done }) {
       field("Date", dateField, dateMode, days, daysLabel),
     ),
     el("h2", { className: "rules-group-title" }, "Go"),
-    el("div", { className: "rules-fields" }, field("Sort", groupChoice), folderField, groupDateField),
+    el("div", { className: "rules-fields" }, field("Sort", groupChoice), folderField, meaningField, groupDateField),
     readBack,
     el("div", { className: "actions" }, cancel, saveButton),
     status,

@@ -30,6 +30,23 @@ pub fn kind(ext: &str) -> &'static str {
     }
 }
 
+/// Every kind `kind` names.
+pub const KINDS: &[&str] = &[
+    "Documents",
+    "Spreadsheets",
+    "Presentations",
+    "Images",
+    "Videos",
+    "Audio",
+    "Installers",
+    "Archives",
+    "Books",
+    "Fonts",
+    "Code",
+    "Calendar and contacts",
+    "Other",
+];
+
 /// PDFs with no text to read: a kind of their own, found by opening them.
 pub const SCANNED_PDFS: &str = "Scanned PDFs";
 
@@ -54,4 +71,28 @@ pub fn matching_folder<'a>(kind: &str, folder_names: &'a [String]) -> Option<&'a
                 .any(|w| stem(w) == wanted)
         })
         .map(String::as_str)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::KINDS;
+
+    /// The quoted strings in `text`.
+    fn quoted(text: &str) -> Vec<&str> {
+        text.split('"').skip(1).step_by(2).collect()
+    }
+
+    #[test]
+    fn every_kind_is_listed_here_and_on_the_rules_screen() {
+        let source = include_str!("kinds.rs");
+        let code = &source[..source.find("#[cfg(test)]").unwrap()];
+        for line in code.lines().filter(|l| l.contains("=> \"")) {
+            let named = quoted(line.split("=> ").last().unwrap())[0];
+            assert!(KINDS.contains(&named), "{named} isn't in KINDS");
+        }
+
+        let screen = include_str!("../../../src/screens/rules/rule-text.js");
+        let list = screen.split("export const KINDS = [").nth(1).unwrap();
+        assert_eq!(quoted(&list[..list.find("];").unwrap()]), KINDS);
+    }
 }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { describeRule, parseExtensions, parseWords } from "../src/screens/rules/rule-text.js";
+import { describeRule, parseExtensions, parseMeaningFolders, parseWords } from "../src/screens/rules/rule-text.js";
 
 test("a Rule reads back in one line", () => {
   const rule = {
@@ -19,4 +19,10 @@ test("a Rule reads back in one line", () => {
 test("extensions are read from a typed list", () => {
   assert.deepEqual(parseExtensions("png, .JPG  gif"), ["png", "jpg", "gif"]);
   assert.deepEqual(parseWords(" baraka, trip to ,"), ["baraka", "trip to"]);
+});
+
+test("a Rule by meaning's folders are read one a line, with what goes in each", () => {
+  const folders = parseMeaningFolders("Thesis: chapters and drafts\n\n Taxes \n");
+  assert.deepEqual(folders, [{ name: "Thesis", description: "chapters and drafts" }, { name: "Taxes" }]);
+  assert.equal(describeRule({ match: {}, groupBy: { type: "meaning", folders } }), "Files → by meaning: “Thesis” or “Taxes”");
 });

@@ -12,10 +12,10 @@ Saving overlapping Rules is allowed. The Rules screen marks each Rule that some 
 
 - **Reject a Rule that overlaps an existing one, so every file fits at most one Rule:** rejected because names almost always can overlap ("contains invoice" and "is a PDF"), so a broad Rule would block nearly every narrower one until the user adds exceptions to it. It's too strict to be pleasant.
 - **Put a file in every folder whose Rule matches it:** rejected because a file can only be moved to one place.
-- **Let the user drag Rules into order, so they pick which one wins:** deferred. For now new Rules go to the end of the list, so older Rules win.
+- **Let the user drag Rules into order, so they pick which one wins:** deferred. New Rules go to the end of the list, so older Rules win until the user moves one up or down.
 
 ## Consequences
 
-- The order of the Rules list is their priority, and nothing yet lets the user change it except deleting a Rule and adding it again.
+- The order of the Rules list is their priority. New Rules go to the end, and the user moves a Rule up or down on the Rules screen to change which one wins.
 - The first-match behaviour lives in the grouping crate alone, and the overlap check sits next to it, so both follow the same matching.
 - Disabled Rules match nothing, so they neither cause nor get the warning, and switching one back on brings it back.

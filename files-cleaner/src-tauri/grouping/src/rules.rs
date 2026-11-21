@@ -1,9 +1,10 @@
 //! Rules applied to Loose Files by code alone (ADR 0013): dates, kinds,
 //! extensions, names and sizes are checked here, never by a model. Each
 //! file goes where the first enabled Rule that matches it says, even when
-//! a later one matches it too (ADR 0014).
+//! a later one matches it too (ADR 0014). A Rule by meaning only takes its
+//! files here; the models sort them.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -22,19 +23,40 @@ pub fn is_loose(entry: &ScanEntry) -> bool {
     entry.relative_path.len() == 1 && !entry.is_package && !entry.extension.is_empty()
 }
 
+/// The Loose Files a Rule groups by meaning, which the models sort.
+pub struct ByMeaning {
+    pub rule: Rule,
+    pub files: Vec<PathBuf>,
+}
+
 /// The Suggested Folders `rules` make of the Loose Files of `scan`, dates
-/// counted from `today`, in the order they were first filled. Folders of
-/// the same name are one, made by the first Rule that filled it.
-pub fn apply(scan: &ScanResult, rules: &[Rule], today: NaiveDate) -> Vec<SuggestedFolder> {
+/// counted from `today`, in the order they were first filled, and the files
+/// each Rule by meaning takes, in the Rules' order. Folders of the same name
+/// are one, made by the first Rule that filled it. Rules by meaning take
+/// only files that are read, and only `by_meaning`: otherwise their files
+/// go by the next Rule they fit.
+pub fn apply(
+    scan: &ScanResult,
+    rules: &[Rule],
+    today: NaiveDate,
+    by_meaning: bool,
+) -> (Vec<SuggestedFolder>, Vec<ByMeaning>) {
     let mut folders: Vec<SuggestedFolder> = Vec::new();
     let mut by_name: HashMap<String, usize> = HashMap::new();
+    let mut taken: BTreeMap<usize, Vec<PathBuf>> = BTreeMap::new();
     for entry in scan.entries.iter().filter(|e| is_loose(e)) {
-        let Some(rule) = rules
-            .iter()
-            .find(|rule| rule.enabled && matches(rule, entry, today))
-        else {
+        let read = kinds::fixed_kind(&entry.extension.to_lowercase()).is_none();
+        let Some((r, rule)) = rules.iter().enumerate().find(|(_, rule)| {
+            rule.enabled
+                && (!is_by_meaning(rule) || (by_meaning && read))
+                && matches(rule, entry, today)
+        }) else {
             continue;
         };
+        if is_by_meaning(rule) {
+            taken.entry(r).or_default().push(entry.path.clone());
+            continue;
+        }
         let name = folder_name(rule, entry, today);
         let i = *by_name.entry(name.to_lowercase()).or_insert_with(|| {
             folders.push(SuggestedFolder {
@@ -48,7 +70,18 @@ pub fn apply(scan: &ScanResult, rules: &[Rule], today: NaiveDate) -> Vec<Suggest
         });
         folders[i].files.push(entry.path.clone());
     }
-    folders
+    let taken = taken
+        .into_iter()
+        .map(|(r, files)| ByMeaning {
+            rule: rules[r].clone(),
+            files,
+        })
+        .collect();
+    (folders, taken)
+}
+
+fn is_by_meaning(rule: &Rule) -> bool {
+    matches!(rule.group_by, GroupBy::Meaning { .. })
 }
 
 /// For each of `rules`, the first enabled Rule before it that some file
@@ -224,6 +257,7 @@ fn folder_name(rule: &Rule, entry: &ScanEntry, today: NaiveDate) -> String {
             }
         }
         GroupBy::Kind => kinds::kind(&entry.extension.to_lowercase()).to_string(),
+        GroupBy::Meaning { .. } => unreachable!("a Rule by meaning names no folder by code"),
     }
 }
 
@@ -325,7 +359,7 @@ fn pattern_matches(pattern: &str, name: &str) -> bool {
 
 /// The folder at `name` below `root`, each `/`-separated part matched
 /// ignoring case, if it's there.
-fn existing_folder(root: &Path, name: &str) -> Option<PathBuf> {
+pub fn existing_folder(root: &Path, name: &str) -> Option<PathBuf> {
     name.split('/')
         .try_fold(root.to_path_buf(), |parent, part| {
             let wanted = part.trim().to_lowercase();

@@ -2,7 +2,8 @@
 // `{ enabled, words?, match, groupBy }` as saved in the config (see `Rule` in core): `match` is
 // `{ kind?, extensions?, name?, exceptNames?, minSize?, maxSize?, date? }`, `name` `{ how, words }`,
 // `date` `{ field, withinDays?, olderThanDays? }`,
-// and `groupBy` `{ type: "folder", name, date }`, `{ type: "date", date, by }` or `{ type: "kind" }`.
+// and `groupBy` `{ type: "folder", name, date }`, `{ type: "date", date, by }`, `{ type: "kind" }` or
+// `{ type: "meaning", folders }`, each folder `{ name, description? }`.
 import { formatSize } from "../../shared/format.js";
 
 /** The file kinds as the grouping engine names them (`kinds.rs`). */
@@ -51,6 +52,22 @@ export const parseWords = (text) =>
     .map((w) => w.trim())
     .filter(Boolean);
 
+/** "Thesis: chapters and drafts\nTaxes" as `[{ name: "Thesis", description: "chapters and drafts" }, { name: "Taxes" }]`: one folder a line, what goes in it after a colon, which no folder name can hold. */
+export const parseMeaningFolders = (text) =>
+  text
+    .split("\n")
+    .map((line) => {
+      const at = line.indexOf(":");
+      const name = (at < 0 ? line : line.slice(0, at)).trim();
+      const description = at < 0 ? "" : line.slice(at + 1).trim();
+      return description ? { name, description } : { name };
+    })
+    .filter((folder) => folder.name);
+
+/** `folders` as `parseMeaningFolders` reads them. */
+export const formatMeaningFolders = (folders) =>
+  folders.map((f) => (f.description ? `${f.name}: ${f.description}` : f.name)).join("\n");
+
 /** `words` as "“baraka” or “trip”". */
 const anyOf = (words, joiner) => words.map((w) => `“${w}”`).join(` ${joiner} `);
 
@@ -81,6 +98,10 @@ export function describeMatch(match) {
 export function describeGroupBy(groupBy) {
   if (groupBy.type === "folder") return `“${groupBy.name}”`;
   if (groupBy.type === "kind") return "by kind";
+  if (groupBy.type === "meaning") {
+    const names = (groupBy.folders ?? []).map((f) => f.name);
+    return names.length ? `by meaning: ${anyOf(names, "or")}` : "by meaning";
+  }
   const by = { buckets: "Today, Yesterday, Older…", month: "by month", year: "by year" }[groupBy.by];
   return groupBy.date === "added" ? `${by} added` : by;
 }
