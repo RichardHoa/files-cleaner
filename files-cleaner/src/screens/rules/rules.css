@@ -16,18 +16,6 @@
   gap: var(--space-1);
 }
 
-.rules-phrase {
-  display: flex;
-  gap: var(--space-2);
-  max-width: 760px;
-  margin-top: var(--space-3);
-}
-
-.rules-phrase input {
-  flex: 1;
-  min-width: 0;
-}
-
 .rules-list {
   max-width: 760px;
   margin: 0;

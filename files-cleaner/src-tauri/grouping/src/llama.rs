@@ -1,7 +1,6 @@
 //! The Grouping Models on llama.cpp: Qwen2.5-1.5B-Instruct, or the model
 //! the user picked, writes the cards, places the files left out of every
-//! folder and drafts Rules from the user's words, and
-//! Qwen3-Embedding-0.6B embeds the cards, on the GPU through Metal on macOS or Vulkan elsewhere, or on the CPU when
+//! folder, and Qwen3-Embedding-0.6B embeds the cards, on the GPU through Metal on macOS or Vulkan elsewhere, or on the CPU when
 //! there's no usable GPU. File contents never leave the machine.
 
 use std::num::NonZeroU32;
@@ -18,7 +17,6 @@ use llama_cpp_2::{list_llama_ggml_backend_devices, LlamaBackendDeviceType};
 
 use crate::card::{self, parse_card, prompt_id, Card, Chat};
 use crate::cluster::Vector;
-use crate::draft;
 use crate::place::{self, Question};
 use crate::read::Content;
 use crate::{trace, Models};
@@ -190,23 +188,6 @@ impl Models for LlamaModels {
             );
         }
         Ok(chosen)
-    }
-
-    fn draft(&mut self, words: &str) -> Result<String, String> {
-        let prompt = self.format(&draft::chat(words))?;
-        let (reply, cut) =
-            self.generate(&prompt, draft::MAX_NEW_TOKENS, Some(&draft::grammar()))?;
-        if trace::enabled() {
-            trace::write(
-                trace::DRAFTS,
-                "draft.txt",
-                &format!(
-                    "=== PROMPT ===\n{prompt}{}\n=== REPLY ===\n{reply}\n",
-                    cut_note(cut)
-                ),
-            );
-        }
-        Ok(reply)
     }
 
     fn embed(&mut self, texts: &[String]) -> Result<Vec<Vector>, String> {

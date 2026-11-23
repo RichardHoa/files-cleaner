@@ -1,9 +1,9 @@
 // The Review screen's selection: files, and copies, are selected as in Finder, by clicking, by dragging a
 // rectangle over them, or with the arrow keys (Shift adding to the selection), then trashed or put back (or
-// kept, for copies) from the toolbar always shown above the list, their right-click menu or ⌘⌫ (Ctrl+Delete
-// elsewhere), or moved with "Move to…" in their right-click menu. With nothing selected in a Suggested
-// Folder, the toolbar trashes the whole folder; elsewhere its buttons are disabled with nothing selected,
-// and never hide, so the list never moves. A file opens in its default app by double-clicking it or from
+// kept, for copies) from the toolbar always shown above the list of files (not copies, whose pane has none),
+// their right-click menu or ⌘⌫ (Ctrl+Delete elsewhere), or moved with "Move to…" in their right-click menu.
+// With nothing selected in a Suggested Folder, the toolbar trashes the whole folder; elsewhere its buttons
+// are disabled with nothing selected, and never hide, so the list never moves. A file opens in its default app by double-clicking it or from
 // its right-click menu.
 import { describeError, onAnotherDisk, openFile, pathSeparator, pickFolder } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";

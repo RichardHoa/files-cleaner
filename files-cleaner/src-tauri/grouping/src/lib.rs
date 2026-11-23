@@ -23,7 +23,6 @@
 
 mod card;
 mod cluster;
-mod draft;
 mod kinds;
 mod llama;
 mod marks;
@@ -45,7 +44,6 @@ use serde::Serialize;
 
 pub use card::Card;
 pub use cluster::Vector;
-pub use draft::{draft_rule, draft_rule_with_models};
 pub use llama::{check_describing_model, LlamaModels};
 pub use place::{Choice, Question};
 pub use read::{pdf_child_main, read, Content};
@@ -73,11 +71,6 @@ pub trait Models {
     fn place(&mut self, question: &Question) -> Result<Option<usize>, String>;
     /// One vector per text, in order.
     fn embed(&mut self, texts: &[String]) -> Result<Vec<Vector>, String>;
-    /// The describing model's reply when asked for the Rule the user's
-    /// `words` describe, held to `draft::grammar()` so it reads as one.
-    fn draft(&mut self, _words: &str) -> Result<String, String> {
-        Err("this model can't draft Rules".to_string())
-    }
     /// Where the models ran, such as "Metal GPU" or "CPU"; `None` if they
     /// haven't run.
     fn device(&self) -> Option<String>;

@@ -32,8 +32,6 @@ pub(crate) fn enabled() -> bool {
 pub(crate) const CARDS: &str = "cards";
 /// The placing prompt and reply for each file left out of every folder.
 pub(crate) const PLACING: &str = "placing";
-/// The prompt and reply of the latest Rule drafted from words.
-pub(crate) const DRAFTS: &str = "drafts";
 /// How similar the files and folders are, in `similarity.txt`.
 pub(crate) const SIMILARITY: &str = "similarity";
 /// Where the time goes, file by file, appended to `timings.log`.

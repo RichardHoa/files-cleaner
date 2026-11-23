@@ -14,7 +14,7 @@ pub struct Rule {
     /// An off Rule is kept but matches nothing.
     #[serde(default = "on")]
     pub enabled: bool,
-    /// The user's own words the Rule was drafted from, if any.
+    /// The words a Rule was once drafted from, kept so older configs still load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub words: Option<String>,
     /// What every matched file has; nothing set matches every Loose File.

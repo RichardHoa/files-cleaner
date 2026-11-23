@@ -30,8 +30,9 @@ pub fn kind(ext: &str) -> &'static str {
     }
 }
 
-/// Every kind `kind` names.
-pub const KINDS: &[&str] = &[
+/// Every kind `kind` names, which the Rules screen lists too.
+#[cfg(test)]
+const KINDS: &[&str] = &[
     "Documents",
     "Spreadsheets",
     "Presentations",

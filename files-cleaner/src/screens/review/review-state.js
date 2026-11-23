@@ -5,7 +5,6 @@ import {
   addFolder,
   initialChoices,
   initialDuplicates,
-  keepCopyIn,
   LeftFiles,
   mergeFolder,
   moveFile,
@@ -135,9 +134,17 @@ export class ReviewState {
     setCopy(duplicate, path, fate, this.choices, this.left);
   }
 
-  /** Keeps the copy in `folder` of each group not changed by hand; returns how many groups changed by hand it left alone. */
-  keepCopyIn(folder) {
-    return keepCopyIn(this.duplicates, folder, this.choices, this.left);
+  /**
+   * The copies at `paths` went to the System Trash on their own, before the rest of the Plan: drops them from
+   * their Duplicate Groups, then every group left with one copy or none, whose Kept Copy is now a file like any other.
+   */
+  copiesTrashed(paths) {
+    const gone = new Set(paths);
+    for (const duplicate of this.duplicates) {
+      for (const path of gone) duplicate.copies.delete(path);
+      duplicate.group = { ...duplicate.group, copies: duplicate.group.copies.filter((copy) => !gone.has(copy.path)) };
+    }
+    this.duplicates = this.duplicates.filter((duplicate) => duplicate.copies.size > 1);
   }
 
   /** Sets the file at `path` of the Suggested Folder `choice` to `file`: "inFolder" or "trash". */

@@ -6,9 +6,10 @@
 // are added once that's done.
 // Rows have no buttons: files, and copies, are selected as in Finder, by clicking, by dragging a rectangle
 // over them or with the arrow keys, then trashed or put back (or kept, for copies) from the toolbar always
-// shown above the list, their right-click menu or ⌘⌫. Files are moved by dragging them by the name onto a
-// folder in the sidebar, or with "Move to…" in their right-click menu, which also offers any other folder on
-// disk. A file opens in its default app by double-clicking it or from its right-click menu. The sidebar
+// shown above the list of files, their right-click menu or ⌘⌫. The Duplicates pane has no toolbar: its Keep
+// boxes choose, and its own button trashes the unticked copies at once, apart from the rest of the Plan.
+// Files are moved by dragging them by the name onto a folder in the sidebar, or with "Move to…" in their
+// right-click menu, which also offers any other folder on disk. A file opens in its default app by double-clicking it or from its right-click menu. The sidebar
 // counts the files in each item, and grays out a folder whose every file is trashed. It also adds a folder,
 // and merges one into another by dragging it there, or trashes (with ⌘⌫ too) or removes one, from its
 // right-click menu; the toolbar trashes the listed folder when nothing in it is selected. Nothing
@@ -50,8 +51,6 @@ export async function render(root, nav, result, duplicateGroups) {
     // Set while the sidebar is redrawn, when moving the name field can blur it.
     redrawing: false,
     duplicatesShown: FILES_SHOWN,
-    // What the last "Keep only copies in" left alone, said beside it until the next pick.
-    keepSkipped: "",
     // How far the reading is, shown in the sidebar while the files are read.
     readingProgress: "",
     // Whether the Session is running.
@@ -99,7 +98,7 @@ export async function render(root, nav, result, duplicateGroups) {
   root.append(ctx.sessions.node, el("div", { className: "folder-split" }, ctx.sidebar.node, ctx.pane), ctx.menu.node, ctx.reading.footer);
   drawPane();
 
-  /** The pane: the listed section of the Plan, under the toolbar when it lists files. A toolbar button or a file's row that had focus keeps it. */
+  /** The pane: the listed section of the Plan, under the toolbar when it lists files (not copies). A toolbar button or a file's row that had focus keeps it. */
   function drawPane() {
     const { toolbar } = ctx.selection;
     const focused = toolbar.contains(document.activeElement) ? document.activeElement : null;
@@ -110,7 +109,7 @@ export async function render(root, nav, result, duplicateGroups) {
       panel.draw();
     } else {
       const sections = {
-        duplicates: () => [toolbar, ...ctx.duplicates.panel()],
+        duplicates: ctx.duplicates.panel,
         folders: ctx.reading.waiting,
         left: () => [toolbar, ...ctx.folders.leftPanel()],
       };

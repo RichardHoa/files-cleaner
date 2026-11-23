@@ -1,27 +1,31 @@
 // The Review screen's Duplicates pane: the Duplicate Groups, each with the file's name once and its copies by
-// folder under a "Keep" column, and "Keep only copies in". Ticking a copy's Keep box keeps it, any number of them
-// per group; an unticked copy is marked Trash. The selection keeps or trashes any copies. They're trashed only
-// with the rest of the Plan.
-import { pathSeparator } from "../../shared/api.js";
+// folder under a "Keep" column. Ticking a copy's Keep box keeps it, any number of them per group; an unticked
+// copy is marked Trash. The selection keeps or trashes any copies, from its right-click menu or ⌘⌫. The copies marked Trash go with the rest of the Plan, or on their own, at once, from the button
+// above the groups: the Suggested Folders stay as they are, for the header's button.
+import { buildReviewPlan, pathSeparator, runPlan } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";
 import { drawMore } from "../../shared/plan/file-list.js";
-import { formatDate, formatSize, plural, trashPlace } from "../../shared/format.js";
-import { copyFolder, filedCopy, foldersHoldingCopies, trashedCopies, trashedCopiesIn } from "./review-choices.js";
+import { formatDate, formatSize, trashPlace } from "../../shared/format.js";
+import { icon } from "../../shared/icons.js";
+import { describeNothingDone, describeRunProgress, describeWarning } from "../../shared/outcomes.js";
+import { busy, showStatus, showWarning } from "../../shared/status.js";
+import { copyFolder, filedCopy, planDuplicates, trashedCopies, trashedCopiesIn } from "./review-choices.js";
 import { copiesText, fileName } from "./pane-helpers.js";
-
-/** The menu keeping the copies in one folder. */
-const PREFER = "Keep only copies in";
 
 /** The Duplicates pane of the Review screen with context `ctx`: `panel()` is what it lists. */
 export function duplicatesPane(ctx) {
   const { state, view, pane } = ctx;
+  const trashNow = el("button", { type: "button", className: "small" }, icon("trash"), el("span"));
+  // What trashing the copies now did, kept across redraws.
+  const status = el("p", { className: "status duplicates-trash-status" });
+  trashNow.addEventListener("click", trashCopiesNow);
 
   /**
-   * How many copies go to the System Trash, "Prefer copies in", then the Duplicate Groups, each with its
-   * name, how many copies and the space going to the System Trash, then every copy.
+   * The button trashing the copies marked Trash now, with how much space that frees, then the Duplicate
+   * Groups, each with its name, how many copies and the space going to the System Trash, then every copy.
    */
   function panel() {
-    if (state.duplicates.length === 0) return [el("h2", {}, "Duplicates"), el("p", { className: "note" }, "No duplicates")];
+    if (state.duplicates.length === 0) return [el("h2", {}, "Duplicates"), status, el("p", { className: "note" }, "No duplicates")];
     const trashed = trashedCopiesIn(state.duplicates);
     const trashedSize = state.duplicates.reduce((sum, duplicate) => sum + duplicate.group.size * trashedCopies(duplicate), 0);
     const shown = Math.min(state.duplicates.length, view.duplicatesShown);
@@ -32,8 +36,8 @@ export function duplicatesPane(ctx) {
     });
     return [
       el("h2", {}, "Duplicates"),
-      trashed ? el("p", { className: "muted" }, `${copiesText(trashed)} · ${formatSize(trashedSize)} → ${trashPlace(pathSeparator)}`) : "",
-      el("div", { className: "duplicates-bulk" }, preferCopiesIn(), view.keepSkipped),
+      trashNowRow(trashed, trashedSize),
+      status,
       el(
         "div",
         { className: "duplicate-columns muted", ariaHidden: "true" },
@@ -47,25 +51,45 @@ export function duplicatesPane(ctx) {
   }
 
   /**
-   * "Keep only copies in", a menu of the folders holding copies, starting on "Choose a folder…": keeps the copy
-   * in the one picked and trashes the others, in the groups not changed by hand.
+   * "Trash N copies now", trashing every unticked copy at once, on its own, beside what it frees, with a
+   * tooltip saying the Suggested Folders aren't touched.
    */
-  function preferCopiesIn() {
-    const holding = foldersHoldingCopies(state.duplicates);
-    const pick = el(
-      "select",
-      { ariaLabel: PREFER, title: "In every group with a copy there, keep that copy and trash the rest." },
-      el("option", { value: "", disabled: true, selected: true }, "Choose a folder…"),
-      ...holding.map((folder, i) => el("option", { value: i }, folder || ctx.rootName)),
+  function trashNowRow(trashed, trashedSize) {
+    const trash = trashPlace(pathSeparator);
+    trashNow.lastChild.textContent = trashed ? `Trash ${copiesText(trashed)} now` : "No copies to trash";
+    trashNow.disabled = trashed === 0 || view.running;
+    trashNow.title = `Moves every unticked copy to the ${trash} now. Suggested Folders aren't touched. Undo it from History.`;
+    return el(
+      "div",
+      { className: "duplicates-trash-now" },
+      trashNow,
+      trashed ? el("span", { className: "muted" }, `Unticked copies only · ${formatSize(trashedSize)} → ${trash}`) : "",
     );
-    pick.addEventListener("change", () => {
-      const skipped = state.keepCopyIn(holding[Number(pick.value)]);
-      view.keepSkipped = skipped ? el("span", { className: "muted", title: "You set these yourself." }, `${plural(skipped, "group")} unchanged`) : "";
-      ctx.redraw.pane();
-      // The menu is drawn again: the focus goes with it.
-      pane.querySelector(`select[aria-label="${PREFER}"]`)?.focus();
+  }
+
+  /**
+   * Trashes the copies marked Trash as a Session of their own, and stays on the Review screen, the copies
+   * trashed gone from it; any copy that couldn't go stays marked Trash, for the rest of the Plan, and is said why.
+   */
+  async function trashCopiesNow() {
+    if (view.running) return;
+    view.running = true;
+    ctx.redraw.header();
+    const summary = await busy(status, [trashNow], "Trashing copies…", async () => {
+      const plan = await buildReviewPlan(planDuplicates(state.duplicates), []);
+      const approved = plan.operations.filter((op) => op.reason.type === "duplicate" && (op.ticked || Boolean(op.error))).map((op) => op.id);
+      return runPlan(approved, (progress) => showStatus(status, describeRunProgress(progress)));
     });
-    return el("label", { className: "duplicates-prefer" }, el("span", {}, PREFER), pick);
+    view.running = false;
+    if (summary) {
+      state.copiesTrashed(summary.done.map((outcome) => outcome.source));
+      const warning = describeWarning(summary, { action: "run", done: "trashed", separator: pathSeparator });
+      // A Run that did nothing keeps no Session.
+      if (!summary.sessionId) showWarning(status, describeNothingDone(summary, "trashed", pathSeparator));
+      else if (warning) showWarning(status, warning);
+      else showStatus(status, `${copiesText(summary.done.length)} trashed · undo from History`);
+    }
+    ctx.redraw.pane();
   }
 
   /** A Duplicate Group: its name, with a warning if no copy is kept, then each copy. */

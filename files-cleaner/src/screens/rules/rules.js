@@ -1,14 +1,12 @@
 // Rules: the user's Rules (ADR 0013), in order, each read back in one line. A Rule is picked by clicking its
 // row, then edited, turned off or on, moved or deleted from the toolbar, by double-clicking or pressing Return,
 // Space, ⌥⌘↑/↓ or ⌘⌫; rows have no buttons. A file goes by the first enabled Rule it fits, so the order is
-// the priority. The editor builds a Rule from ordinary controls, read back as it changes; a line of plain words
-// above the list fills it with a draft, read by hand when they're a common phrasing or else by the describing
-// model when the Grouping Models are in, saved only when the user saves it. Grouping by meaning needs the
-// models too, so without them it isn't offered for a new Rule. Every
+// the priority. The editor builds a Rule from ordinary controls, read back as it changes. Grouping by meaning
+// needs the Grouping Models, so without them it isn't offered for a new Rule. Every
 // change saves the whole list at once; a Rule that can't be saved says why and isn't saved. Rules apply at the
 // next scan. A Rule that some file could share with an earlier one is marked, since that file goes by the
 // earlier one (ADR 0014).
-import { changeSetting, describeError, draftRule, groupingModelsStatus, loadConfig, ruleOverlaps } from "../../shared/api.js";
+import { changeSetting, describeError, groupingModelsStatus, loadConfig, ruleOverlaps } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";
 import { icon } from "../../shared/icons.js";
 import { showStatus } from "../../shared/status.js";
@@ -70,7 +68,7 @@ async function load(body) {
 
 /**
  * The list of `initial` Rules in `body`, with its toolbar, or the editor in its place while one is edited. `withModels`
- * is whether the Grouping Models are in, to draft other phrasings and group by meaning.
+ * is whether the Grouping Models are in, to group by meaning.
  */
 function rulesList(body, initial, withModels) {
   let rules = initial;
@@ -85,13 +83,6 @@ function rulesList(body, initial, withModels) {
   const down = el("button", { type: "button", title: "Move Down ⌥⌘↓", ariaLabel: "Move Down" }, icon("down"));
   const remove = el("button", { type: "button", title: "⌘⌫" }, icon("trash"), "Delete");
   const toolbar = el("div", { className: "rules-toolbar" }, add, edit, toggle, up, down, remove);
-  const phraseInput = el("input", {
-    type: "text",
-    placeholder: withModels ? "Put my files in folders by project…" : "Sort by month, .pdf into Papers…",
-    ariaLabel: "Rule in plain words",
-  });
-  const draftButton = el("button", { type: "submit" }, "Draft");
-  const phrase = el("form", { className: "rules-phrase" }, phraseInput, draftButton);
   const empty = el("p", { className: "empty" }, "No Rules yet.");
 
   /** Saves `next` as the whole list; resolves to whether it was saved, saying why not in `where`. */
@@ -116,9 +107,9 @@ function rulesList(body, initial, withModels) {
     draw();
   };
 
-  /** Opens the editor on the Rule at `index`, or on `drafted` (a new Rule when null) to add one. */
-  const openEditor = (index, drafted = null) => {
-    const editing = index === null ? (drafted ?? newRule()) : rules[index];
+  /** Opens the editor on the Rule at `index`, or on a new Rule when null to add one. */
+  const openEditor = (index) => {
+    const editing = index === null ? newRule() : rules[index];
     body.replaceChildren(
       editor(editing, withModels, {
         save: (rule, where) =>
@@ -162,25 +153,6 @@ function rulesList(body, initial, withModels) {
   up.addEventListener("click", () => moveSelected(-1));
   down.addEventListener("click", () => moveSelected(1));
   remove.addEventListener("click", deleteSelected);
-  phrase.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    if (!phraseInput.value.trim()) return;
-    draftButton.disabled = true;
-    // The model takes a few seconds to draft.
-    draftButton.textContent = "Drafting…";
-    try {
-      const drafted = await draftRule(phraseInput.value);
-      if (drafted) {
-        phraseInput.value = "";
-        openEditor(null, drafted);
-      } else showStatus(status, "Couldn't understand that; try “by month” or “.pdf into Papers”, or add the Rule.", true);
-    } catch (error) {
-      showStatus(status, describeError(error), true);
-    } finally {
-      draftButton.disabled = false;
-      draftButton.textContent = "Draft";
-    }
-  });
 
   function draw() {
     if (selected !== null && selected >= rules.length) selected = null;
@@ -243,7 +215,7 @@ function rulesList(body, initial, withModels) {
   }
 
   const show = () => {
-    body.replaceChildren(phrase, toolbar, list, empty, status);
+    body.replaceChildren(toolbar, list, empty, status);
     draw();
   };
   show();

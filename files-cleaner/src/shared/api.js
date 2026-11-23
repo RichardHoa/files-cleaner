@@ -164,12 +164,6 @@ export const ruleFolders = () => invoke("rule_folders");
 export const ruleOverlaps = (rules) => invoke("rule_overlaps", { rules });
 
 /**
- * The Rule the user's plain `words` ask for, drafted for the editor and not saved, or null when it couldn't be understood.
- * A common phrasing is read at once; anything else is drafted by the describing model when the Grouping Models are in.
- */
-export const draftRule = (words) => invoke("draft_rule", { words });
-
-/**
  * Reads the loose files of the latest scan with the Grouping Models and groups them by the config's Rules,
  * then its `grouping` settings (without the models, only the Rules group files, and nothing is read), calling `onProgress({ finished, total, current, placing, loading })` as it goes:
  * `total` counts only the files not read before, `loading` is set until the first of them is read, and

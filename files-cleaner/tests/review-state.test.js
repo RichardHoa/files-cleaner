@@ -79,3 +79,15 @@ test("the folders read later join the Rules' folders shown first, keeping what t
   ]);
   assert.deepEqual(added, [state.choices[1]]);
 });
+
+test("copies trashed on their own leave the Plan, and a group left with one copy is a file like any other", () => {
+  const paths = ["/d/a.pdf", "/d/x/a.pdf"];
+  const group = { size: 1, copies: paths.map((path) => ({ path, modified: 0 })) };
+  const state = new ReviewState({ root: "/d", entries: paths.map((path) => ({ path, size: 1, modified: 0 })) }, [group]);
+  state.ready({ folders: [{ name: "Docs", files: ["/d/a.pdf"], existing: null, basis: "topic" }], ungrouped: [], summaries: {}, kinds: {} });
+
+  state.copiesTrashed(["/d/x/a.pdf"]);
+
+  assert.deepEqual(state.duplicates, []);
+  assert.deepEqual(planChoices(state.choices, state.left), [{ name: "Docs", choice: { type: "createHere" }, files: [["/d/a.pdf", "inFolder"]] }]);
+});

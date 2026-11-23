@@ -338,31 +338,27 @@
   margin-bottom: var(--space-2);
 }
 
-.duplicates-bulk {
+/* The button trashing the unticked copies now, on its own, and what it frees beside it. */
+.duplicates-trash-now {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-2);
   margin-top: var(--space-2);
 }
 
-/* A select is as wide as its longest option: a long folder path must shrink it to the pane, not widen the pane. */
-.duplicates-prefer {
-  display: flex;
+.duplicates-trash-now button {
+  display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
-  max-width: 100%;
+  gap: var(--space-1);
 }
 
-.duplicates-prefer > span {
-  flex-shrink: 0;
+.duplicates-trash-status {
+  margin: var(--space-2) 0 0;
 }
 
-.duplicates-bulk select {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 100%;
-  text-overflow: ellipsis;
+.duplicates-trash-status:empty {
+  display: none;
 }
 
 /*

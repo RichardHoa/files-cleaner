@@ -25,8 +25,7 @@ export class LeftFiles extends Set {
  * The starting choice for each Duplicate Group of `groups` (`{ size, copies }`, as `findDuplicates` gives
  * them): its first copy is kept and every other copy is trashed. Each copy is "keep" or "trash", by path.
  * `placed` is the copy holding the group's place among the Suggested Folders and the files left where they
- * are, `emptyPlace` where that was while no copy is kept, and `changedByHand` whether the user set one of
- * its copies themselves, which leaves it out of `keepCopyIn`.
+ * are, and `emptyPlace` where that was while no copy is kept.
  */
 export function initialDuplicates(groups) {
   return groups.map((group) => ({
@@ -34,16 +33,11 @@ export function initialDuplicates(groups) {
     copies: new Map(group.copies.map((copy, i) => [copy.path, i === 0 ? "keep" : "trash"])),
     placed: group.copies[0].path,
     emptyPlace: null,
-    changedByHand: false,
   }));
 }
 
 /** The folder holding `copy`, from the Scan Root: "" for the Scan Root itself. */
 export const copyFolder = (copy) => copy.relativePath.slice(0, -1).join("/");
-
-/** The folders directly holding the copies of `duplicates`, each once, A–Z. */
-export const foldersHoldingCopies = (duplicates) =>
-  [...new Set(duplicates.flatMap((duplicate) => duplicate.group.copies.map(copyFolder)))].sort((a, b) => a.localeCompare(b));
 
 /** How many copies of the Duplicate Group `duplicate` are trashed. */
 export const trashedCopies = (duplicate) => [...duplicate.copies.values()].filter((fate) => fate === "trash").length;
@@ -111,32 +105,10 @@ function placeCopies(duplicate, choices, left) {
   for (const path of otherKeptCopies([duplicate])) left.add(path);
 }
 
-/** The user sets the copy at `path` of the Duplicate Group `duplicate` to `fate`, "keep" or "trash": marks the group changed by hand and puts its copies where that leaves them. */
+/** The user sets the copy at `path` of the Duplicate Group `duplicate` to `fate`, "keep" or "trash", and puts its copies where that leaves them. */
 export function setCopy(duplicate, path, fate, choices, left) {
-  duplicate.changedByHand = true;
   duplicate.copies.set(path, fate);
   placeCopies(duplicate, choices, left);
-}
-
-/**
- * Keeps the copy directly in `folder` (the first, if it holds more) of each group of `duplicates` with one
- * there, and trashes the group's other copies, then puts them where that leaves them. Groups changed by hand
- * are left as they are: returns how many of those it would have changed.
- */
-export function keepCopyIn(duplicates, folder, choices, left) {
-  let skipped = 0;
-  for (const duplicate of duplicates) {
-    const kept = duplicate.group.copies.find((copy) => copyFolder(copy) === folder);
-    if (!kept) continue;
-    const fates = duplicate.group.copies.map((copy) => [copy.path, copy === kept ? "keep" : "trash"]);
-    if (duplicate.changedByHand) {
-      if (fates.some(([path, fate]) => duplicate.copies.get(path) !== fate)) skipped += 1;
-      continue;
-    }
-    for (const [path, fate] of fates) duplicate.copies.set(path, fate);
-    placeCopies(duplicate, choices, left);
-  }
-  return skipped;
 }
 
 /** Puts the copies of `duplicates` where the choices made while the files were read leave them; the copy read, the first, holds each group's place until then. */
