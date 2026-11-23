@@ -99,7 +99,7 @@ A folder the Plan gathers Loose Files into: made by one of the user's Rules, pro
 _Avoid_: cluster, group, category, proposed folder
 
 **Rule**:
-A saved instruction for how Loose Files are sorted into Suggested Folders at every scan, written by the user in plain words, drafted into a structured form (common phrasings by the app itself, anything else by the Grouping Models) and corrected by the user before it's saved. Some Rules group by fields (date, kind, name); others group by meaning ("by project"). A Rule only shapes the Plan: its Operations are reviewed and approved like any other. Rules may overlap: a file that two Rules match goes where the first one in the list says, and the Rules screen marks the later one.
+A saved instruction for how Loose Files are sorted into Suggested Folders at every scan, built by the user on the Rules screen from what files it matches and where they go. Some Rules group by fields (date, kind, name); others group by meaning ("by project"). A Rule only shapes the Plan: its Operations are reviewed and approved like any other. Rules may overlap: a file that two Rules match goes where the first one in the list says, and the Rules screen marks the later one.
 _Avoid_: automation, filter, preset, instruction
 
 **Grouping Models**:
