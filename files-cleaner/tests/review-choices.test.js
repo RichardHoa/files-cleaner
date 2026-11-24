@@ -6,13 +6,13 @@ import {
   folderTally,
   initialChoices,
   initialDuplicates,
+  leaveUnsorted,
   LeftFiles,
   mergeFolder,
   moveFile,
   moveToOtherFolder,
   planChoices,
   planDuplicates,
-  removeFolder,
   setCopy,
   totals,
 } from "../src/screens/review/review-choices.js";
@@ -60,10 +60,10 @@ test("merging moves every file into the target, which keeps its name, and drops 
   ]);
 });
 
-test("removing a folder leaves its files where they are, and a group with no copy kept comes back there too", () => {
+test("leaving a folder's files unsorted drops the emptied folder, and a group with no copy kept comes back there too", () => {
   const { duplicate, choices, left } = threeCopies();
   setCopy(duplicate, "/d/a.pdf", "trash", choices, left);
-  removeFolder(choices, left, [duplicate], choices[0]);
+  leaveUnsorted(choices, left, [duplicate], choices[0]);
   assert.deepEqual(choices, []);
   assert.deepEqual([...left], ["/d/b.pdf"]);
 
@@ -91,7 +91,7 @@ test("files moved to another folder end up there in the Plan, and one already in
   assert.deepEqual([...left], ["/other/c.pdf"]);
 });
 
-test("a file left where it is can be trashed, until it leaves", () => {
+test("a file left where it is can be trashed, and stays there with its mark when moved", () => {
   const choices = initialChoices([{ name: "Labs", files: [], existing: null }]);
   const left = new LeftFiles(["/d/a.pdf", "/d/b.pdf"]);
   left.trashed.add("/d/a.pdf");
@@ -100,8 +100,14 @@ test("a file left where it is can be trashed, until it leaves", () => {
   moveFile(choices, left, "/d/b.pdf", choices[0]);
 
   assert.deepEqual(planChoices(choices, left), [
-    { name: "Labs", choice: { type: "createHere" }, files: [["/d/b.pdf", "inFolder"]] },
-    { name: "Left where they are", choice: { type: "trashAll" }, files: [["/d/a.pdf", "inFolder"]] },
+    {
+      name: "Left where they are",
+      choice: { type: "trashAll" },
+      files: [
+        ["/d/a.pdf", "inFolder"],
+        ["/d/b.pdf", "inFolder"],
+      ],
+    },
   ]);
 });
 

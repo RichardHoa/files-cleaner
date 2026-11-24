@@ -10,6 +10,8 @@ const PATHS = {
   createFolder: `${FOLDER} M12 10v6 M9 13h6`,
   folder: FOLDER,
   copies: "M8 8h11v12H8z M5 16V4h11",
+  files: "M8 3h7l4 4v11H8z M15 3v4h4 M5 7v14h11",
+  more: "M6 12a1 1 0 1 1-2 0a1 1 0 1 1 2 0 M13 12a1 1 0 1 1-2 0a1 1 0 1 1 2 0 M20 12a1 1 0 1 1-2 0a1 1 0 1 1 2 0",
   plus: "M12 5v14 M5 12h14",
   up: "M6 15l6-6 6 6",
   down: "M6 9l6 6 6-6",

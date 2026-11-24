@@ -31,6 +31,30 @@ test("taking a file out of a folder leaves it where it is in the Plan", () => {
   ]);
 });
 
+test("moving files skips one marked Trash, which keeps its mark where it is", () => {
+  const state = twoFolders();
+  const [ielts, labs] = state.choices;
+  state.setFile(ielts, "/d/a.pdf", "trash");
+
+  state.move(["/d/a.pdf", "/d/b.pdf"], labs);
+
+  assert.deepEqual([...ielts.files], [["/d/a.pdf", "trash"]]);
+  assert.deepEqual([...labs.files.keys()], ["/d/c.pdf", "/d/b.pdf"]);
+});
+
+test("leaving a folder's files unsorted takes only those not marked Trash, and the folder stays with the rest", () => {
+  const state = twoFolders();
+  const [ielts, labs] = state.choices;
+  state.setFile(ielts, "/d/a.pdf", "trash");
+
+  state.leaveUnsorted(ielts);
+  state.leaveUnsorted(labs);
+
+  assert.deepEqual([...state.left], ["/d/b.pdf", "/d/c.pdf"]);
+  assert.deepEqual(state.choices, [ielts]);
+  assert.deepEqual(folderTally(ielts), { going: 0, trashed: true });
+});
+
 test("trashing every file of a folder grays it out in the sidebar and plans each file as a Trash, with no folder made", () => {
   const state = twoFolders();
   const [ielts] = state.choices;

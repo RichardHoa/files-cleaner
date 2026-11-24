@@ -17,6 +17,9 @@ export const displayName = (choice) => choice.name.trim() || "No name";
 /** What the screen calls the files left where they are. */
 export const UNSORTED = "Unsorted";
 
+/** What moving files to Unsorted is called: they stay where they are, and no folder is made. */
+export const LEAVE_UNSORTED = "Leave unsorted";
+
 /** The small trash icon marking a trashed file's row, said as "Trashed". */
 export const trashedMark = () => el("span", { className: "folder-file-trashed", role: "img", ariaLabel: "Trashed", title: "Trashed" }, icon("trash"));
 

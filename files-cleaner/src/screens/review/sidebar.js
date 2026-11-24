@@ -1,8 +1,8 @@
 // The Review screen's sidebar, read like Finder's: the Duplicates, then a Suggested Folders section with each
 // folder and New folder, then the files left where they are, as Unsorted, each with how many files are in it.
 // Suggested Folders are selected as in Finder, by clicking, ⌘-clicking and ⇧-clicking; one selected is listed.
-// It adds a folder, renames one, or merges one into another, trashes the selected folders' files now or removes
-// one, from its right-click menu, and the Edit menu renames, merges and trashes now too (Trash Now, ⇧⌘⌫). Nothing
+// It adds a folder, renames one, or merges one into another, trashes the selected folders' files now or leaves
+// those not marked Trash unsorted, from its right-click menu (the listed folder's ⋯ menu has the same items), and the Edit menu renames, merges and trashes now too (Trash Now, ⇧⌘⌫). Nothing
 // in it is dragged. While the Suggested Folders wait on the user, their item says what's needed beside a blue dot.
 import { el } from "../../shared/dom.js";
 import { count, plural } from "../../shared/format.js";
@@ -18,7 +18,8 @@ const WAITING_ON_USER = { offer: "Download models", ask: "Waiting for you" };
 
 /**
  * The sidebar of the Review screen with context `ctx`: `node`, `draw()` bringing it up to date,
- * `showProgress(text)` saying how far the reading is, and `menuItems()`, its part of the menu bar.
+ * `showProgress(text)` saying how far the reading is, `menuItems()`, its part of the menu bar, and
+ * `folderMenuItems(choice)`, a Suggested Folder's menu.
  */
 export function sidebar(ctx) {
   const { state, view } = ctx;
@@ -58,9 +59,20 @@ export function sidebar(ctx) {
     // Clicking the listed one again leaves the sidebar as it is, so a double-click lands on the same item.
     else if (only !== view.current) ctx.show(only);
   };
-  const remove = (choice) => {
-    state.remove(choice);
-    forgetFolder(choice, "left");
+  /**
+   * Leaves the files of `chosen`, Suggested Folders, not marked Trash unsorted. Those left with none go: Unsorted
+   * is listed in place of the one listed, or of the several selected once fewer than two are left.
+   */
+  const leaveUnsorted = (chosen) => {
+    for (const choice of chosen) state.leaveUnsorted(choice);
+    const gone = chosen.filter((choice) => !state.choices.includes(choice));
+    const picked = new Set([...view.picked].filter((choice) => !gone.includes(choice)));
+    if (view.current === "picked") ctx.show(picked.size > 1 ? "picked" : "left", picked.size > 1 ? picked : new Set());
+    else if (gone.includes(view.current)) forgetFolder(view.current, "left");
+    else {
+      view.picked = picked;
+      ctx.redraw.pane();
+    }
   };
 
   /**
@@ -81,7 +93,7 @@ export function sidebar(ctx) {
             // The rest of the files are still read, beside the Rules' folders.
             ...(state.more ? [sidebarItem("folders", state.more === "reading" ? "Reading…" : "Reading failed", null)] : []),
             newFolder,
-            sidebarItem("left", UNSORTED, state.left.size - state.left.trashed.size),
+            sidebarItem("left", UNSORTED, state.left.size - state.left.trashed.size, "", "files"),
           ]
         : [foldersItem()]),
     );
@@ -155,22 +167,35 @@ export function sidebar(ctx) {
     state.choices.filter((other) => other !== choice).map((into) => ({ label: displayName(into), action: () => merge(choice, into) }));
 
   /**
-   * The right-click menu of the Suggested Folder `choice`: Rename, "Merge into…" listing the other folders,
-   * Trash now and Remove; on one of several selected, "Trash N folders now".
+   * The menu of the Suggested Folder `choice`, from its right-click or its pane's ⋯: Rename, "Merge into…" listing
+   * the other folders, "Trash all N files now" and "Leave N files unsorted", counting those not marked Trash.
    */
-  function folderMenu(choice, item, event) {
-    event.preventDefault();
-    const chosen = actedOn(choice);
-    if (chosen.length > 1) {
-      return showMenu([{ label: `Trash ${plural(chosen.length, "folder")} now`, shortcut: "trashNow", action: () => ctx.sessions.trashFoldersNow(chosen) }]);
-    }
+  function folderMenuItems(choice) {
     const others = mergeTargets(choice);
-    showMenu([
+    const { going } = folderTally(choice);
+    return [
       { label: "Rename", shortcut: "rename", action: () => renameListed(choice) },
       { label: "Merge into…", enabled: others.length > 0, submenu: others },
       { separator: true },
-      { label: "Trash now", shortcut: "trashNow", action: () => ctx.sessions.trashFoldersNow([choice]) },
-      { label: "Remove", action: () => remove(choice) },
+      {
+        label: `Trash all ${plural(choice.files.size, "file")} now`,
+        shortcut: "trashNow",
+        enabled: choice.files.size > 0 && !view.running,
+        action: () => ctx.sessions.trashFoldersNow([choice]),
+      },
+      { label: `Leave ${plural(going, "file")} unsorted`, enabled: going > 0, action: () => leaveUnsorted([choice]) },
+    ];
+  }
+
+  /** The right-click menu of the Suggested Folder `choice`: its `folderMenuItems`, or, on one of several selected, what acts on them all. */
+  function folderMenu(choice, item, event) {
+    event.preventDefault();
+    const chosen = actedOn(choice);
+    if (chosen.length === 1) return showMenu(folderMenuItems(choice));
+    const folders = plural(chosen.length, "folder");
+    showMenu([
+      { label: `Trash ${folders} now`, shortcut: "trashNow", enabled: !view.running, action: () => ctx.sessions.trashFoldersNow(chosen) },
+      { label: `Leave files of ${folders} unsorted`, enabled: chosen.some((other) => folderTally(other).going > 0), action: () => leaveUnsorted(chosen) },
     ]);
   }
 
@@ -253,5 +278,5 @@ export function sidebar(ctx) {
     return field;
   }
 
-  return { node, draw, showProgress, menuItems };
+  return { node, draw, showProgress, menuItems, folderMenuItems };
 }

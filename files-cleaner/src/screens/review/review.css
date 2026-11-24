@@ -144,12 +144,21 @@
   margin-top: 0;
 }
 
-/* Always shown above the list, its buttons disabled with nothing selected, so the list never moves. */
+/* Always shown above the list, its buttons disabled with nothing selected, so the list never moves. It stays
+   at the top while the list scrolls under it, lifted off the rows by a soft shadow. */
 .review-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding-top: var(--space-2);
+  background: var(--background);
+  box-shadow: 0 6px 8px -8px var(--shadow);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
+  /* As tall as a small button, so the list doesn't move once a selection shows the buttons. */
+  min-height: calc(var(--font-sm) * 1.6 + 2px);
   margin-bottom: var(--space-3);
   padding-bottom: var(--space-2);
   border-bottom: 1px solid var(--border);
@@ -182,6 +191,30 @@
   display: flex;
   align-items: center;
   gap: var(--space-1-5);
+}
+
+/* Right after the folder's size, a recessed pill as macOS's inline ⋯ buttons: a faint fill, darker on hover or while its menu is open. */
+.folder-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text);
+}
+
+.folder-actions:hover,
+.folder-actions[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--text) 15%, transparent);
+}
+
+.unsorted-note {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-sm);
 }
 
 .folder-name {

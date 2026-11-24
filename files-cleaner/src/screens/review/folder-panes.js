@@ -1,11 +1,13 @@
-// The Review screen's folder panes: a Suggested Folder, with its name, why it was suggested and its one
-// Location popup, and the files left where they are, shown as Unsorted. Rows have no buttons: a trashed file
-// is dimmed with a trash icon, and every action, trashing the folder's files now too, comes from the toolbar.
+// The Review screen's folder panes: a Suggested Folder, with its name, its ⋯ menu acting on the whole folder,
+// why it was suggested and its one Location popup, and the files left where they are, shown as Unsorted, which
+// says no folder is made for them. Rows have no buttons: a trashed file is dimmed with a trash icon, and every
+// action on files comes from the toolbar.
 import { describeError, onAnotherDisk, pickFolder } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";
 import { drawMore } from "../../shared/plan/file-list.js";
 import { count, formatDate, formatSize, plural } from "../../shared/format.js";
 import { icon } from "../../shared/icons.js";
+import { showMenu } from "../../shared/menus/menus.js";
 import { showStatus } from "../../shared/status.js";
 import { describeRule } from "../rules/rule-text.js";
 import { byKindNewestFirst, nameMissing, otherKeptCopies } from "./review-choices.js";
@@ -56,15 +58,17 @@ export function folderPanes(ctx) {
       return ctx.selection.copyMenu(node, path);
     };
     const head = el("h2", {}, `${UNSORTED} (${count(state.left.size)})`);
-    if (state.choices.length > 0) return [head, ...leftLists([...state.left], row)];
+    const stay = el("p", { className: "unsorted-note muted" }, "These stay where they are. No folder is made.");
+    if (state.choices.length > 0) return [head, stay, ...leftLists([...state.left], row)];
     return [
       head,
+      stay,
       el("p", { className: "note" }, state.grouping.folders.length > 0 ? "No folders are left." : "No files here are alike enough to share a folder."),
       ...leftLists([...state.left], row),
     ];
   }
 
-  /** The pane for one Suggested Folder: its name, why it was suggested, where it goes, and its files. */
+  /** The pane for one Suggested Folder: its name and ⋯ menu, why it was suggested, where it goes, and its files. */
   function folderPanel(choice) {
     const name = el("input", { type: "text", className: "folder-name", value: choice.name, ariaLabel: "Folder name", spellcheck: false });
     const nameError = el("p", { className: "status error folder-name-error" });
@@ -76,6 +80,9 @@ export function folderPanes(ctx) {
     const list = el("ul", { className: "folder-files", ariaLabel: "Files" });
     const empty = el("p", { className: "note" }, "Empty");
     const more = el("div", { className: "plan-more" });
+    // The folder's actions, as its sidebar item's right-click menu has them.
+    const actions = el("button", { type: "button", className: "folder-actions", ariaLabel: "Folder actions", title: "Folder actions", ariaHasPopup: "menu" }, icon("more"));
+    actions.addEventListener("click", () => showMenu(ctx.sidebar.folderMenuItems(choice)));
     let limit = FILES_SHOWN;
 
     /** Asks for a folder on the files' disk to make the folder in; one on another disk is refused, beside the popup. */
@@ -151,7 +158,7 @@ export function folderPanes(ctx) {
     const node = el(
       "div",
       { className: "folder-panel" },
-      el("div", { className: "folder-panel-head" }, icon("folder"), name, size),
+      el("div", { className: "folder-panel-head" }, icon("folder"), name, size, actions),
       nameError,
       basis,
       el("label", { className: "folder-location" }, el("span", { className: "muted" }, "Location"), location),
