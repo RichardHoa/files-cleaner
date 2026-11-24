@@ -5,14 +5,16 @@
 // offered in the Suggested Folders' place); the Rules' folders show at once, and the other Suggested Folders
 // are added once that's done.
 // Rows have no buttons: files, and copies, are selected as in Finder, by clicking or with the arrow keys,
-// then trashed or put back (or kept, for copies) from the toolbar always shown above the list of files, their
-// right-click menu or Edit › Trash (⌘⌫). The Duplicates pane has no toolbar: its Keep boxes choose, and its own button
-// trashes the unticked copies at once, apart from the rest of the Plan. Files are moved with "Move to…" in
-// their right-click menu, which also offers any other folder on disk; nothing on the screen is dragged. A file
+// then trashed or put back (or kept, for copies) from the toolbar always shown above the list of files, its buttons
+// once some are selected, their right-click menu or Edit › Trash (⌘⌫). The Duplicates pane has no toolbar: its Keep boxes choose, and
+// its own button trashes the unticked copies at once, apart from the rest of the Plan. Files not marked Trash are
+// moved with the toolbar's "Move to…" or their right-click menu, which also offers any other folder on disk, or
+// left unsorted; nothing on the screen is dragged. A file
 // opens in its default app by double-clicking it or from its right-click menu. The sidebar counts the files in
 // each item, and grays out a folder whose every file is trashed. Its Suggested Folders are selected as files
 // are; it adds a folder, and merges one into another, trashes the selected ones' files now (with Edit › Trash Now,
-// ⇧⌘⌫, too) or removes one, from its right-click menu. The toolbar over a Suggested Folder trashes its files now too. Those
+// ⇧⌘⌫, too) or leaves their files not marked Trash unsorted, from its right-click menu. The listed Suggested Folder's
+// ⋯ menu has the same items. Those
 // Trash Nows, and the copies', are Sessions of their own; nothing else happens to the files until the
 // header's button, which waits for the reading (it can be stopped early to group only what was read), carries
 // out the whole Plan as one Session; Cancel stops the reading and goes Home.

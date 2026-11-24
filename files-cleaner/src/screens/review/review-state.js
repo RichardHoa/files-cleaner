@@ -7,12 +7,13 @@ import {
   filedCopyTrashed,
   initialChoices,
   initialDuplicates,
+  leaveUnsorted,
   LeftFiles,
+  markedTrash,
   mergeFolder,
   moveFile,
   moveToOtherFolder,
   placeDuplicates,
-  removeFolder,
   setCopy,
 } from "./review-choices.js";
 
@@ -162,7 +163,7 @@ export class ReviewState {
       const gone = new Set(paths);
       for (const choice of chosen) {
         for (const path of gone) choice.files.delete(path);
-        if (choice.files.size === 0 && this.choices.includes(choice)) this.remove(choice);
+        if (choice.files.size === 0 && this.choices.includes(choice)) this.leaveUnsorted(choice);
       }
       for (const duplicate of this.duplicates) {
         if (gone.has(filedCopy(duplicate))) filedCopyTrashed(duplicate, this.choices, this.left);
@@ -200,7 +201,7 @@ export class ReviewState {
     return addFolder(this.choices);
   }
 
-  /** Moves `paths` into the Suggested Folder `to`, or leaves them where they are when `to` is null. */
+  /** Moves `paths` into the Suggested Folder `to`, or leaves them where they are when `to` is null; one marked Trash stays where it is. */
   move(paths, to) {
     for (const path of paths) moveFile(this.choices, this.left, path, to);
   }
@@ -215,9 +216,14 @@ export class ReviewState {
     mergeFolder(this.choices, this.duplicates, from, into);
   }
 
-  /** Removes the Suggested Folder `choice`, leaving its files where they are. */
-  remove(choice) {
-    removeFolder(this.choices, this.left, this.duplicates, choice);
+  /** Leaves the files of the Suggested Folder `choice` not marked Trash where they are; it's dropped once it has none. */
+  leaveUnsorted(choice) {
+    leaveUnsorted(this.choices, this.left, this.duplicates, choice);
+  }
+
+  /** How many of `paths` aren't marked Trash, so Move takes them. */
+  movable(paths) {
+    return paths.filter((path) => !markedTrash(this.choices, this.left, path)).length;
   }
 
   /** The Emptied Folder Operations are now `operations`, ticked as the ones before were. */

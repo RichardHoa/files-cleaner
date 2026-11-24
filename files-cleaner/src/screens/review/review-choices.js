@@ -3,9 +3,10 @@
 // to each of its files. A folder's choice is "addTo" (into an existing folder, the subfolder it matched or one
 // the user picked), "createHere" (a new folder in the Scan Root) or "createIn" (a new folder inside
 // `elsewhere`, a folder the user picked); each of its files is "inFolder" (goes wherever the folder's choice
-// sends it) or "trash". The user can also add a folder, merge one into another, or remove one. The files left
-// where they are stay there, unless the user trashes one or moves it to a folder, suggested or any other on
-// disk. The whole Plan is carried out at once.
+// sends it) or "trash". The user can also add a folder, merge one into another, or leave its files unsorted. The
+// files left where they are stay there, unless the user trashes one or moves it to a folder, suggested or any other
+// on disk. A file marked Trash stays where it's listed: moving files, or leaving them unsorted, takes only the
+// others. The whole Plan is carried out at once.
 import { count, splitPath } from "../../shared/format.js";
 
 /** What the Plan calls the files trashed from those left where they are. */
@@ -177,10 +178,20 @@ export function mergeFolder(choices, duplicates, from, into) {
   dropFolder(choices, duplicates, from, into);
 }
 
-/** Removes the Suggested Folder `choice`, leaving every file of it where it is, in the Set `left`. */
-export function removeFolder(choices, left, duplicates, choice) {
-  for (const path of choice.files.keys()) left.add(path);
-  dropFolder(choices, duplicates, choice, null);
+/**
+ * Leaves the files of the Suggested Folder `choice` not marked Trash where they are, in the Set `left`. The folder
+ * keeps those marked Trash, and is dropped once it has none.
+ */
+export function leaveUnsorted(choices, left, duplicates, choice) {
+  for (const [path, file] of choice.files) {
+    if (file === "trash") continue;
+    choice.files.delete(path);
+    left.add(path);
+  }
+  for (const { emptyPlace } of duplicates) {
+    if (emptyPlace?.choice === choice && emptyPlace.file !== "trash") emptyPlace.choice = null;
+  }
+  if (choice.files.size === 0) dropFolder(choices, duplicates, choice, null);
 }
 
 /** What happens to `path` of the Suggested Folder `choice`: "move", "trash" or "stay", as for a file already directly in the folder it goes to. */
@@ -221,8 +232,15 @@ export function folderTally(choice) {
 /** Whether the Suggested Folder `choice` lacks the name it needs: it needs one once it has files, and an empty name is never read as "trash". */
 export const nameMissing = (choice) => choice.files.size > 0 && choice.name.trim() === "";
 
-/** Moves `path` into the Suggested Folder `to`, in with the rest, or into the Set `left` of files left where they are when `to` is null. */
+/** Whether the file at `path` is marked Trash, in a Suggested Folder of `choices` or in the Set `left`. */
+export const markedTrash = (choices, left, path) => Boolean(left.trashed?.has(path)) || choices.some((choice) => choice.files.get(path) === "trash");
+
+/**
+ * Moves `path` into the Suggested Folder `to`, in with the rest, or into the Set `left` of files left where they
+ * are when `to` is null. A file marked Trash stays where it is, with its mark.
+ */
 export function moveFile(choices, left, path, to) {
+  if (markedTrash(choices, left, path)) return;
   for (const choice of choices) choice.files.delete(path);
   left.delete(path);
   if (to) to.files.set(path, "inFolder");
@@ -231,12 +249,13 @@ export function moveFile(choices, left, path, to) {
 
 /**
  * Moves `paths` into the Suggested Folder going into `folder`, a folder on disk the user picked, adding it if
- * there's none yet, and returns it. A file already directly in `folder` is left where it is instead, and
- * returns null when that's all of them.
+ * there's none yet, and returns it. A file already directly in `folder` is left where it is instead, and a file
+ * marked Trash stays where it is; returns null when that's all of them.
  */
 export function moveToOtherFolder(choices, left, paths, folder, separator) {
-  const moving = paths.filter((path) => splitPath(path, separator).parent !== folder);
-  for (const path of paths) {
+  const unmarked = paths.filter((path) => !markedTrash(choices, left, path));
+  const moving = unmarked.filter((path) => splitPath(path, separator).parent !== folder);
+  for (const path of unmarked) {
     if (!moving.includes(path)) moveFile(choices, left, path, null);
   }
   if (moving.length === 0) return null;
