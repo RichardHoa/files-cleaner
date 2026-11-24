@@ -7,12 +7,16 @@ import { el } from "../../shared/dom.js";
 import { drawMore } from "../../shared/plan/file-list.js";
 import { formatDate, formatSize, trashPlace } from "../../shared/format.js";
 import { icon } from "../../shared/icons.js";
+import { withShortcut } from "../../shared/menus/menu-items.js";
 import { describeNothingDone, describeRunProgress, describeWarning } from "../../shared/outcomes.js";
 import { busy, showStatus, showWarning } from "../../shared/status.js";
 import { copyFolder, filedCopy, planDuplicates, trashedCopies, trashedCopiesIn } from "./review-choices.js";
 import { copiesText, fileName } from "./pane-helpers.js";
 
-/** The Duplicates pane of the Review screen with context `ctx`: `panel()` is what it lists. */
+/**
+ * The Duplicates pane of the Review screen with context `ctx`: `panel()` is what it lists, and `trashNow()` trashes
+ * the copies marked Trash now, or is null when there are none or a Session is running.
+ */
 export function duplicatesPane(ctx) {
   const { state, view, pane } = ctx;
   const trashNow = el("button", { type: "button", className: "small" }, icon("trash"), el("span"));
@@ -58,7 +62,7 @@ export function duplicatesPane(ctx) {
     const trash = trashPlace(pathSeparator);
     trashNow.lastChild.textContent = trashed ? `Trash ${copiesText(trashed)} now` : "No copies to trash";
     trashNow.disabled = trashed === 0 || view.running;
-    trashNow.title = `Moves every unticked copy to the ${trash} now. Suggested Folders aren't touched. Undo it from History.`;
+    trashNow.title = withShortcut(`Moves every unticked copy to the ${trash} now. Suggested Folders aren't touched. Undo it from History.`, "trashNow");
     return el(
       "div",
       { className: "duplicates-trash-now" },
@@ -131,8 +135,8 @@ export function duplicatesPane(ctx) {
       el("span", { className: "path duplicate-copy-folder", title: copy.path }, folder),
       el("span", { className: "muted folder-file-date" }, formatDate(copy.modified)),
     );
-    return ctx.selection.selectable(row, copy.path, { movable: false });
+    return ctx.selection.selectable(row, copy.path);
   }
 
-  return { panel };
+  return { panel, trashNow: () => (trashedCopiesIn(state.duplicates) > 0 && !view.running ? trashCopiesNow : null) };
 }

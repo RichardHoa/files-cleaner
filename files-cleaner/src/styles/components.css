@@ -119,7 +119,7 @@ button.small {
   line-height: 1.6;
 }
 
-/* The menu that opens on a row: on a click in the scan results, on a right-click in the Plan or a Session. */
+/* A popover under a line of text: what "Some files skipped" leaves out. */
 .row-menu {
   position: absolute;
   z-index: 4;
@@ -131,43 +131,8 @@ button.small {
   box-shadow: var(--shadow-menu);
 }
 
-/* Opens at the pointer on a right-click in the Plan or a Session, so it is placed in the window. */
-.file-menu {
-  position: fixed;
-  max-height: 70vh;
-  overflow-y: auto;
-}
-
-.menu-separator {
-  margin: var(--space-1) 0;
-  border: 0;
-  border-top: 1px solid var(--border);
-}
-
 .row-menu[hidden] {
   display: none;
-}
-
-.row-menu button {
-  display: block;
-  width: 100%;
-  padding: var(--space-1) var(--space-2-5);
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  text-align: left;
-}
-
-.row-menu button:hover,
-.row-menu button:focus-visible {
-  background: var(--accent);
-  color: var(--on-accent);
-  outline: none;
-}
-
-.row-menu .status {
-  margin: var(--space-1) var(--space-2);
-  max-width: 320px;
 }
 
 /* A sheet over the window, asking one question: the first-open offer of the Grouping Models. */

@@ -1,11 +1,12 @@
-// The Review screen's header and its one Session: the Scan Root's name, what was scanned, the button carrying
+// The Review screen's header and its Sessions: the Scan Root's name, what was scanned, the button carrying
 // out the whole Plan as one Session, Cancel, and "Also trash N emptied folders". The Emptied Folders depend on
 // everything the Plan moves, so they are worked out by the backend again a moment after each change. What the
-// button is doing, or why it did nothing, shows under it.
+// button is doing, or why it did nothing, shows under it, as does what a Trash Now of Suggested Folders did.
 import { buildReviewPlan, pathSeparator, previewReviewPlan, runPlan } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";
 import { formatSize, plural } from "../../shared/format.js";
-import { describeNothingDone, describeRunProgress } from "../../shared/outcomes.js";
+import { describeNothingDone, describeRunProgress, describeWarning } from "../../shared/outcomes.js";
+import { refreshMenu } from "../../shared/menus/menus.js";
 import { busy, showStatus, showWarning } from "../../shared/status.js";
 import { describeChange, nameMissing, planChoices, planDuplicates, totals } from "./review-choices.js";
 import { skippedLine } from "./skipped.js";
@@ -21,8 +22,8 @@ const runsOrIsListed = (op) => op.ticked || (Boolean(op.error) && (op.kind === "
 
 /**
  * The header of the Review screen with context `ctx`, for the scan `result`: `node`, `drawHeader()`,
- * `status`, the line under the button, and `refreshEmptied()` working out the Emptied Folders again a moment
- * later, unless the button is clicked first.
+ * `status`, the line under the button, `refreshEmptied()` working out the Emptied Folders again a moment
+ * later, unless the button is clicked first, and `trashFoldersNow(chosen)`.
  */
 export function sessions(ctx, result) {
   const { nav, state, view } = ctx;
@@ -79,8 +80,12 @@ export function sessions(ctx, result) {
     drawHeader();
   });
 
-  /** The emptied-folders checkbox, and the button saying what it will do, disabled while there's nothing to do, a folder has no name, or the files are still read. */
+  /**
+   * The emptied-folders checkbox, and the button saying what it will do, disabled while there's nothing to do, a
+   * folder has no name, or the files are still read; and the menu bar, greyed out while a Session runs.
+   */
   function drawHeader() {
+    refreshMenu();
     const possible = state.emptied.filter((op) => !op.error);
     emptied.hidden = possible.length === 0;
     emptied.title = possible.map((op) => `${op.relativePath.join("/")}/`).join("\n");
@@ -100,6 +105,7 @@ export function sessions(ctx, result) {
   run.addEventListener("click", async () => {
     clearTimeout(emptiedTimer);
     view.running = true;
+    refreshMenu();
     const session = await busy(status, [run, cancel], "Planning…", async () => {
       const plan = await buildReviewPlan(planDuplicates(state.duplicates), planChoices(state.choices, state.left));
       const approved = plan.operations
@@ -113,6 +119,39 @@ export function sessions(ctx, result) {
     if (session) showWarning(status, describeNothingDone(session, "moved", pathSeparator));
     drawHeader();
   });
+
+  /**
+   * Trashes every file listed in the Suggested Folders `chosen` now, as a Session of their own, and stays on
+   * the Review screen: the folders leave the Plan and the next one is listed. Any file that couldn't go stays
+   * in its folder, and is said why.
+   */
+  async function trashFoldersNow(chosen) {
+    if (view.running) return;
+    const { folders, trashed } = state.trashNow(chosen);
+    if (folders.length === 0) return showWarning(status, "Nothing was trashed. No files are listed there.");
+    clearTimeout(emptiedTimer);
+    const at = Math.min(...chosen.map((choice) => state.choices.indexOf(choice)));
+    view.running = true;
+    ctx.redraw.pane();
+    const summary = await busy(status, [run, cancel], "Trashing files…", async () => {
+      const plan = await buildReviewPlan([], folders);
+      const approved = plan.operations.filter((op) => op.reason.type === "suggestedFolder" && (op.ticked || Boolean(op.error))).map((op) => op.id);
+      return runPlan(approved, (progress) => showStatus(status, describeRunProgress(progress)));
+    });
+    view.running = false;
+    if (summary) {
+      trashed(summary.done.map((outcome) => outcome.source));
+      const warning = describeWarning(summary, { action: "run", done: "trashed", separator: pathSeparator });
+      // A Trash Now that did nothing keeps no Session.
+      if (!summary.sessionId) showWarning(status, describeNothingDone(summary, "trashed", pathSeparator));
+      else if (warning) showWarning(status, warning);
+      else showStatus(status, `${plural(summary.done.length, "file")} trashed · undo from History`);
+    }
+    if (view.renaming && !state.choices.includes(view.renaming.choice)) view.renaming = null;
+    const listed = view.current === "picked" ? [...view.picked] : [view.current];
+    if (listed.some((choice) => chosen.includes(choice))) ctx.show(state.choices[Math.min(at, state.choices.length - 1)] ?? "left");
+    else ctx.redraw.pane();
+  }
 
   /** Works out the Emptied Folders again a moment after a change, with the duplicates; only the latest answer counts. */
   let emptiedTimer = 0;
@@ -133,5 +172,5 @@ export function sessions(ctx, result) {
     }, EMPTIED_DELAY);
   };
 
-  return { node, drawHeader, status, refreshEmptied };
+  return { node, drawHeader, status, refreshEmptied, trashFoldersNow };
 }

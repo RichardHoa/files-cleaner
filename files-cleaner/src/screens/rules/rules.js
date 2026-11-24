@@ -1,6 +1,6 @@
 // Rules: the user's Rules (ADR 0013), in order, each read back in one line. A Rule is picked by clicking its
 // row, then edited, turned off or on, moved or deleted from the toolbar, by double-clicking or pressing Return,
-// Space, ⌥⌘↑/↓ or ⌘⌫; rows have no buttons. A file goes by the first enabled Rule it fits, so the order is
+// Space, ⌥⌘↑/↓ or ⌘⌫ (Ctrl+Alt+↑/↓ or Delete on Windows and Linux); rows have no buttons. A file goes by the first enabled Rule it fits, so the order is
 // the priority. The editor builds a Rule from ordinary controls, read back as it changes. Grouping by meaning
 // needs the Grouping Models, so without them it isn't offered for a new Rule. Every
 // change saves the whole list at once; a Rule that can't be saved says why and isn't saved. Rules apply at the
@@ -9,6 +9,8 @@
 import { changeSetting, describeError, groupingModelsStatus, loadConfig, ruleOverlaps } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";
 import { icon } from "../../shared/icons.js";
+import { IS_MAC, withShortcut } from "../../shared/menus/menu-items.js";
+import { drawing } from "../../shared/onboarding/drawings.js";
 import { showStatus } from "../../shared/status.js";
 import {
   describeGroupBy,
@@ -77,13 +79,15 @@ function rulesList(body, initial, withModels) {
   const status = el("p", { className: "status" });
   const list = el("ul", { className: "rules-list", role: "listbox", ariaLabel: "Rules" });
   const add = el("button", { type: "button", className: "primary" }, icon("plus"), "Add Rule");
-  const edit = el("button", { type: "button" }, "Edit");
-  const toggle = el("button", { type: "button", title: "Space" }, "Turn Off");
-  const up = el("button", { type: "button", title: "Move Up ⌥⌘↑", ariaLabel: "Move Up" }, icon("up"));
-  const down = el("button", { type: "button", title: "Move Down ⌥⌘↓", ariaLabel: "Move Down" }, icon("down"));
-  const remove = el("button", { type: "button", title: "⌘⌫" }, icon("trash"), "Delete");
+  const edit = el("button", { type: "button", title: withShortcut("Edit", "edit") }, "Edit");
+  const toggle = el("button", { type: "button" }, "Turn Off");
+  const up = el("button", { type: "button", title: withShortcut("Move Up", "moveUp"), ariaLabel: "Move Up" }, icon("up"));
+  const down = el("button", { type: "button", title: withShortcut("Move Down", "moveDown"), ariaLabel: "Move Down" }, icon("down"));
+  const remove = el("button", { type: "button", title: withShortcut("Delete", "deleteRule") }, icon("trash"), "Delete");
   const toolbar = el("div", { className: "rules-toolbar" }, add, edit, toggle, up, down, remove);
-  const empty = el("p", { className: "empty" }, "No Rules yet.");
+  // With no Rules: the introduction's Rules drawing, one line and a way to start.
+  const start = el("button", { type: "button", className: "primary" }, "New Rule");
+  const empty = el("div", { className: "rules-empty" }, drawing("rules"), el("p", {}, "Sort files your way at every scan"), start);
 
   /** Saves `next` as the whole list; resolves to whether it was saved, saying why not in `where`. */
   const save = async (next, where = status) => {
@@ -148,6 +152,7 @@ function rulesList(body, initial, withModels) {
   };
 
   add.addEventListener("click", () => openEditor(null));
+  start.addEventListener("click", () => openEditor(null));
   edit.addEventListener("click", () => selected !== null && openEditor(selected));
   toggle.addEventListener("click", toggleSelected);
   up.addEventListener("click", () => moveSelected(-1));
@@ -160,6 +165,7 @@ function rulesList(body, initial, withModels) {
     up.disabled = selected === null || selected === 0;
     down.disabled = selected === null || selected === rules.length - 1;
     toggle.textContent = selected !== null && !rules[selected].enabled ? "Turn On" : "Turn Off";
+    toggle.title = withShortcut(toggle.textContent, "toggle");
     list.replaceChildren(
       ...rules.map((rule, index) => {
         // Its place in the order, since a file goes by the first Rule it fits.
@@ -198,7 +204,7 @@ function rulesList(body, initial, withModels) {
             event.preventDefault();
             selected = index;
             toggleSelected();
-          } else if (event.altKey && event.metaKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+          } else if (event.altKey && (IS_MAC ? event.metaKey : event.ctrlKey) && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
             event.preventDefault();
             selected = index;
             moveSelected(event.key === "ArrowUp" ? -1 : 1);

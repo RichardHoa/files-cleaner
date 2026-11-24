@@ -111,6 +111,20 @@ export function setCopy(duplicate, path, fate, choices, left) {
   placeCopies(duplicate, choices, left);
 }
 
+/**
+ * The Filed Copy of `duplicate` went to the System Trash with its Suggested Folder: it leaves the group,
+ * another copy is kept if none is, so one always survives, and the group's place is with the files left where they are.
+ */
+export function filedCopyTrashed(duplicate, choices, left) {
+  const filed = filedCopy(duplicate);
+  duplicate.copies.delete(filed);
+  duplicate.group = { ...duplicate.group, copies: duplicate.group.copies.filter((copy) => copy.path !== filed) };
+  if (!filedCopy(duplicate)) duplicate.copies.set(duplicate.group.copies[0].path, "keep");
+  duplicate.placed = null;
+  duplicate.emptyPlace = { choice: null };
+  placeCopies(duplicate, choices, left);
+}
+
 /** Puts the copies of `duplicates` where the choices made while the files were read leave them; the copy read, the first, holds each group's place until then. */
 export function placeDuplicates(choices, left, duplicates) {
   for (const duplicate of duplicates) {

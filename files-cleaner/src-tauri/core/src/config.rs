@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 use crate::atomic_file;
 use crate::rules::{rule_problem, Rule};
 
-/// The config written on first launch, as a working starting point.
+/// The config written on first launch and on Reset settings: no Never-Touch Paths until the user adds some.
 pub const EXAMPLE_CONFIG: &str = r#"{
-  "neverTouch": ["~/Downloads/Keep"]
+  "neverTouch": []
 }
 "#;
 

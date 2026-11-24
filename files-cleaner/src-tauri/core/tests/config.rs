@@ -14,13 +14,10 @@ fn error(text: &str) -> ConfigError {
 }
 
 #[test]
-fn the_example_config_loads() {
+fn the_example_config_loads_with_no_never_touch_paths() {
     let config = load_config(EXAMPLE_CONFIG, Path::new("/Users/me")).unwrap();
 
-    assert_eq!(
-        config.never_touch,
-        [PathBuf::from("/Users/me/Downloads/Keep")]
-    );
+    assert!(config.never_touch.is_empty());
     assert!(!EXAMPLE_CONFIG.contains("\"rules\"") && !EXAMPLE_CONFIG.contains("\"duplicates\""));
 }
 
@@ -165,9 +162,10 @@ fn an_unreadable_config_resets_to_the_example() {
     let path = folder.path().join("config.json");
     fs::write(&path, "{ not json").unwrap();
 
-    reset_config(&path, Path::new("/Users/me")).unwrap();
+    let config = reset_config(&path, Path::new("/Users/me")).unwrap();
 
     assert_eq!(fs::read_to_string(&path).unwrap(), EXAMPLE_CONFIG);
+    assert!(config.never_touch.is_empty());
 }
 
 #[test]

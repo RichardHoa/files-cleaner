@@ -43,13 +43,14 @@ Dependencies only point down. `core` knows nothing of Tauri or `grouping`; `grou
 
 ### `files-cleaner/src` (UI)
 
-`main.js` shows one screen at a time; each screen under `screens/` exports `render(root, nav, ...args)` and builds its own DOM. `shared/api.js` is the only place that calls Tauri: one function per command. `steps.js` holds the scan → duplicates → review order, kept apart from the screens so it can be tested.
+`main.js` shows one screen at a time; each screen under `screens/` exports `render(root, nav, ...args)` and builds its own DOM. `shared/api.js` is the only place that calls Tauri: one function per command. `steps.js` holds the scan → duplicates → review order, kept apart from the screens so it can be tested. `shared/menus/` keeps the native menus in step with the screen shown: `menu-items.js` works out what applies and each shortcut as the OS writes it, `menus.js` sends that to the backend and runs what's clicked.
 
 **Architecture Invariant:** the UI holds no file-system logic. It only shows what the core returns and sends back the user's choices.
 
 ### `src-tauri/src` (shell)
 
 - `lib.rs`: every Tauri command. Each finds the app's paths (config, Sessions folder, models folder), calls `core` or `grouping`, and serialises the result. It also keeps the latest scan, Duplicate Groups and Plan in memory, so the UI never sends them back.
+- `menu.rs`: the native menu bar, the same on every OS, and the native right-click menus. The UI says which items apply and describes each right-click menu; clicks come back to it as events.
 - `models.rs`: downloading, pausing and removing the Grouping Models, each pinned by SHA-256.
 - `downloads.rs`: the app's **only** network code.
 

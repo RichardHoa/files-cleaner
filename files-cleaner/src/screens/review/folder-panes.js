@@ -1,6 +1,6 @@
 // The Review screen's folder panes: a Suggested Folder, with its name, why it was suggested and its one
-// Location popup, and the files left where they are, shown as Unsorted. Rows have no buttons: a trashed
-// file is dimmed with a trash icon, and every action comes from the selection.
+// Location popup, and the files left where they are, shown as Unsorted. Rows have no buttons: a trashed file
+// is dimmed with a trash icon, and every action, trashing the folder's files now too, comes from the toolbar.
 import { describeError, onAnotherDisk, pickFolder } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";
 import { drawMore } from "../../shared/plan/file-list.js";

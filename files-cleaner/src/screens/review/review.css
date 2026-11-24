@@ -1,7 +1,6 @@
 /* Review: laid out like Finder or Mail, a sidebar of the Plan's sections beside a pane listing the one
-   picked. The sidebar stays in view while the pane scrolls, so a file is never dragged further than across
-   it. Flat surfaces and hairline dividers; the name field looks like text until it's edited. The
-   sidebar row a file would drop into gets an accent outline. Rows have no buttons. */
+   picked. The sidebar stays in view while the pane scrolls. Flat surfaces and hairline dividers; the name
+   field looks like text until it's edited. Rows have no buttons. */
 .reading-estimate {
   margin: var(--space-1) 0 var(--space-3);
   font-variant-numeric: tabular-nums;
@@ -83,6 +82,15 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The Suggested Folders wait on the user: a dot as Mail's unread one. */
+.folder-sidebar-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
 .folder-sidebar-new {
   color: var(--muted);
 }
@@ -130,15 +138,6 @@
 .folder-pane {
   position: relative;
   min-width: 0;
-}
-
-/* The rectangle drawn while drag-selecting. */
-.marquee {
-  position: absolute;
-  z-index: 1;
-  pointer-events: none;
-  border: 1px solid var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .folder-pane h2 {
@@ -301,24 +300,11 @@
   color: var(--muted);
 }
 
-.folder-file-name[draggable="true"] {
-  cursor: grab;
-}
-
 .folder-pane [data-path].selected {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .folder-file:focus-visible {
-  outline-offset: -2px;
-}
-
-.folder-file.dragging {
-  opacity: 0.5;
-}
-
-.drop-target {
-  outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
@@ -338,15 +324,8 @@
   margin-bottom: var(--space-2);
 }
 
-/* The button trashing the unticked copies now, on its own, and what it frees beside it. */
-.duplicates-trash-now {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-  margin-top: var(--space-2);
-}
-
+/* The button trashing the unticked copies, or a Suggested Folder's files, now, on their own, and what it frees beside it. */
+.duplicates-trash-now,
 .duplicates-trash-now button {
   display: inline-flex;
   align-items: center;

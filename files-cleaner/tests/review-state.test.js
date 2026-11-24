@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { folderTally, planChoices } from "../src/screens/review/review-choices.js";
+import { folderTally, planChoices, planDuplicates } from "../src/screens/review/review-choices.js";
 import { ReviewState } from "../src/screens/review/review-state.js";
 
 /** A Review state whose files were read into the folders "IELTS", holding a.pdf and b.pdf, and "Labs", holding c.pdf. */
@@ -35,7 +35,7 @@ test("trashing every file of a folder grays it out in the sidebar and plans each
   const state = twoFolders();
   const [ielts] = state.choices;
 
-  state.trashAllFiles(ielts);
+  for (const path of ielts.files.keys()) state.setFile(ielts, path, "trash");
 
   assert.deepEqual(folderTally(ielts), { going: 0, trashed: true });
   assert.deepEqual(planChoices(state.choices, state.left)[0], {
@@ -47,7 +47,7 @@ test("trashing every file of a folder grays it out in the sidebar and plans each
     ],
   });
 
-  state.trashAllFiles(ielts, false);
+  for (const path of ielts.files.keys()) state.setFile(ielts, path, "inFolder");
   assert.deepEqual(folderTally(ielts), { going: 2, trashed: false });
 });
 
@@ -90,4 +90,38 @@ test("copies trashed on their own leave the Plan, and a group left with one copy
 
   assert.deepEqual(state.duplicates, []);
   assert.deepEqual(planChoices(state.choices, state.left), [{ name: "Docs", choice: { type: "createHere" }, files: [["/d/a.pdf", "inFolder"]] }]);
+});
+
+test("a Suggested Folder trashed now trashes exactly its listed files, then leaves the Plan while the others stay", () => {
+  const state = twoFolders();
+  const [ielts] = state.choices;
+
+  const { folders, trashed } = state.trashNow([ielts]);
+  assert.deepEqual(folders, [
+    {
+      name: "IELTS",
+      choice: { type: "trashAll" },
+      files: [
+        ["/d/a.pdf", "trash"],
+        ["/d/b.pdf", "trash"],
+      ],
+    },
+  ]);
+
+  trashed(["/d/a.pdf", "/d/b.pdf"]);
+  assert.deepEqual(planChoices(state.choices, state.left), [{ name: "Labs", choice: { type: "createHere" }, files: [["/d/c.pdf", "inFolder"]] }]);
+});
+
+test("a folder trashed now with a Duplicate Group's Filed Copy in it leaves that group another copy Kept", () => {
+  const paths = ["/d/a.pdf", "/d/x/a.pdf", "/d/y/a.pdf"];
+  const group = { size: 1, copies: paths.map((path) => ({ path, modified: 0 })) };
+  const state = new ReviewState({ root: "/d", entries: paths.map((path) => ({ path, size: 1, modified: 0 })) }, [group]);
+  state.ready({ folders: [{ name: "Docs", files: ["/d/a.pdf"], existing: null, basis: "topic" }], ungrouped: [], summaries: {}, kinds: {} });
+  const [docs] = state.choices;
+
+  state.trashNow([docs]).trashed(["/d/a.pdf"]);
+
+  assert.deepEqual(planDuplicates(state.duplicates), [{ kept: "/d/x/a.pdf", trash: ["/d/y/a.pdf"] }]);
+  assert.deepEqual([...state.left], ["/d/x/a.pdf"]);
+  assert.deepEqual(state.choices, []);
 });

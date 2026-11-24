@@ -1,5 +1,5 @@
 // What a first-time user is shown: the introduction's cards, a drawing and a few words each. Whether they've
-// seen it is `{ introductionSeen }`, kept by the app (see `onboarding` in api.js).
+// seen it is `{ introductionSeen, multiSelectSeen }`, kept by the app (see `onboarding` in api.js).
 import { groupingModelsDetails } from "../grouping-models/details.js";
 
 /**
@@ -12,6 +12,7 @@ export function introductionCards(modelsInstalled, modelsSize, computer = "compu
     { drawing: "pick", text: "Pick a messy folder" },
     { drawing: "plan", text: "Check the Plan" },
     { drawing: "trash", text: "Everything goes to Trash. Undo anytime." },
+    { drawing: "rules", text: "Make Rules to sort files your way" },
   ];
   if (!modelsInstalled) {
     cards.push({
