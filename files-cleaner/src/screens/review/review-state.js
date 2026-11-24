@@ -3,6 +3,8 @@
 // through its methods, which build on the rules in review-choices.
 import {
   addFolder,
+  filedCopy,
+  filedCopyTrashed,
   initialChoices,
   initialDuplicates,
   LeftFiles,
@@ -147,14 +149,33 @@ export class ReviewState {
     this.duplicates = this.duplicates.filter((duplicate) => duplicate.copies.size > 1);
   }
 
+  /**
+   * Trash Now of the Suggested Folders `chosen`: `folders`, every file listed in them trashed, as
+   * `buildReviewPlan` takes them, so no folder is made, and `trashed(paths)`, once the files at `paths` went to
+   * the System Trash, dropping them and each folder left with none.
+   */
+  trashNow(chosen) {
+    const folders = chosen
+      .filter((choice) => choice.files.size > 0)
+      .map((choice) => ({ name: choice.name.trim() || "No name", choice: { type: "trashAll" }, files: [...choice.files.keys()].map((path) => [path, "trash"]) }));
+    const trashed = (paths) => {
+      const gone = new Set(paths);
+      for (const choice of chosen) {
+        for (const path of gone) choice.files.delete(path);
+        if (choice.files.size === 0 && this.choices.includes(choice)) this.remove(choice);
+      }
+      for (const duplicate of this.duplicates) {
+        if (gone.has(filedCopy(duplicate))) filedCopyTrashed(duplicate, this.choices, this.left);
+      }
+      // A group left with one copy is a file like any other.
+      this.duplicates = this.duplicates.filter((duplicate) => duplicate.copies.size > 1);
+    };
+    return { folders, trashed };
+  }
+
   /** Sets the file at `path` of the Suggested Folder `choice` to `file`: "inFolder" or "trash". */
   setFile(choice, path, file) {
     choice.files.set(path, file);
-  }
-
-  /** Trashes every file of the Suggested Folder `choice`, or puts them all back when `trashed` is false. */
-  trashAllFiles(choice, trashed = true) {
-    for (const path of choice.files.keys()) choice.files.set(path, trashed ? "trash" : "inFolder");
   }
 
   /** Trashes the file at `path` left where it is, or puts it back when `trashed` is false. */

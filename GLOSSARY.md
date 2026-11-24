@@ -65,7 +65,7 @@ _Avoid_: keeper rule, preference
 ### Planning
 
 **Plan**:
-The full list of proposed Operations for one Scan Root, shown grouped by Reason, one line per Operation, with the selected Operation's Reason beside it, for the user to approve, untick, or cancel. The Review screen approves the whole Plan at once, from one button; nothing happens to the files before that.
+The full list of proposed Operations for one Scan Root, shown grouped by Reason, one line per Operation, with the selected Operation's Reason beside it, for the user to approve, untick, or cancel. The Review screen approves the whole Plan at once, from one button; nothing happens to the files before that, except a Trash Now.
 _Avoid_: preview, proposal
 
 **Operation**:
@@ -75,6 +75,10 @@ _Avoid_: action, step, task
 **Reason**:
 Why the Plan proposes an Operation: a **Duplicate** (naming a Kept Copy it leaves in place, if any), a **Suggested Folder** (naming that folder) or an **Emptied Folder** (every item in it leaves, so the folder itself is offered for Trash, unticked). The Plan is grouped by Reason. Why an Operation was skipped or failed is not a Reason: that is its Note.
 _Avoid_: cause, source, explanation
+
+**Trash Now**:
+Carrying out part of the Plan on its own, before the rest is approved: the Duplicate Groups' copies marked Trash, or every file listed in one or more Suggested Folders, which then leave the Plan. Only those files go to the System Trash, never a folder already on disk or what else it holds. A Duplicate Group whose Filed Copy is trashed this way keeps another of its copies, so one always survives.
+_Avoid_: quick trash, delete now
 
 **Note**:
 Why an Operation of a Session didn't happen: why it was skipped, failed or couldn't be recovered, or why the last Undo or Redo of it didn't happen ("It no longer exists").
@@ -95,7 +99,7 @@ _Avoid_: Finder-style suffix, copy suffix
 ### Grouping
 
 **Suggested Folder**:
-A folder the Plan gathers Loose Files into: made by one of the user's Rules, proposed by the tool, or added by the user. A Rule's folder holds the files it matched, however few, which are never read unless the Rule groups by meaning; when the Rule puts its files into one named folder, the tool may place other read files in it too. For the rest, the tool proposes one only for files that share a topic (at least half of them, and at least two) or for files of one kind it never reads, such as images (or of any kind, without the Grouping Models), and names it after that topic or kind; read files that share no topic are left where they are. It goes into the existing folder it matched or the user picked, a new folder in the Scan Root (the default) or somewhere else the user picks on the same disk. Trashing all its files is done file by file, never as where it goes. The user can merge one into another, or remove it, which leaves its files where they are. A Suggested Folder always has a name: leaving the name empty never means "trash".
+A folder the Plan gathers Loose Files into: made by one of the user's Rules, proposed by the tool, or added by the user. A Rule's folder holds the files it matched, however few, which are never read unless the Rule groups by meaning; when the Rule puts its files into one named folder, the tool may place other read files in it too. For the rest, the tool proposes one only for files that share a topic (at least half of them, and at least two) or for files of one kind it never reads, such as images (or of any kind, without the Grouping Models), and names it after that topic or kind; read files that share no topic are left where they are. It goes into the existing folder it matched or the user picked, a new folder in the Scan Root (the default) or somewhere else the user picks on the same disk. Trashing all its files is done file by file, or at once with Trash Now, never as where it goes. The user can merge one into another, or remove it, which leaves its files where they are. A Suggested Folder always has a name: leaving the name empty never means "trash".
 _Avoid_: cluster, group, category, proposed folder
 
 **Rule**:
@@ -109,7 +113,7 @@ _Avoid_: AI, smart features, LLM
 ### History
 
 **Session**:
-One approved Plan being carried out, from the first Operation to the last; the unit that Undo reverses. A Session from the Review screen is the whole approved Plan. Every Operation that can happen does: one that can't is skipped with a Note and the rest carry on. Any approved Plan that changes something on disk is a Session, even if some of its Operations were skipped; one where nothing happened is not. Trying a skipped or failed Operation again later adds it to the same Session.
+One approved Plan being carried out, from the first Operation to the last; the unit that Undo reverses. A Session from the Review screen is the whole approved Plan, or one Trash Now. Every Operation that can happen does: one that can't is skipped with a Note and the rest carry on. Any approved Plan that changes something on disk is a Session, even if some of its Operations were skipped; one where nothing happened is not. Trying a skipped or failed Operation again later adds it to the same Session.
 _Avoid_: run, job, cleanup
 
 **Journal**:

@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 mod downloads;
+mod menu;
 mod models;
 
 use files_cleaner_core::write_atomically;
@@ -831,11 +832,14 @@ fn use_describing_model(
     models.use_custom(picked).map_err(CommandError::new)
 }
 
-/// What the user has seen of the introduction, as stored.
+/// What the user has seen, as stored: the introduction, and whether they
+/// have selected several items once, after which the hint saying how is
+/// no longer shown.
 #[derive(Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct Onboarding {
     introduction_seen: bool,
+    multi_select_seen: bool,
 }
 
 /// What the user has seen of the introduction.
@@ -925,6 +929,7 @@ pub fn run() {
             }
             let folder = app.path().app_data_dir()?.join(MODELS_FOLDER_NAME);
             app.manage(Arc::new(GroupingModels::new(app.handle().clone(), folder)));
+            menu::install(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -966,7 +971,9 @@ pub fn run() {
             build_review_plan,
             open_file,
             open_session_file,
-            on_another_disk
+            on_another_disk,
+            menu::set_menu_state,
+            menu::show_context_menu
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

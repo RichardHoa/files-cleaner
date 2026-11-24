@@ -143,8 +143,8 @@ export const useDescribingModel = (picked) => invoke("use_describing_model", { p
 export const onGroupingModelsStatus = (onStatus) => events.listen("grouping-models", (event) => onStatus(event.payload));
 
 /**
- * What the user has seen: `{ introductionSeen }`.
- * Nothing is seen until it's saved.
+ * What the user has seen: `{ introductionSeen, multiSelectSeen }`, the last whether they have once selected
+ * several items, after which the hint saying how goes. Nothing is seen until it's saved.
  */
 export const onboarding = () => invoke("onboarding");
 
@@ -248,6 +248,21 @@ export const openFile = (path) => invoke("open_file", { path });
 
 /** Opens, in its default app, where the item of the Operation `operationId` of the Session `sessionId` is now. */
 export const openSessionFile = (sessionId, operationId) => invoke("open_session_file", { sessionId, operationId });
+
+/**
+ * Greys out the menu bar's items that don't apply and lists the ones that change: `{ enabled, recent, moveTo,
+ * mergeInto }` as `menuBar` in menu-items.js works it out.
+ */
+export const setMenuState = (state) => invoke("set_menu_state", { state });
+
+/** Calls `onClick(id)` with the id of each menu bar item clicked, "moveTo:1" for a listed one. */
+export const onMenuClick = (onClick) => events.listen("menu", (event) => onClick(event.payload));
+
+/** Shows the OS's own right-click menu of `items`, the `spec` of `contextMenu` in menu-items.js, at the pointer. */
+export const showContextMenu = (items) => invoke("show_context_menu", { items });
+
+/** Calls `onChosen(place)` with the place of each right-click menu item chosen, "1.0" for a submenu's first. */
+export const onContextMenuChoice = (onChosen) => events.listen("context-menu", (event) => onChosen(event.payload));
 
 /** Asks `question` in a native dialog with `okLabel` and Cancel; resolves to whether OK was clicked. */
 export const askToConfirm = (question, okLabel) => dialog.ask(question, { okLabel, cancelLabel: "Cancel", kind: "info" });

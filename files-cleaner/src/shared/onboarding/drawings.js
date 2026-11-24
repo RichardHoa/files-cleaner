@@ -1,4 +1,4 @@
-// The introduction's line drawings, on a 160×100 grid, stroked in the accent colour (see `.intro-drawing`).
+// The introduction's line drawings (the Rules one also on the Rules screen with no Rules), on a 160×100 grid, stroked in the accent colour (see `.intro-drawing`).
 const SVG = "http://www.w3.org/2000/svg";
 
 const DOC = "M0 0h14l6 6v20H0z M14 0v6h6";
@@ -24,6 +24,14 @@ const DRAWINGS = {
     ["M76 30h40 M90 30v-5h12v5 M80 30l3 52h26l3-52 M91 40v32 M101 40v32"],
     ["M70 60H52a12 12 0 0 1 0-24h14 M61 31l5 5-5 5"],
   ],
+  // Files going into a labelled folder.
+  rules: [
+    [DOC, "translate(14 40) rotate(-10)"],
+    [DOC, "translate(34 32) rotate(6)"],
+    ["M62 62h18 M75 57l5 5-5 5"],
+    ["M92 46h20l6 6h28a4 4 0 0 1 4 4v28a4 4 0 0 1-4 4H92a4 4 0 0 1-4-4V50a4 4 0 0 1 4-4z"],
+    ["M101 64h38v12h-38z M107 70h26"],
+  ],
   // A file being read, and a download.
   download: [
     ["M40 18h22l10 10v50H40z M62 18v10h10 M48 40h16 M48 50h16 M48 60h10"],
@@ -31,7 +39,7 @@ const DRAWINGS = {
   ],
 };
 
-/** The drawing `name` as an `<svg>`. Decorative: the card's sentence says what it shows. */
+/** The drawing `name` as an `<svg>`. Decorative: the sentence beside it says what it shows. */
 export function drawing(name) {
   const svg = document.createElementNS(SVG, "svg");
   svg.setAttribute("viewBox", "0 0 160 100");

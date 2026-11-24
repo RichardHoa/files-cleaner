@@ -1,39 +1,41 @@
-// The Review screen's selection: files, and copies, are selected as in Finder, by clicking, by dragging a
-// rectangle over them, or with the arrow keys (Shift adding to the selection), then trashed or put back (or
-// kept, for copies) from the toolbar always shown above the list of files (not copies, whose pane has none),
-// their right-click menu or ⌘⌫ (Ctrl+Delete elsewhere), or moved with "Move to…" in their right-click menu.
-// With nothing selected in a Suggested Folder, the toolbar trashes the whole folder; elsewhere its buttons
-// are disabled with nothing selected, and never hide, so the list never moves. A file opens in its default app by double-clicking it or from
-// its right-click menu.
+// The Review screen's selection: files, and copies, are selected as in Finder, by clicking or with the arrow
+// keys (Shift adding to the selection), then marked Trash or put back (or kept, for copies) from the toolbar
+// always shown above the list of files (not copies, whose pane has none), their right-click menu or Edit › Trash
+// (⌘⌫, Ctrl+Delete elsewhere), or moved with "Move to…" in their right-click menu or Edit › Move To…. Over a
+// Suggested Folder, the toolbar first trashes all its files now (Edit › Trash Now, ⇧⌘⌫); the button marking the
+// selection shows once files are selected, after it, so nothing before it moves. Its count line says how to select
+// more until the user has once. A file opens in its default app by double-clicking it or from its
+// right-click menu. Nothing is dragged.
 import { describeError, onAnotherDisk, openFile, pathSeparator, pickFolder } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";
-import { openEach } from "../../shared/plan/file-list.js";
-import { plural } from "../../shared/format.js";
+import { fileMenuItems, openEach } from "../../shared/plan/file-list.js";
+import { plural, trashPlace } from "../../shared/format.js";
 import { icon } from "../../shared/icons.js";
+import { refreshMenu, showMenu } from "../../shared/menus/menus.js";
+import { selectionLine, withShortcut } from "../../shared/menus/menu-items.js";
+import { updateSeen } from "../../shared/onboarding/seen.js";
 import { showStatus } from "../../shared/status.js";
-import { marqueeSelect } from "./marquee.js";
 import { clickSelection } from "./row-selection.js";
 import { copiesText, displayName, fileName, UNSORTED } from "./pane-helpers.js";
-import { folderTally } from "./review-choices.js";
 
 /**
  * The selection of the Review screen with context `ctx`: `toolbar`, `draw()`, `selectable` and `copyMenu`
- * making a row selectable or openable, `move` moving files into a Suggested Folder, and `clearStatus()`
- * dropping the toolbar's error once another section is listed.
+ * making a row selectable or openable, `move` moving files into a Suggested Folder, `clearStatus()`
+ * dropping the toolbar's error once another section is listed, and `menuItems()`, its part of the menu bar.
  */
 export function selection(ctx) {
-  const { state, view, menu, pane } = ctx;
+  const { state, view, pane } = ctx;
   const keep = el("button", { type: "button", className: "small" }, "Keep");
-  const trash = el("button", { type: "button", className: "small" }, icon("trash"), el("span", {}, "Trash"));
+  const trashNow = el("button", { type: "button", className: "small" }, icon("trash"), el("span"));
+  trashNow.title = withShortcut(`Moves every file in this folder to the ${trashPlace(pathSeparator)} now. The rest of the Plan isn't touched. Undo it from History.`, "trashNow");
+  const trash = el("button", { type: "button", className: "small" }, el("span", {}, "Mark as Trash"));
   const selected = el("span", { className: "muted review-toolbar-count" });
   // Why Move to… or opening a file failed, beside the toolbar's buttons.
   const status = el("p", { className: "status review-toolbar-status" });
-  const toolbar = el("div", { className: "review-toolbar", role: "toolbar", ariaLabel: "Selected files" }, keep, trash, selected, status);
+  const toolbar = el("div", { className: "review-toolbar", role: "toolbar", ariaLabel: "Selected files" }, trashNow, keep, trash, selected, status);
   /** Every selectable row now listed in the pane. */
   const rows = () => [...pane.querySelectorAll("[data-path]")];
   const copies = () => view.current === "duplicates";
-  /** The Suggested Folder listed with nothing selected in it, which the toolbar's Trash then acts on, or null. */
-  const wholeFolder = () => (view.selection.size === 0 && state.choices.includes(view.current) && view.current.files.size > 0 ? view.current : null);
 
   const move = (paths, to) => {
     state.move(paths, to);
@@ -81,13 +83,10 @@ export function selection(ctx) {
   /** Trashes `paths`, or puts them all back when every one is trashed already. */
   const toggleTrash = (paths) => setTrashed(paths, !paths.every(isTrashed));
 
+  trashNow.addEventListener("click", () => ctx.sessions.trashFoldersNow([view.current]));
   keep.addEventListener("click", () => setTrashed([...view.selection], false));
   trash.addEventListener("click", () => {
-    const folder = wholeFolder();
-    if (folder) {
-      state.trashAllFiles(folder, !folderTally(folder).trashed);
-      ctx.redraw.pane();
-    } else if (copies()) setTrashed([...view.selection], true);
+    if (copies()) setTrashed([...view.selection], true);
     else toggleTrash([...view.selection]);
   });
 
@@ -96,7 +95,7 @@ export function selection(ctx) {
     draw();
   }
 
-  /** Marks the selected rows in the pane, and brings the toolbar up to date with what can be done with them. */
+  /** Marks the selected rows in the pane, and brings the toolbar and the menu bar up to date with what can be done with them. */
   function draw() {
     const listed = rows();
     const shown = new Set(listed.map((row) => row.dataset.path));
@@ -104,47 +103,77 @@ export function selection(ctx) {
     for (const row of listed) row.classList.toggle("selected", view.selection.has(row.dataset.path));
     const paths = [...view.selection];
     const none = paths.length === 0;
-    const folder = wholeFolder();
-    keep.hidden = !copies();
-    keep.disabled = none;
-    trash.disabled = none && !folder;
-    if (folder) trash.lastChild.textContent = folderTally(folder).trashed ? "Put back folder" : "Trash folder";
-    else trash.lastChild.textContent = !copies() && !none && paths.every(isTrashed) ? "Put back" : "Trash";
-    selected.textContent = none ? "" : `${copies() ? copiesText(paths.length) : plural(paths.length, "file")} selected`;
+    const folder = state.choices.includes(view.current) ? view.current : null;
+    trashNow.hidden = !folder;
+    if (folder) {
+      trashNow.lastChild.textContent = `Trash all ${plural(folder.files.size, "file")} now`;
+      trashNow.disabled = folder.files.size === 0 || view.running;
+    }
+    keep.hidden = !copies() || none;
+    trash.hidden = none;
+    trash.lastChild.textContent = copies() ? "Trash" : paths.every(isTrashed) ? "Put back" : "Mark as Trash";
+    trash.title = withShortcut(trash.lastChild.textContent, "trash");
+    if ((paths.length > 1 || view.picked.size > 1) && !view.multiSelectSeen) {
+      view.multiSelectSeen = true;
+      updateSeen((seen) => ({ ...seen, multiSelectSeen: true }));
+    }
+    const count = none ? "" : `${copies() ? copiesText(paths.length) : plural(paths.length, "file")} selected`;
+    selected.textContent = selectionLine(count, paths.length === 1 || (none && view.picked.size === 1), view.multiSelectSeen);
+    refreshMenu();
   }
 
+  /** Where `paths` can be moved: every folder but the one listed, or Unsorted, then any other folder on disk. */
+  const moveTargets = (paths) => [
+    ...destinations().map((target) => ({ label: target ? displayName(target) : UNSORTED, action: () => move(paths, target) })),
+    { label: "Other folder…", action: () => moveToOther(paths) },
+  ];
+
   /** The right-click menu's actions on `paths`, besides opening them: Keep and Trash for copies; Trash or Put back, and Move to…, for files. */
-  function menuItems(paths, row, event) {
+  function rowMenuItems(paths) {
     if (copies()) {
       return [
         { label: "Keep", action: () => setTrashed(paths, false) },
-        { label: "Trash", action: () => setTrashed(paths, true) },
+        { label: "Trash", shortcut: "trash", action: () => setTrashed(paths, true) },
       ];
     }
-    const targets = [
-      ...destinations().map((target) => ({ label: target ? displayName(target) : UNSORTED, action: () => move(paths, target) })),
-      { label: "Other folder…", action: () => moveToOther(paths) },
-    ];
     return [
-      { label: paths.every(isTrashed) ? "Put back" : "Trash", action: () => toggleTrash(paths) },
-      { label: "Move to…", action: () => menu.open([], row, event, targets) },
+      { label: paths.every(isTrashed) ? "Put back" : "Trash", shortcut: "trash", action: () => toggleTrash(paths) },
+      { label: "Move to…", submenu: moveTargets(paths) },
     ];
+  }
+
+  /**
+   * The selection's part of the menu bar: Select All while rows are listed, Trash and Move To… while rows are
+   * selected, as their right-click menu has them: Trash marks copies Trash and toggles it on files, and Move To… is
+   * for files only.
+   */
+  function menuItems() {
+    const paths = [...view.selection];
+    return {
+      selectAll: rows().length > 0 ? selectAll : null,
+      trash: paths.length === 0 ? null : copies() ? () => setTrashed(paths, true) : () => toggleTrash(paths),
+      moveTo: paths.length > 0 && !copies() ? moveTargets(paths) : [],
+    };
+  }
+
+  /** Selects every row listed, so Mark as Trash then marks a whole folder. */
+  function selectAll() {
+    view.selection = new Set(rows().map((row) => row.dataset.path));
+    draw();
   }
 
   /** Opens the files at `paths` in their default apps, saying so if one can't be opened. */
   const openFiles = (paths) => openEach(paths, openFile).catch((error) => showStatus(status, describeError(error), true));
+  /** Says in the toolbar's status line why a right-click menu's action failed. */
+  const showError = (error) => showStatus(status, describeError(error), true);
 
   /**
    * Makes `row`, listing the file at `path`, selectable as in Finder, opened by double-clicking it, with a
-   * right-click menu acting on the selection, opening it or showing it in its folder, and, when `movable`,
-   * draggable by its name onto a folder in the sidebar, taking the whole selection when it is in it. A copy
-   * isn't movable: its fate moves it.
+   * right-click menu acting on the selection, opening it or showing it in its folder.
    */
-  function selectable(row, path, { movable = true } = {}) {
+  function selectable(row, path) {
     row.dataset.path = path;
     row.tabIndex = 0;
-    const handle = row.querySelector(".folder-file-name, .duplicate-copy-folder");
-    handle.draggable = movable;
     const select = ({ toggle, range }) => {
       const order = rows().map((node) => node.dataset.path);
       view.selection = clickSelection(view.selection, order, view.anchor, path, { toggle, range });
@@ -167,20 +196,7 @@ export function selection(ctx) {
       event.preventDefault();
       if (!view.selection.has(path)) select({ toggle: false, range: false });
       const paths = [...view.selection];
-      menu.open(paths, row, event, menuItems(paths, row, event), () => openFiles(paths));
-    });
-    row.addEventListener("dragstart", (event) => {
-      view.dragged = view.selection.has(path) ? [...view.selection] : [path];
-      view.draggedFolder = null;
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", view.dragged.join("\n"));
-      for (const node of rows()) {
-        if (view.dragged.includes(node.dataset.path)) node.classList.add("dragging");
-      }
-    });
-    row.addEventListener("dragend", () => {
-      view.dragged = null;
-      for (const node of pane.querySelectorAll(".dragging")) node.classList.remove("dragging");
+      showMenu(fileMenuItems(paths, rowMenuItems(paths), () => openFiles(paths), showError));
     });
     return row;
   }
@@ -190,19 +206,12 @@ export function selection(ctx) {
     row.addEventListener("dblclick", () => openFiles([path]));
     row.addEventListener("contextmenu", (event) => {
       event.preventDefault();
-      menu.open([path], row, event, [], () => openFiles([path]));
+      showMenu(fileMenuItems([path], [], () => openFiles([path]), showError));
     });
     return row;
   }
 
-  // ⌘⌫ on macOS, Ctrl+Delete elsewhere, toggles Trash on the selection, as long as no field is being typed in
-  // (a copy's Keep box isn't one).
-  pane.addEventListener("keydown", (event) => {
-    const shortcut = (event.metaKey && event.key === "Backspace") || (event.ctrlKey && event.key === "Delete");
-    if (!shortcut || view.selection.size === 0 || event.target.closest("input:not(.duplicate-copy-keep), select, textarea")) return;
-    event.preventDefault();
-    toggleTrash([...view.selection]);
-  });
+  // ⌘⌫ (Ctrl+Delete elsewhere) and ⌘A (Ctrl+A) are the menu bar's Trash and Select All (see `menuItems`).
 
   // The arrow keys select the row above or below, as in Finder; with Shift, from the last row clicked to it.
   pane.addEventListener("keydown", (event) => {
@@ -228,19 +237,12 @@ export function selection(ctx) {
     draw();
   });
 
-  marqueeSelect(pane, {
-    rows,
-    // A drag from a file's name moves the file.
-    ignore: (target) => Boolean(target.closest("[draggable='true']")),
-    select: (paths) => {
-      view.selection = new Set(paths);
-      view.anchor = paths[0] ?? null;
-      draw();
-    },
-    // Clicking the toolbar's blank part isn't clicking empty space.
-    ignoreClick: (target) => toolbar.contains(target),
-    clear,
+  // A plain click on empty space, not on a row, a control or the toolbar's blank part, deselects.
+  pane.addEventListener("click", (event) => {
+    const target = event.target;
+    if (target.closest("button, input, select, a, label, [contenteditable]") || toolbar.contains(target)) return;
+    if (!rows().some((row) => row.contains(target))) clear();
   });
 
-  return { toolbar, draw, selectable, copyMenu, move, clearStatus: () => showStatus(status, "") };
+  return { toolbar, draw, selectable, copyMenu, move, clearStatus: () => showStatus(status, ""), menuItems };
 }

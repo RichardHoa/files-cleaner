@@ -111,5 +111,8 @@ cargo build --release -p files-cleaner-core --bin bench-scan
 
 ## things to improve
 
-- Proper JS doc for the project
-
+- Remove the drag thing out of the app
+- Have the ability to trash individual folder in suggested folder instead of trash all
+- Have an introduction about rules, how to use it or set it up
+- Seem like we have a bug, /Download/keep repeatedly get into save folder although there is no action from user
+- if there is an action required from user (download the model in the review screen, or accept scanning in the review screen), make the suggested folder apperant that there is an action that the user need to do. 

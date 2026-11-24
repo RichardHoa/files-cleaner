@@ -1,6 +1,6 @@
 // Pieces shared by the review and Session screens' file lists: the "Show more" links under a
 // list, the menu a right-click on a file opens, and opening files in their default apps.
-import { askToConfirm, describeError, revealInFileManager } from "../api.js";
+import { askToConfirm, revealInFileManager } from "../api.js";
 import { count } from "../format.js";
 import { el } from "../dom.js";
 import { PAGE_SIZE } from "./plan-view.js";
@@ -37,60 +37,14 @@ export async function openEach(items, openOne) {
 }
 
 /**
- * A right-click menu with "Open" and "Show in folder". `node` goes on the page once;
- * `open(paths, row, event, items, openAll)` opens it for the `contextmenu` `event` on `row`, and Show in
- * folder selects `paths` in the file manager, left out when `paths` is empty. Open runs `openAll()`, and is
- * left out without it. `items`, `[{ label, action }]`, go above them, each closing the menu before its
- * `action()` runs.
+ * A right-click menu's items, as `showMenu` takes them: `items` above "Open" and "Show in folder". Show in folder
+ * selects `paths` in the file manager, saying why it couldn't with `onError(error)`, and is left out when `paths`
+ * is empty. Open runs `openAll()`, and is left out without it.
  */
-export function revealMenu() {
-  const menu = el("div", { className: "row-menu file-menu", role: "menu", hidden: true });
-  const close = () => {
-    if (menu.hidden) return;
-    menu.hidden = true;
-    document.removeEventListener("pointerdown", closeOutside, true);
-    document.removeEventListener("keydown", closeOnEscape);
-    window.removeEventListener("scroll", close);
-  };
-  const closeOutside = (event) => {
-    if (!menu.contains(event.target)) close();
-  };
-  const closeOnEscape = (event) => {
-    if (event.key === "Escape") close();
-  };
-  function open(paths, row, event, items = [], openAll = null) {
-    const buttons = items.map(({ label, action }) => {
-      const button = el("button", { type: "button", role: "menuitem" }, label);
-      button.addEventListener("click", () => {
-        close();
-        action();
-      });
-      return button;
-    });
-    const reveal = el("button", { type: "button", role: "menuitem" }, "Show in folder");
-    reveal.addEventListener("click", () =>
-      revealInFileManager(paths).then(close, (error) => menu.replaceChildren(el("p", { className: "status error" }, describeError(error)))),
-    );
-    const opener = el("button", { type: "button", role: "menuitem" }, "Open");
-    opener.addEventListener("click", () => {
-      close();
-      openAll();
-    });
-    const below = [...(openAll ? [opener] : []), ...(paths.length > 0 ? [reveal] : [])];
-    menu.replaceChildren(...buttons);
-    if (below.length > 0) menu.append(buttons.length ? el("hr", { className: "menu-separator" }) : "", ...below);
-    menu.hidden = false;
-    // At the pointer, kept inside the window; opened from the keyboard, under the row.
-    const fromKeyboard = event.clientX === 0 && event.clientY === 0;
-    const anchor = row.getBoundingClientRect();
-    const x = fromKeyboard ? anchor.left : event.clientX;
-    const y = fromKeyboard ? anchor.bottom : event.clientY;
-    menu.style.left = `${Math.max(0, Math.min(x, window.innerWidth - menu.offsetWidth - 4))}px`;
-    menu.style.top = `${Math.max(0, Math.min(y, window.innerHeight - menu.offsetHeight - 4))}px`;
-    document.addEventListener("pointerdown", closeOutside, true);
-    document.addEventListener("keydown", closeOnEscape);
-    window.addEventListener("scroll", close);
-    (buttons[0] ?? below[0])?.focus();
-  }
-  return { node: menu, open };
+export function fileMenuItems(paths, items = [], openAll = null, onError = () => {}) {
+  const below = [
+    ...(openAll ? [{ label: "Open", action: openAll }] : []),
+    ...(paths.length > 0 ? [{ label: "Show in folder", action: () => revealInFileManager(paths).catch(onError) }] : []),
+  ];
+  return [...items, ...(items.length > 0 && below.length > 0 ? [{ separator: true }] : []), ...below];
 }

@@ -1,4 +1,5 @@
 // Home: rescan a Recent Scan Root or pick a folder, open Rules or Settings, and see the latest Sessions.
+// File › New Scan and File › Scan Recent come here to start one; while a scan runs they're greyed out.
 import {
   cancelScan,
   describeError,
@@ -13,13 +14,16 @@ import {
 import { el } from "../../shared/dom.js";
 import { count, relativeTime, splitPath } from "../../shared/format.js";
 import { icon } from "../../shared/icons.js";
+import { refreshMenu, setScreenMenu } from "../../shared/menus/menus.js";
+import { withShortcut } from "../../shared/menus/menu-items.js";
 import { noSessions, sessionList } from "../../shared/session-list/session-row.js";
 import { undoSections } from "../../shared/outcomes.js";
 import { showStatus, showWarning } from "../../shared/status.js";
 
 const LATEST_SESSIONS = 3;
 
-export function render(root, nav) {
+/** `start` is `{ pick: true }` to pick a folder to scan at once, or `{ folder }` to scan it (see main.js). */
+export function render(root, nav, start = null) {
   const badge = el("button", { type: "button", className: "config-badge" });
   const rulesButton = el("button", { type: "button", className: "config-badge", title: "How files are sorted at every scan" }, "Rules");
   rulesButton.addEventListener("click", () => nav.rules("home"));
@@ -44,6 +48,7 @@ export function render(root, nav) {
   );
 
   let scanning = false;
+  setScreenMenu(() => (scanning ? { newScan: null, recent: [] } : {}));
   // Set once Cancel was clicked during the scan: Home stays as it was, with nothing kept.
   let cancelled = false;
   const cancel = () => {
@@ -64,6 +69,7 @@ export function render(root, nav) {
   const startScan = async (folder) => {
     if (scanning) return;
     scanning = true;
+    refreshMenu();
     tiles.classList.add("busy");
     try {
       // A protected folder can still be scanned, once the user has read why it's protected.
@@ -91,6 +97,7 @@ export function render(root, nav) {
       else showWarning(status, describeError(error));
     }
     scanning = false;
+    refreshMenu();
     tiles.classList.remove("busy");
   };
 
@@ -105,6 +112,8 @@ export function render(root, nav) {
   showTiles(tiles, startScan, pick);
   showSessions(sessions, seeAll, nav);
 
+  if (start?.pick) pick();
+  else if (start?.folder) startScan(start.folder);
 }
 
 /** The Settings button, which also says when the config has an error, spelt out below. */
@@ -112,12 +121,12 @@ async function showConfig(badge, errorLine) {
   try {
     await loadConfig();
     badge.classList.remove("error");
-    badge.title = "Open Settings";
+    badge.title = withShortcut("Open Settings", "settings");
     badge.replaceChildren(icon("settings"), "Settings");
     errorLine.textContent = "";
   } catch (error) {
     badge.classList.add("error");
-    badge.title = "Open Settings";
+    badge.title = withShortcut("Open Settings", "settings");
     badge.replaceChildren(icon("settings"), "Settings: config error");
     errorLine.textContent = describeError(error);
   }

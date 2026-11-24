@@ -5,7 +5,8 @@
 // from its right-click menu.
 import { describeError, openSessionFile, pathSeparator, redoOperations, retryOperations, revealInFileManager, sessionDetails, undo } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";
-import { drawMore, revealMenu } from "../../shared/plan/file-list.js";
+import { drawMore, fileMenuItems } from "../../shared/plan/file-list.js";
+import { showMenu } from "../../shared/menus/menus.js";
 import { count, formatDate, formatSize, plural, splitPath } from "../../shared/format.js";
 import { describeSummary, describeWarning, warningBlock } from "../../shared/outcomes.js";
 import { tickState, toggleAll } from "../../shared/plan/plan-selection.js";
@@ -213,7 +214,6 @@ export function render(root, nav, sessionId, from, result) {
     });
     const bulkBar = el("div", { className: "session-bulk" }, bulk);
     const pane = el("aside", { className: "plan-pane", ariaLabel: "Selected file" });
-    const menu = revealMenu();
     let files = []; // the group's files that match the search
     const tickable = () => files.filter(actionOf).map((op) => op.id);
     let rows = []; // [{ op, row, box, target }] for the files on screen; `target` takes focus
@@ -272,7 +272,7 @@ export function render(root, nav, sessionId, from, result) {
       row.addEventListener("contextmenu", (event) => {
         event.preventDefault();
         select(op);
-        if (path) menu.open([path], row, event, [], openIt);
+        if (path) showMenu(fileMenuItems([path], [], openIt, (error) => showStatus(status, describeError(error), true)));
       });
       return { op, row, box, target };
     }
@@ -374,7 +374,6 @@ export function render(root, nav, sessionId, from, result) {
       list,
       more,
       bulkBar,
-      menu.node,
     );
     content.replaceChildren(
       header,
