@@ -69,5 +69,8 @@ fn sync_folder(folder: &Path) -> io::Result<()> {
     if cfg!(windows) {
         return Ok(());
     }
+    // Not path traversal: the folder is only flushed, and its path comes
+    // from the app's own files, not from untrusted input.
+    // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
     File::open(folder)?.sync_all()
 }
