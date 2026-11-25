@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { FOLDER_LEVELS, nearestLevel } from "../src/screens/settings/grouping-levels.js";
+import { FOLDER_LEVELS, nearestLevel } from "../src/screens/settings/settings.js";
 
 test("The middle level is today's default, and a stored value between levels snaps to the nearest", () => {
   assert.equal(FOLDER_LEVELS[2].threshold, 0.86);

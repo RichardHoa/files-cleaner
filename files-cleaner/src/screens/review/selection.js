@@ -1,15 +1,10 @@
 // The toolbar is always shown, so nothing below it moves. Moving takes only the files not marked
 // Trash.
 import { describeError, onAnotherDisk, openFile, pathSeparator, pickFolder } from "../../shared/api.js";
-import { el } from "../../shared/dom.js";
-import { fileMenuItems, openEach } from "../../shared/plan/file-list.js";
-import { plural } from "../../shared/format.js";
-import { refreshMenu, showMenu } from "../../shared/menus/menus.js";
-import { selectionLine, withShortcut } from "../../shared/menus/menu-items.js";
-import { updateSeen } from "../../shared/onboarding/seen.js";
-import { showStatus } from "../../shared/status.js";
-import { clickSelection } from "./row-selection.js";
-import { copiesText, displayName, fileName, LEAVE_UNSORTED } from "./pane-helpers.js";
+import { el, fileMenuItems, icon, openEach, showStatus } from "../../shared/dom.js";
+import { count, plural, splitPath } from "../../shared/format.js";
+import { updateSeen } from "../../shared/introduction.js";
+import { refreshMenu, selectionLine, showMenu, withShortcut } from "../../shared/menus.js";
 
 export function selection(ctx) {
   const { state, view, pane } = ctx;
@@ -212,3 +207,39 @@ export function selection(ctx) {
 
   return { toolbar, draw, selectable, copyMenu, move, clearStatus: () => showStatus(status, ""), menuItems };
 }
+
+// The way Finder selects rows, which users expect on this screen.
+
+/** `anchor` is the item last clicked without Shift. */
+export function clickSelection(selection, order, anchor, item, { toggle = false, range = false } = {}) {
+  const from = anchor === null ? -1 : order.indexOf(anchor);
+  if (range && from !== -1) {
+    const to = order.indexOf(item);
+    const [start, end] = from < to ? [from, to] : [to, from];
+    return new Set([...(toggle ? selection : []), ...order.slice(start, end + 1)]);
+  }
+  if (toggle) {
+    const next = new Set(selection);
+    if (next.has(item)) next.delete(item);
+    else next.add(item);
+    return next;
+  }
+  return new Set([item]);
+}
+
+// The panes reach each other only through the Review screen's context, so the pieces they share are
+// imported from here.
+
+export const FILES_SHOWN = 50;
+
+export const fileName = (path) => splitPath(path, pathSeparator).name;
+
+export const displayName = (choice) => choice.name.trim() || "No name";
+
+export const UNSORTED = "Unsorted";
+
+export const LEAVE_UNSORTED = "Leave unsorted";
+
+export const trashedMark = () => el("span", { className: "folder-file-trashed", role: "img", ariaLabel: "Trashed", title: "Trashed" }, icon("trash"));
+
+export const copiesText = (n) => `${count(n)} ${n === 1 ? "copy" : "copies"}`;

@@ -3,14 +3,13 @@
 import { pathSeparator } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";
 import { plural, splitPath } from "../../shared/format.js";
-import { refreshMenu, setScreenMenu } from "../../shared/menus/menus.js";
-import { seen } from "../../shared/onboarding/seen.js";
+import { seen } from "../../shared/introduction.js";
+import { refreshMenu, setScreenMenu } from "../../shared/menus.js";
 import { duplicatesPane } from "./duplicates-pane.js";
 import { folderPanes } from "./folder-panes.js";
-import { FILES_SHOWN } from "./pane-helpers.js";
 import { reading } from "./reading.js";
 import { ReviewState } from "./review-state.js";
-import { selection } from "./selection.js";
+import { FILES_SHOWN, selection } from "./selection.js";
 import { sessions } from "./sessions.js";
 import { sidebar } from "./sidebar.js";
 

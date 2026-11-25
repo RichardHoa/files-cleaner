@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { introductionCards } from "../src/shared/onboarding/onboarding.js";
+import { introductionCards } from "../src/shared/introduction.js";
 
 test("the introduction shows Rules before offering the Grouping Models last, and leaves that card out once they're installed", () => {
   assert.deepEqual(

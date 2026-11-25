@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { describeDuplicateProgress, describeScanProgress, stepFlow } from "../src/steps.js";
+import { describeDuplicateProgress, describeScanProgress, stepFlow } from "../src/main.js";
 
 const ROOT = "/Users/me/Downloads";
 const groups = [{ size: 4, copies: [{ path: `${ROOT}/a.pdf` }, { path: `${ROOT}/Old/a.pdf` }] }];

@@ -1,14 +1,11 @@
 // Rows have no buttons on purpose: every action on files comes from the toolbar or a menu.
 import { describeError, onAnotherDisk, pickFolder } from "../../shared/api.js";
-import { el } from "../../shared/dom.js";
-import { drawMore } from "../../shared/plan/file-list.js";
+import { drawMore, el, icon, showStatus } from "../../shared/dom.js";
 import { count, formatDate, formatSize, plural } from "../../shared/format.js";
-import { icon } from "../../shared/icons.js";
-import { showMenu } from "../../shared/menus/menus.js";
-import { showStatus } from "../../shared/status.js";
-import { describeRule } from "../rules/rule-text.js";
+import { showMenu } from "../../shared/menus.js";
+import { describeRule } from "../rules/rules.js";
 import { byKindNewestFirst, nameMissing, otherKeptCopies } from "./review-choices.js";
-import { FILES_SHOWN, fileName, trashedMark, UNSORTED } from "./pane-helpers.js";
+import { fileName, FILES_SHOWN, trashedMark, UNSORTED } from "./selection.js";
 
 function basisText(folder, existingName) {
   const fits = existingName ? ` · fits your folder “${existingName}”` : "";

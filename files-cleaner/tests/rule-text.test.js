@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { describeRule, parseExtensions, parseMeaningFolders, parseWords } from "../src/screens/rules/rule-text.js";
+import { describeRule, parseExtensions, parseMeaningFolders, parseWords } from "../src/screens/rules/rules.js";
 
 test("a Rule reads back in one line", () => {
   const rule = {

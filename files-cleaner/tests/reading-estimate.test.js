@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readingEstimate, readingNeedsAsking, updatedAverage } from "../src/screens/review/reading-estimate.js";
+import { readingEstimate, readingNeedsAsking, updatedAverage } from "../src/screens/review/reading.js";
 
 test("with no history, the time left is 4 s × the files left", () => {
   assert.deepEqual(readingEstimate({ average: null, total: 30, finished: 0, elapsed: 0 }), { perFile: 4, left: 120 });

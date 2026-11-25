@@ -18,14 +18,11 @@ import {
   revealInFileManager,
   useDescribingModel,
 } from "../../shared/api.js";
-import { el } from "../../shared/dom.js";
+import { el, progressBar, showStatus } from "../../shared/dom.js";
 import { formatSize, plural, splitPath } from "../../shared/format.js";
-import { showIntroduction } from "../../shared/onboarding/introduction.js";
-import { groupingModelsControls, modelsButton, watchGroupingModels } from "../../shared/grouping-models/models-panel.js";
+import { showIntroduction } from "../../shared/introduction.js";
+import { groupingModelsControls, modelsButton, watchGroupingModels } from "../../shared/models-panel.js";
 import { warningBlock } from "../../shared/outcomes.js";
-import { progressBar } from "../../shared/progress-bar.js";
-import { showStatus } from "../../shared/status.js";
-import { EXISTING_FOLDER_LEVELS, FOLDER_LEVELS, nearestLevel, onLevel } from "./grouping-levels.js";
 
 const FILE_MANAGER = pathSeparator === "\\" ? "Explorer" : /Mac/.test(navigator.userAgent) ? "Finder" : "File Manager";
 
@@ -553,3 +550,34 @@ function sessionsSection() {
     status,
   );
 }
+
+// Levels instead of numbers, as a threshold means nothing to the user. The config keeps thresholds,
+// so a value between levels shows at the nearest.
+
+/** Looser means fewer, broader folders. */
+export const FOLDER_LEVELS = [
+  { label: "A few broad folders", threshold: 0.8 },
+  { label: "Fewer, broader folders", threshold: 0.83 },
+  { label: "Some folders", threshold: 0.86 },
+  { label: "More, narrower folders", threshold: 0.89 },
+  { label: "Many specific folders", threshold: 0.92 },
+];
+
+/** Looser first: files go into existing folders more often. */
+export const EXISTING_FOLDER_LEVELS = [
+  { label: "Often", threshold: 0.82 },
+  { label: "Sometimes", threshold: 0.86 },
+  { label: "Rarely", threshold: 0.9 },
+];
+
+/** The looser level on a tie. */
+export function nearestLevel(levels, value) {
+  let nearest = 0;
+  for (const [index, level] of levels.entries()) {
+    if (Math.abs(level.threshold - value) < Math.abs(levels[nearest].threshold - value)) nearest = index;
+  }
+  return nearest;
+}
+
+/** Approximate, as the config stores 32-bit floats. */
+export const onLevel = (levels, value) => Math.abs(levels[nearestLevel(levels, value)].threshold - value) < 1e-4;

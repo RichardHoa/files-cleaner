@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { PAGE_SIZE, folderLabel, paging, selectedFile, visibleFiles } from "../src/shared/plan/plan-view.js";
+import { PAGE_SIZE, folderLabel, paging, selectedFile, visibleFiles } from "../src/shared/format.js";
 
 function dup(path, size = 0, kept = "keep.txt") {
   const relativePath = path.split("/");

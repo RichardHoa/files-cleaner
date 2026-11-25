@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { clickSelection } from "../src/screens/review/row-selection.js";
+import { clickSelection } from "../src/screens/review/selection.js";
 
 const order = ["a", "b", "c", "d", "e"];
 

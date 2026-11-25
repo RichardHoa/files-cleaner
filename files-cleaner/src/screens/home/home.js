@@ -9,14 +9,11 @@ import {
   removeRecentScanRoot,
   scanRootWarning,
 } from "../../shared/api.js";
-import { el } from "../../shared/dom.js";
+import { el, icon, showStatus, showWarning } from "../../shared/dom.js";
 import { count, relativeTime, splitPath } from "../../shared/format.js";
-import { icon } from "../../shared/icons.js";
-import { refreshMenu, setScreenMenu } from "../../shared/menus/menus.js";
-import { withShortcut } from "../../shared/menus/menu-items.js";
-import { noSessions, sessionList } from "../../shared/session-list/session-row.js";
+import { refreshMenu, setScreenMenu, withShortcut } from "../../shared/menus.js";
 import { undoSections } from "../../shared/outcomes.js";
-import { showStatus, showWarning } from "../../shared/status.js";
+import { noSessions, sessionList } from "../history/history.js";
 
 const LATEST_SESSIONS = 3;
 

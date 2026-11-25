@@ -1,13 +1,11 @@
 // The Emptied Folders depend on everything the Plan moves, so the backend works them out again
 // after each change.
 import { buildReviewPlan, pathSeparator, previewReviewPlan, runPlan } from "../../shared/api.js";
-import { el } from "../../shared/dom.js";
-import { formatSize, plural } from "../../shared/format.js";
+import { busy, el, showStatus, showWarning } from "../../shared/dom.js";
+import { count, formatSize, plural } from "../../shared/format.js";
+import { refreshMenu } from "../../shared/menus.js";
 import { describeNothingDone, describeRunProgress, describeWarning } from "../../shared/outcomes.js";
-import { refreshMenu } from "../../shared/menus/menus.js";
-import { busy, showStatus, showWarning } from "../../shared/status.js";
 import { describeChange, nameMissing, planChoices, planDuplicates, totals } from "./review-choices.js";
-import { skippedLine } from "./skipped.js";
 
 /** In ms. Batches quick changes, as each answer reads the disk. */
 const EMPTIED_DELAY = 300;
@@ -155,4 +153,21 @@ export function sessions(ctx, result) {
   };
 
   return { node, drawHeader, status, refreshEmptied, trashFoldersNow };
+}
+
+// One quiet line: what was left out matters only to some.
+
+/** True of every scan, so not worth showing the line for. */
+const ALWAYS = [
+  "Only files directly in the folder are sorted into folders. Files deeper down are checked for duplicates.",
+  "Hidden files and symlinks are left alone.",
+];
+
+export function skippedLine({ skipped, noExtension, unreadable }) {
+  const lines = [
+    noExtension > 0 && `Files without an extension: ${count(noExtension)}. They're checked for duplicates but not sorted.`,
+    skipped > 0 && `Protected folders: ${count(skipped)}. Folders the system and your apps need, and your Never-Touch Paths, are left alone.`,
+    unreadable.length > 0 && `Unreadable: ${count(unreadable.length)}\n${unreadable.join("\n")}`,
+  ].filter(Boolean);
+  return lines.length > 0 ? { label: "Some files skipped", detail: [...lines, "", ...ALWAYS].join("\n") } : null;
 }

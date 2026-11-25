@@ -15,13 +15,10 @@ import {
   saveReadingPace,
   stopReading,
 } from "../../shared/api.js";
-import { el } from "../../shared/dom.js";
+import { el, progressBar, showStatus } from "../../shared/dom.js";
 import { count, plural } from "../../shared/format.js";
-import { groupingModelsPanel, thisComputer } from "../../shared/grouping-models/models-panel.js";
+import { groupingModelsPanel, thisComputer } from "../../shared/models-panel.js";
 import { warningBlock } from "../../shared/outcomes.js";
-import { progressBar } from "../../shared/progress-bar.js";
-import { showStatus } from "../../shared/status.js";
-import { describeEstimate, readingEstimate, readingNeedsAsking, readingTime, updatedAverage } from "./reading-estimate.js";
 
 const WAIT_TEXT = "This takes a while. Feel free to switch apps.";
 const COMPUTER = thisComputer();
@@ -256,4 +253,44 @@ export function reading(ctx) {
   }
 
   return { waiting: () => waiting, footer, start, cancel };
+}
+
+// Seconds per file is a run's whole time over the files it read, so loading the models and the last
+// pass count too.
+
+const FIRST_GUESS = 4;
+/** In files. Before this many, this run's own pace isn't blended in. */
+const SETTLED = 5;
+const LONG_READ = 10 * 60;
+
+/**
+ * The stored average weighs as much as the first few files, so the estimate doesn't jump. It
+ * counts down past the last file, to when the folders are shown.
+ */
+export function readingEstimate({ average, total, finished, elapsed }) {
+  const stored = average ?? FIRST_GUESS;
+  const perFile = finished < SETTLED ? stored : (stored * SETTLED + elapsed) / (SETTLED + finished);
+  return { perFile, left: Math.max(0, perFile * total - elapsed) };
+}
+
+export function readingTime({ average, toRead }) {
+  return (average ?? FIRST_GUESS) * toRead;
+}
+
+export function readingNeedsAsking({ average, toRead }) {
+  return readingTime({ average, toRead }) > LONG_READ;
+}
+
+/** Each run counts for half, so the average follows this computer as it changes. */
+export function updatedAverage(average, { seconds, files }) {
+  if (files === 0) return average;
+  const pace = seconds / files;
+  return average == null ? pace : (average + pace) / 2;
+}
+
+export function describeEstimate({ perFile, left }, computer) {
+  const seconds = Math.max(1, Math.round(perFile));
+  const minutes = Math.round(left / 60);
+  const remaining = minutes < 1 ? "less than a minute left" : `about ${minutes} min left`;
+  return `About ${seconds} s per file on this ${computer} · ${remaining}`;
 }

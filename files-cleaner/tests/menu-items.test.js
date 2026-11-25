@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { contextMenu, menuBar, selectionLine, withShortcut } from "../src/shared/menus/menu-items.js";
+import { contextMenu, menuBar, selectionLine, withShortcut } from "../src/shared/menus.js";
 
 test("a right-click menu is described to the backend by label, shortcut and enabled state, and the chosen id runs its action", () => {
   const ran = [];

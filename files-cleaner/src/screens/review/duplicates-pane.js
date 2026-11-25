@@ -1,15 +1,12 @@
 // Trashing copies is a Session of its own, so the user can free space without waiting for the
 // Suggested Folders.
 import { buildReviewPlan, pathSeparator, runPlan } from "../../shared/api.js";
-import { el } from "../../shared/dom.js";
-import { drawMore } from "../../shared/plan/file-list.js";
+import { busy, drawMore, el, icon, showStatus, showWarning } from "../../shared/dom.js";
 import { formatDate, formatSize, trashPlace } from "../../shared/format.js";
-import { icon } from "../../shared/icons.js";
-import { withShortcut } from "../../shared/menus/menu-items.js";
+import { withShortcut } from "../../shared/menus.js";
 import { describeNothingDone, describeRunProgress, describeWarning } from "../../shared/outcomes.js";
-import { busy, showStatus, showWarning } from "../../shared/status.js";
 import { copyFolder, filedCopy, planDuplicates, trashedCopies, trashedCopiesIn } from "./review-choices.js";
-import { copiesText, fileName } from "./pane-helpers.js";
+import { copiesText, fileName } from "./selection.js";
 
 export function duplicatesPane(ctx) {
   const { state, view, pane } = ctx;

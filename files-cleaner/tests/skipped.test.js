@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { skippedLine } from "../src/screens/review/skipped.js";
+import { skippedLine } from "../src/screens/review/sessions.js";
 
 test("the skipped line shows only when the scan skipped something, with each count in its detail", () => {
   assert.equal(skippedLine({ skipped: 0, noExtension: 0, unreadable: [] }), null);

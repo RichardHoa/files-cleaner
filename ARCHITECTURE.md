@@ -43,7 +43,7 @@ Dependencies only point down. `core` knows nothing of Tauri or `grouping`; `grou
 
 ### `files-cleaner/src` (UI)
 
-`main.js` shows one screen at a time; each screen under `screens/` exports `render(root, nav, ...args)` and builds its own DOM. `shared/api.js` is the only place that calls Tauri: one function per command. `steps.js` holds the scan → duplicates → review order, kept apart from the screens so it can be tested. `shared/menus/` keeps the native menus in step with the screen shown: `menu-items.js` works out what applies and each shortcut as the OS writes it, `menus.js` sends that to the backend and runs what's clicked.
+`main.js` shows one screen at a time; each screen under `screens/` exports `render(root, nav, ...args)` and builds its own DOM. `shared/api.js` is the only place that calls Tauri: one function per command. Its `stepFlow` holds the scan → duplicates → review order, given its commands so it can be tested. `shared/menus.js` keeps the native menus in step with the screen shown: it works out what applies and each shortcut as the OS writes it, sends that to the backend and runs what's clicked. No JS file under 100 lines: small pieces live in the file that uses them. `tests/setup.js` stands in for the webview so any of these files can be imported in a test.
 
 **Architecture Invariant:** the UI holds no file-system logic. It only shows what the core returns and sends back the user's choices.
 

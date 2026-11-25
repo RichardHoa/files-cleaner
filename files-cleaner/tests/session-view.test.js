@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { PAGE_SIZE, paging, selectedFile, visibleFiles } from "../src/shared/plan/plan-view.js";
-import { actionFor, groupByState, paneSentence, sessionHeading, sessionLead, whereNow } from "../src/screens/session/session-view.js";
+import { PAGE_SIZE, paging, selectedFile, visibleFiles } from "../src/shared/format.js";
+import { actionFor, groupByState, paneSentence, sessionHeading, sessionLead, whereNow } from "../src/screens/session/session.js";
 
 function op(path, state = "done", { size = 0, note = null } = {}) {
   const relativePath = path.split("/");

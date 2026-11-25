@@ -1,12 +1,9 @@
 // Reads like Finder's sidebar. Nothing in it is dragged, on purpose.
-import { el } from "../../shared/dom.js";
+import { el, icon, showStatus } from "../../shared/dom.js";
 import { count, plural } from "../../shared/format.js";
-import { icon } from "../../shared/icons.js";
-import { showMenu } from "../../shared/menus/menus.js";
-import { showStatus } from "../../shared/status.js";
+import { showMenu } from "../../shared/menus.js";
 import { folderTally, nameMissing, trashedCopiesIn } from "./review-choices.js";
-import { clickSelection } from "./row-selection.js";
-import { displayName, UNSORTED } from "./pane-helpers.js";
+import { clickSelection, displayName, UNSORTED } from "./selection.js";
 
 const WAITING_ON_USER = { offer: "Download models", ask: "Waiting for you" };
 
