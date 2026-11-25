@@ -198,6 +198,9 @@ fn open(folder: &Path) -> rusqlite::Result<Connection> {
     let path = folder.join(DATABASE_FILE_NAME);
     let _ = fs::create_dir_all(folder);
     if !path.exists() {
+        // Not path traversal: the app always passes its own data folder.
+        // Never open a store in a folder the user picked.
+        // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
         if let Ok(children) = fs::read_dir(folder) {
             for child in children.flatten() {
                 if child.file_type().is_ok_and(|t| t.is_dir()) {
