@@ -27,7 +27,7 @@
 
 .tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(var(--width-sm), 1fr));
   gap: var(--space-3);
   margin: var(--space-3) 0;
 }
@@ -45,7 +45,7 @@
   gap: var(--space-0-5);
   min-width: 0;
   padding: var(--space-3-5);
-  border: 1px solid var(--border);
+  border: var(--line);
   border-radius: var(--radius-lg);
   background: var(--surface);
   color: var(--text);
@@ -59,8 +59,8 @@
 }
 
 .tile-icon {
-  width: 24px;
-  height: 24px;
+  width: var(--space-6);
+  height: var(--space-6);
   margin-bottom: var(--space-1-5);
   color: var(--accent);
 }
@@ -68,7 +68,7 @@
 .tile-name {
   max-width: 100%;
   font-size: var(--font-lg);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

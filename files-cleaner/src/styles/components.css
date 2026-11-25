@@ -17,16 +17,16 @@
 .outcomes li,
 .sessions li {
   padding: var(--space-1-5) 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: var(--line);
 }
 
 .icon {
-  width: 16px;
-  height: 16px;
+  width: var(--space-4);
+  height: var(--space-4);
   flex: none;
   fill: none;
   stroke: currentColor;
-  stroke-width: 2;
+  stroke-width: var(--stroke-width);
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -40,7 +40,7 @@
   padding: 1px var(--space-2);
   border-radius: var(--radius-pill);
   font-size: var(--font-xs);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   white-space: nowrap;
   background: var(--border);
   color: var(--text);
@@ -59,8 +59,8 @@
 .status-partlyUndone {
   background: repeating-linear-gradient(
     -45deg,
-    var(--status-undone) 0 6px,
-    var(--status-partly-stripe) 6px 12px
+    var(--status-undone) 0 var(--space-1-5),
+    var(--status-partly-stripe) var(--space-1-5) var(--space-3)
   );
   color: var(--on-status-undone);
 }
@@ -79,7 +79,7 @@
 .empty {
   margin: var(--space-2) 0;
   padding: var(--space-4);
-  border: 1px dashed var(--border);
+  border: var(--border-width) dashed var(--border);
   border-radius: var(--radius-lg);
   color: var(--muted);
   text-align: center;
@@ -112,16 +112,16 @@ button.link:hover {
 button.small {
   padding: 0 var(--space-2);
   font-size: var(--font-sm);
-  line-height: 1.6;
+  line-height: var(--leading-small-button);
 }
 
 .row-menu {
   position: absolute;
   z-index: 4;
-  min-width: 160px;
+  min-width: var(--width-xs);
   padding: var(--space-1);
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: var(--line);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-menu);
 }
@@ -131,9 +131,9 @@ button.small {
 }
 
 .sheet {
-  max-width: min(440px, calc(100vw - 2 * var(--space-6)));
+  max-width: min(440px, var(--sheet-room));
   padding: var(--space-5) var(--space-6) var(--space-3);
-  border: 1px solid var(--border);
+  border: var(--line);
   border-radius: var(--radius-lg);
   background: var(--surface);
   color: var(--text);
@@ -153,7 +153,7 @@ button.small {
 }
 
 .intro {
-  width: min(400px, calc(100vw - 2 * var(--space-6)));
+  width: min(400px, var(--sheet-room));
   text-align: center;
 }
 
@@ -164,11 +164,11 @@ button.small {
 }
 
 .intro-drawing {
-  width: 160px;
+  width: var(--width-xs);
   height: 100px;
   fill: none;
   stroke: var(--accent);
-  stroke-width: 2;
+  stroke-width: var(--stroke-width);
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -196,9 +196,9 @@ button.small {
 }
 
 .intro-dots span {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+  width: var(--space-1-5);
+  height: var(--space-1-5);
+  border-radius: var(--radius-pill);
   background: var(--border);
 }
 
@@ -218,8 +218,8 @@ button.small {
 .progress {
   position: relative;
   flex: none;
-  width: min(100%, 420px);
-  height: 6px;
+  width: min(100%, var(--width-xl));
+  height: var(--space-1-5);
   margin: var(--space-2) 0;
   overflow: hidden;
   border-radius: var(--radius-pill);

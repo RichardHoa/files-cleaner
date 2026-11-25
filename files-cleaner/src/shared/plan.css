@@ -18,13 +18,13 @@
 
 .plan-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--width-xl)), 1fr));
   gap: var(--space-2);
   margin: var(--space-2) 0 var(--space-4);
 }
 
 .plan-card {
-  border: 1px solid var(--border);
+  border: var(--line);
   border-radius: var(--radius-md);
   background: var(--surface);
 }
@@ -87,21 +87,22 @@
   list-style: none;
   margin: 0;
   padding: 0;
-  border-top: 1px solid var(--border);
+  border-top: var(--line);
 }
 
 .plan-file {
   display: grid;
-  grid-template-columns: auto minmax(0, 3fr) minmax(0, 2fr) 72px;
+  --plan-columns: minmax(0, 3fr) minmax(0, 2fr) var(--column-size);
+  grid-template-columns: auto var(--plan-columns);
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-1-5) var(--space-2);
-  border-bottom: 1px solid var(--border);
+  border-bottom: var(--line);
   cursor: default;
 }
 
 .plan-file.selected {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  background: var(--selected);
 }
 
 .plan-file-name,
@@ -145,7 +146,7 @@
   position: sticky;
   top: var(--space-4);
   padding-left: var(--space-4);
-  border-left: 1px solid var(--border);
+  border-left: var(--line);
 }
 
 .plan-pane p {
@@ -179,12 +180,12 @@
   font: inherit;
   padding: var(--space-1-5) var(--space-2);
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border-control);
+  border: var(--line-control);
   background: var(--surface);
   color: inherit;
 }
 
 .filters .search {
-  flex: 1 1 240px;
+  flex: 1 1 var(--width-md);
   min-width: 0;
 }

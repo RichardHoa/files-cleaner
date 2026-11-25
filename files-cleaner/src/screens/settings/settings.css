@@ -1,7 +1,7 @@
 .settings-section {
-  max-width: 720px;
+  max-width: var(--width-settings);
   padding-bottom: var(--space-2);
-  border-bottom: 1px solid var(--border);
+  border-bottom: var(--line);
 }
 
 .settings-choices {
@@ -36,11 +36,11 @@
 }
 
 .settings-list li + li {
-  border-top: 1px solid var(--border);
+  border-top: var(--line);
 }
 
 .settings-setting {
-  max-width: 720px;
+  max-width: var(--width-settings);
   margin: var(--space-4) 0;
 }
 
@@ -64,21 +64,21 @@
 
 .settings-slider input[type="range"] {
   flex: 1 1 200px;
-  max-width: 320px;
+  max-width: var(--width-lg);
 }
 
 .settings-number {
-  width: 5em;
+  width: var(--width-number);
   font: inherit;
   font-variant-numeric: tabular-nums;
 }
 
 .settings-number[aria-invalid="true"] {
-  outline: 2px solid var(--error);
+  outline: var(--focus-width) solid var(--error);
 }
 
 .settings-link {
-  flex: 1 1 320px;
+  flex: 1 1 var(--width-lg);
   max-width: 480px;
   font: inherit;
 }

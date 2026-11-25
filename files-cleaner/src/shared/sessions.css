@@ -12,7 +12,7 @@
 .session-row {
   display: grid;
   /* Fixed tracks, so the columns line up from row to row. */
-  grid-template-columns: 170px minmax(80px, 1fr) 120px 170px 80px 72px;
+  grid-template-columns: var(--width-sm) minmax(80px, 1fr) var(--width-2xs) var(--width-sm) 80px var(--column-size);
   align-items: center;
   gap: var(--space-3);
 }
@@ -30,7 +30,7 @@
   }
 
   .session-root {
-    flex: 1 1 120px;
+    flex: 1 1 var(--width-2xs);
     min-width: 0;
   }
 }
@@ -41,7 +41,7 @@
 }
 
 .session-root {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
