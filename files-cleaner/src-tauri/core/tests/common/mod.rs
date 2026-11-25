@@ -10,11 +10,8 @@ use files_cleaner_core::{
 };
 use tempfile::TempDir;
 
-/// A temp folder for a test to scan.
-///
-/// It lives under the crate folder rather than the system temp dir: macOS
-/// puts that under `/private`, and `target/` sits next to a `Cargo.toml`,
-/// and both are Protected Paths that would hide the test's own files.
+/// Not the system temp folder or `target/`: both are Protected Paths, which
+/// would hide the test's files.
 pub fn scan_root() -> TempDir {
     let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("test-tmp");
     fs::create_dir_all(&base).unwrap();
@@ -24,8 +21,7 @@ pub fn scan_root() -> TempDir {
         .unwrap()
 }
 
-/// `path` with symlinks resolved, in the form the app gives it: on Windows
-/// `C:\…`, not the `\\?\C:\…` that `fs::canonicalize` returns.
+/// `fs::canonicalize` returns `\\?\C:\…` on Windows, which the app never shows.
 pub fn real_path(path: &Path) -> PathBuf {
     let real = fs::canonicalize(path).unwrap();
     #[cfg(windows)]
@@ -41,7 +37,6 @@ pub fn real_path(path: &Path) -> PathBuf {
     real
 }
 
-/// Writes `contents` to `root/relative`, creating parent folders.
 pub fn write(root: &Path, relative: &str, contents: &str) -> PathBuf {
     let path = root.join(relative);
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -57,8 +52,7 @@ pub fn empty_config(home: &Path) -> Config {
     config("{}", home)
 }
 
-/// Makes `link` a symlink to `target`. On Windows this needs Developer
-/// Mode or an administrator.
+/// On Windows this needs Developer Mode or an administrator.
 pub fn symlink(target: impl AsRef<Path>, link: impl AsRef<Path>) {
     #[cfg(unix)]
     std::os::unix::fs::symlink(target, link).unwrap();
@@ -73,8 +67,8 @@ pub fn symlink(target: impl AsRef<Path>, link: impl AsRef<Path>) {
     }
 }
 
-/// A folder for a test's Journals, on the same disk as `scan_root`'s folders
-/// so its `FakeTrash` can rename items into it.
+/// On the same disk as `scan_root`'s folders, so `FakeTrash` can rename items
+/// into it.
 pub fn journal_dir() -> TempDir {
     let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("test-tmp");
     fs::create_dir_all(&base).unwrap();
@@ -84,13 +78,11 @@ pub fn journal_dir() -> TempDir {
         .unwrap()
 }
 
-/// The Journal database in `journal`, for a test to change as a crash would.
 pub fn journal_database(journal: &Path) -> rusqlite::Connection {
     rusqlite::Connection::open(journal.join("journal.sqlite")).unwrap()
 }
 
-/// Leaves Session `id`'s Journal as a crash right after its changes would:
-/// intents, and no outcome after them.
+/// As a crash right after its changes would leave it.
 pub fn drop_outcomes(journal: &Path, id: &str) {
     journal_database(journal)
         .execute(
@@ -101,9 +93,7 @@ pub fn drop_outcomes(journal: &Path, id: &str) {
         .unwrap();
 }
 
-/// An OS Trash that moves items into a folder beside the Journals, so tests
-/// never touch a real Trash. It can refuse items, or say up front that
-/// everything in a folder can't be trashed.
+/// So tests never touch a real Trash.
 pub struct FakeTrash {
     folder: PathBuf,
     pub refuses: Vec<PathBuf>,
@@ -151,7 +141,6 @@ impl OsTrash for FakeTrash {
     }
 }
 
-/// An OS Trash for building Plans, which has nothing to refuse.
 fn no_trash() -> FakeTrash {
     FakeTrash::new(Path::new(""))
 }
@@ -215,8 +204,6 @@ pub fn build_plan_with_progress(
     core::build_plan_with_progress(scan, config, &no_trash(), on_progress)
 }
 
-/// Scans `root` and plans the Suggested Folder `name`, sending it where
-/// `choice` says with the files at `files`, relative to `root`.
 pub fn folder_plan(root: &Path, name: &str, choice: FolderChoice, files: &[&str]) -> Plan {
     let scanned = scan(root, &empty_config(root)).unwrap();
     let folder = SuggestedFolderChoice {
@@ -245,9 +232,8 @@ pub fn build_suggested_folders_plan(
     core::build_suggested_folders_plan(scan, &no_trash(), folders)
 }
 
-/// Mounts a fresh empty disk (tmpfs) at `folder` and unmounts it when
-/// dropped. `None` if that isn't allowed: it needs root, or `sudo` without
-/// a password, as on CI.
+/// `None` if that isn't allowed: it needs root, or `sudo` without a password,
+/// as on CI.
 #[cfg(target_os = "linux")]
 pub struct OtherDisk(PathBuf);
 
@@ -272,7 +258,6 @@ impl Drop for OtherDisk {
     }
 }
 
-/// Runs `args` as root: as is, or else through `sudo` if it needs no password.
 #[cfg(target_os = "linux")]
 fn as_root(args: &[&str]) -> bool {
     let succeeds = |program: &str, args: &[&str]| {

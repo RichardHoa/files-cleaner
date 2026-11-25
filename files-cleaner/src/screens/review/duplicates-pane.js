@@ -1,7 +1,5 @@
-// The Review screen's Duplicates pane: the Duplicate Groups, each with the file's name once and its copies by
-// folder under a "Keep" column. Ticking a copy's Keep box keeps it, any number of them per group; an unticked
-// copy is marked Trash. The selection keeps or trashes any copies, from its right-click menu or ⌘⌫. The copies marked Trash go with the rest of the Plan, or on their own, at once, from the button
-// above the groups: the Suggested Folders stay as they are, for the header's button.
+// Trashing copies is a Session of its own, so the user can free space without waiting for the
+// Suggested Folders.
 import { buildReviewPlan, pathSeparator, runPlan } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";
 import { drawMore } from "../../shared/plan/file-list.js";
@@ -13,21 +11,13 @@ import { busy, showStatus, showWarning } from "../../shared/status.js";
 import { copyFolder, filedCopy, planDuplicates, trashedCopies, trashedCopiesIn } from "./review-choices.js";
 import { copiesText, fileName } from "./pane-helpers.js";
 
-/**
- * The Duplicates pane of the Review screen with context `ctx`: `panel()` is what it lists, and `trashNow()` trashes
- * the copies marked Trash now, or is null when there are none or a Session is running.
- */
 export function duplicatesPane(ctx) {
   const { state, view, pane } = ctx;
   const trashNow = el("button", { type: "button", className: "small" }, icon("trash"), el("span"));
-  // What trashing the copies now did, kept across redraws.
+  // Outside the redrawn part, so the result survives redraws.
   const status = el("p", { className: "status duplicates-trash-status" });
   trashNow.addEventListener("click", trashCopiesNow);
 
-  /**
-   * The button trashing the copies marked Trash now, with how much space that frees, then the Duplicate
-   * Groups, each with its name, how many copies and the space going to the System Trash, then every copy.
-   */
   function panel() {
     if (state.duplicates.length === 0) return [el("h2", {}, "Duplicates"), status, el("p", { className: "note" }, "No duplicates")];
     const trashed = trashedCopiesIn(state.duplicates);
@@ -54,10 +44,6 @@ export function duplicatesPane(ctx) {
     ];
   }
 
-  /**
-   * "Trash N copies now", trashing every unticked copy at once, on its own, beside what it frees, with a
-   * tooltip saying the Suggested Folders aren't touched.
-   */
   function trashNowRow(trashed, trashedSize) {
     const trash = trashPlace(pathSeparator);
     trashNow.lastChild.textContent = trashed ? `Trash ${copiesText(trashed)} now` : "No copies to trash";
@@ -71,10 +57,7 @@ export function duplicatesPane(ctx) {
     );
   }
 
-  /**
-   * Trashes the copies marked Trash as a Session of their own, and stays on the Review screen, the copies
-   * trashed gone from it; any copy that couldn't go stays marked Trash, for the rest of the Plan, and is said why.
-   */
+  /** Copies that couldn't go stay marked Trash, for the rest of the Plan. */
   async function trashCopiesNow() {
     if (view.running) return;
     view.running = true;
@@ -96,7 +79,6 @@ export function duplicatesPane(ctx) {
     ctx.redraw.pane();
   }
 
-  /** A Duplicate Group: its name, with a warning if no copy is kept, then each copy. */
   function duplicateGroup(duplicate) {
     const { group } = duplicate;
     const filed = filedCopy(duplicate);
@@ -114,10 +96,6 @@ export function duplicatesPane(ctx) {
     );
   }
 
-  /**
-   * One copy of the Duplicate Group `duplicate`: its Keep box, then its folder from the Scan Root, with its full
-   * path on hover, and its modified date. A trashed copy is dimmed and struck through.
-   */
   function duplicateCopy(duplicate, copy) {
     const kept = duplicate.copies.get(copy.path) === "keep";
     const folder = copyFolder(copy) || ctx.rootName;

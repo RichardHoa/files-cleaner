@@ -1,12 +1,5 @@
-// The Review screen's selection: files, and copies, are selected as in Finder, by clicking or with the arrow
-// keys (Shift adding to the selection), then marked Trash or put back (or kept, for copies) from the toolbar
-// always shown above the list of files (not copies, whose pane has none), their right-click menu or Edit › Trash
-// (⌘⌫, Ctrl+Delete elsewhere), or moved with the toolbar's Move to…, their right-click menu or Edit › Move To….
-// Moving takes only the files not marked Trash, and "Leave unsorted" is apart from the folders, as it makes none.
-// The toolbar is always shown, so nothing below it moves; it holds only what acts on the selection, its buttons
-// shown once files are selected. What acts on a whole Suggested Folder is in its ⋯ menu (see the folder panes). Its
-// count line says how to select more until the user has once. A file opens in its default app by double-clicking
-// it or from its right-click menu. Nothing is dragged.
+// The toolbar is always shown, so nothing below it moves. Moving takes only the files not marked
+// Trash.
 import { describeError, onAnotherDisk, openFile, pathSeparator, pickFolder } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";
 import { fileMenuItems, openEach } from "../../shared/plan/file-list.js";
@@ -18,21 +11,14 @@ import { showStatus } from "../../shared/status.js";
 import { clickSelection } from "./row-selection.js";
 import { copiesText, displayName, fileName, LEAVE_UNSORTED } from "./pane-helpers.js";
 
-/**
- * The selection of the Review screen with context `ctx`: `toolbar`, `draw()`, `selectable` and `copyMenu`
- * making a row selectable or openable, `move` moving files into a Suggested Folder, `clearStatus()`
- * dropping the toolbar's error once another section is listed, and `menuItems()`, its part of the menu bar.
- */
 export function selection(ctx) {
   const { state, view, pane } = ctx;
   const keep = el("button", { type: "button", className: "small" }, "Keep");
   const trash = el("button", { type: "button", className: "small" }, el("span", {}, "Mark as Trash"));
   const moveTo = el("button", { type: "button", className: "small", ariaHasPopup: "menu" }, "Move to…");
   const selected = el("span", { className: "muted review-toolbar-count" });
-  // Why Move to… or opening a file failed, beside the toolbar's buttons.
   const status = el("p", { className: "status review-toolbar-status" });
   const toolbar = el("div", { className: "review-toolbar", role: "toolbar", ariaLabel: "Selected files" }, keep, trash, moveTo, selected, status);
-  /** Every selectable row now listed in the pane. */
   const rows = () => [...pane.querySelectorAll("[data-path]")];
   const copies = () => view.current === "duplicates";
 
@@ -42,7 +28,7 @@ export function selection(ctx) {
     ctx.redraw.pane();
   };
 
-  /** Asks for any folder on the files' disk and moves `paths` there, through a Suggested Folder going into it; a folder on another disk is refused. */
+  /** Goes through a Suggested Folder, so the move is part of the Plan. Another disk is refused. */
   const moveToOther = async (paths) => {
     showStatus(status, "");
     try {
@@ -59,15 +45,13 @@ export function selection(ctx) {
     ctx.redraw.pane();
   };
 
-
-  /** Whether the file at `path` in the listed section is marked Trash. */
   const isTrashed = (path) => {
     if (copies()) return state.duplicateOf.get(path).copies.get(path) === "trash";
     if (view.current === "left") return state.left.trashed.has(path);
     return view.current.files.get(path) === "trash";
   };
 
-  /** Marks `paths` in the listed section Trash when `trashed`, or puts them back (keeps them, for copies), keeping the selection. */
+  /** Keeps the selection, so the user can change their mind at once. */
   const setTrashed = (paths, trashed) => {
     for (const path of paths) {
       if (copies()) state.setCopy(state.duplicateOf.get(path), path, trashed ? "trash" : "keep");
@@ -77,7 +61,6 @@ export function selection(ctx) {
     ctx.redraw.pane();
   };
 
-  /** Trashes `paths`, or puts them all back when every one is trashed already. */
   const toggleTrash = (paths) => setTrashed(paths, !paths.every(isTrashed));
 
   moveTo.addEventListener("click", () => showMenu(moveTargets([...view.selection])));
@@ -92,7 +75,6 @@ export function selection(ctx) {
     draw();
   }
 
-  /** Marks the selected rows in the pane, and brings the toolbar and the menu bar up to date with what can be done with them. */
   function draw() {
     const listed = rows();
     const shown = new Set(listed.map((row) => row.dataset.path));
@@ -116,20 +98,16 @@ export function selection(ctx) {
     refreshMenu();
   }
 
-  /** "Move 4 files to…", counting only those of `paths` not marked Trash, which are all that move. */
+  /** Counts only what would really move: files not marked Trash. */
   const moveLabel = (paths) => `Move ${plural(state.movable(paths), "file")} to…`;
 
-  /**
-   * Where `paths` can be moved: every Suggested Folder but the one listed, then any other folder on disk, then,
-   * apart from the folders and unless Unsorted is listed, leaving them unsorted.
-   */
+  /** "Leave unsorted" comes last and apart, as it makes no folder. */
   const moveTargets = (paths) => [
     ...state.choices.filter((choice) => choice !== view.current).map((target) => ({ label: displayName(target), action: () => move(paths, target) })),
     { label: "Other folder…", action: () => moveToOther(paths) },
     ...(view.current === "left" ? [] : [{ separator: true }, { label: LEAVE_UNSORTED, action: () => move(paths, null) }]),
   ];
 
-  /** The right-click menu's actions on `paths`, besides opening them: Keep and Trash for copies; Trash or Put back, and Move N files to…, for files. */
   function rowMenuItems(paths) {
     if (copies()) {
       return [
@@ -143,11 +121,6 @@ export function selection(ctx) {
     ];
   }
 
-  /**
-   * The selection's part of the menu bar: Select All while rows are listed, Trash and Move To… while rows are
-   * selected, as their right-click menu has them: Trash marks copies Trash and toggles it on files, and Move To… is
-   * for files only, while one of them isn't marked Trash.
-   */
   function menuItems() {
     const paths = [...view.selection];
     return {
@@ -157,21 +130,14 @@ export function selection(ctx) {
     };
   }
 
-  /** Selects every row listed, so Mark as Trash then marks a whole folder. */
   function selectAll() {
     view.selection = new Set(rows().map((row) => row.dataset.path));
     draw();
   }
 
-  /** Opens the files at `paths` in their default apps, saying so if one can't be opened. */
   const openFiles = (paths) => openEach(paths, openFile).catch((error) => showStatus(status, describeError(error), true));
-  /** Says in the toolbar's status line why a right-click menu's action failed. */
   const showError = (error) => showStatus(status, describeError(error), true);
 
-  /**
-   * Makes `row`, listing the file at `path`, selectable as in Finder, opened by double-clicking it, with a
-   * right-click menu acting on the selection, opening it or showing it in its folder.
-   */
   function selectable(row, path) {
     row.dataset.path = path;
     row.tabIndex = 0;
@@ -202,7 +168,7 @@ export function selection(ctx) {
     return row;
   }
 
-  /** Gives `row`, listing the Kept Copy at `path` that stays where it is, a right-click menu to open it or show it in the file manager, and opens it on a double-click. */
+  /** A Kept Copy must stay where it is, so there is nothing else to offer. */
   function copyMenu(row, path) {
     row.addEventListener("dblclick", () => openFiles([path]));
     row.addEventListener("contextmenu", (event) => {
@@ -212,9 +178,8 @@ export function selection(ctx) {
     return row;
   }
 
-  // ⌘⌫ (Ctrl+Delete elsewhere) and ⌘A (Ctrl+A) are the menu bar's Trash and Select All (see `menuItems`).
+  // ⌘⌫ and ⌘A are bound by the native menu bar (see `menuItems`), so they aren't handled here.
 
-  // The arrow keys select the row above or below, as in Finder; with Shift, from the last row clicked to it.
   pane.addEventListener("keydown", (event) => {
     if ((event.key !== "ArrowDown" && event.key !== "ArrowUp") || event.metaKey || event.ctrlKey || event.altKey) return;
     if (event.target.closest("input, select, textarea, button")) return;
@@ -238,7 +203,7 @@ export function selection(ctx) {
     draw();
   });
 
-  // A plain click on empty space, not on a row, a control or the toolbar's blank part, deselects.
+  // As in Finder, a click on empty space deselects.
   pane.addEventListener("click", (event) => {
     const target = event.target;
     if (target.closest("button, input, select, a, label, [contenteditable]") || toolbar.contains(target)) return;

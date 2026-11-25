@@ -1,12 +1,9 @@
-//! Developer folders: version control, dependencies, build output, caches
-//! and tool state for common languages and tools. Moving or trashing these
-//! breaks projects, and they hold huge numbers of files, so they are
-//! Protected Paths. None of this is OS-specific.
+//! Moving or trashing these breaks projects, and they hold huge numbers of
+//! files.
 
 use std::fs;
 use std::path::Path;
 
-/// Names that mean a developer folder wherever they appear.
 const ALWAYS: &[&str] = &[
     // Version control
     ".git",
@@ -103,22 +100,19 @@ const ALWAYS: &[&str] = &[
     ".fleet",
 ];
 
-/// Name endings and beginnings that mean a developer folder.
 const ALWAYS_SUFFIXES: &[&str] = &[".egg-info", ".dist-info"];
 const ALWAYS_PREFIXES: &[&str] = &["cmake-build-"];
 
-/// Files that, found inside any folder, say what it is whatever it is
-/// called: a Python or Conda environment, or a Chrome/Chromium profile
-/// folder (as browser automation tools create).
+/// These give a folder away whatever it is called, as with browser-automation
+/// profiles.
 const CONTENT_MARKERS: &[(&str, &str)] = &[
     ("pyvenv.cfg", "a Python environment"),
     ("conda-meta", "a Conda environment"),
     ("Local State", "a Chrome or Chromium profile folder"),
 ];
 
-/// Names that are too common to protect everywhere (a `build` folder of
-/// photos is fine to clean), so they are developer folders only next to a
-/// project file that creates them.
+/// Too common to protect everywhere (a `build` folder of photos is fine to
+/// clean), so a project file must sit beside them.
 const NEXT_TO_FILE: &[(&str, &[&str])] = &[
     (
         "target",
@@ -165,7 +159,7 @@ const NEXT_TO_FILE: &[(&str, &[&str])] = &[
     ("Temp", &["ProjectSettings/ProjectVersion.txt"]),
 ];
 
-/// Like `NEXT_TO_FILE`, but the project file is known by its extension.
+/// For project files whose names vary.
 const NEXT_TO_EXTENSION: &[(&str, &[&str])] = &[
     // .NET
     ("bin", &["csproj", "fsproj", "vbproj", "sln"]),
@@ -177,8 +171,8 @@ const NEXT_TO_EXTENSION: &[(&str, &[&str])] = &[
     ("Saved", &["uproject"]),
 ];
 
-/// Why `path` is a developer folder, if it is. `is_folder` says whether
-/// `path` is a folder, so a plain file is never checked for a marker inside.
+/// A plain file is never checked for a marker inside, so `is_folder` is asked
+/// for.
 pub fn reason(path: &Path, is_folder: bool) -> Option<String> {
     let name = path.file_name()?.to_string_lossy();
     let lower = name.to_lowercase();
@@ -219,7 +213,6 @@ pub fn reason(path: &Path, is_folder: bool) -> Option<String> {
     None
 }
 
-/// The name of a file in `folder` with one of `extensions`, if any.
 fn file_with_extension(folder: &Path, extensions: &[&str]) -> Option<String> {
     fs::read_dir(folder).ok()?.flatten().find_map(|child| {
         let path = child.path();

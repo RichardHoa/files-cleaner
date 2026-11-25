@@ -1,7 +1,5 @@
-// The Review screen's header and its Sessions: the Scan Root's name, what was scanned, the button carrying
-// out the whole Plan as one Session, Cancel, and "Also trash N emptied folders". The Emptied Folders depend on
-// everything the Plan moves, so they are worked out by the backend again a moment after each change. What the
-// button is doing, or why it did nothing, shows under it, as does what a Trash Now of Suggested Folders did.
+// The Emptied Folders depend on everything the Plan moves, so the backend works them out again
+// after each change.
 import { buildReviewPlan, pathSeparator, previewReviewPlan, runPlan } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";
 import { formatSize, plural } from "../../shared/format.js";
@@ -11,20 +9,12 @@ import { busy, showStatus, showWarning } from "../../shared/status.js";
 import { describeChange, nameMissing, planChoices, planDuplicates, totals } from "./review-choices.js";
 import { skippedLine } from "./skipped.js";
 
-/** How long the Emptied Folders wait after a change before they're worked out again, in ms. */
+/** In ms. Batches quick changes, as each answer reads the disk. */
 const EMPTIED_DELAY = 300;
 
-/**
- * Whether a Run is given `op`: it's ticked, or it's a Trash or a Suggested Folder's Move blocked up front, which
- * the Run skips, leaving it in place and listed under Needs attention.
- */
+/** Blocked Operations are passed too: the Run skips them and lists them under Needs attention. */
 const runsOrIsListed = (op) => op.ticked || (Boolean(op.error) && (op.kind === "trash" || op.reason.type === "suggestedFolder"));
 
-/**
- * The header of the Review screen with context `ctx`, for the scan `result`: `node`, `drawHeader()`,
- * `status`, the line under the button, `refreshEmptied()` working out the Emptied Folders again a moment
- * later, unless the button is clicked first, and `trashFoldersNow(chosen)`.
- */
 export function sessions(ctx, result) {
   const { nav, state, view } = ctx;
   const run = el("button", { type: "button", className: "primary" });
@@ -53,7 +43,6 @@ export function sessions(ctx, result) {
     el("div", { className: "review-run" }, el("div", { className: "actions" }, emptied, cancel, run), status),
   );
 
-  /** "Some files skipped", opening its detail under it on a click; a click anywhere else, or Esc, closes it. */
   function skippedPopover({ label, detail: text }) {
     const toggle = el("button", { type: "button", className: "skipped-line", ariaExpanded: "false" }, label);
     const detail = el("div", { className: "row-menu skipped-detail", hidden: true }, text);
@@ -80,10 +69,7 @@ export function sessions(ctx, result) {
     drawHeader();
   });
 
-  /**
-   * The emptied-folders checkbox, and the button saying what it will do, disabled while there's nothing to do, a
-   * folder has no name, or the files are still read; and the menu bar, greyed out while a Session runs.
-   */
+  /** The menu bar too, as it must be greyed out while a Session runs. */
   function drawHeader() {
     refreshMenu();
     const possible = state.emptied.filter((op) => !op.error);
@@ -120,11 +106,7 @@ export function sessions(ctx, result) {
     drawHeader();
   });
 
-  /**
-   * Trashes every file listed in the Suggested Folders `chosen` now, as a Session of their own, and stays on
-   * the Review screen: the folders leave the Plan and the next one is listed. Any file that couldn't go stays
-   * in its folder, and is said why.
-   */
+  /** A Session of its own; files that couldn't go stay in their folder. */
   async function trashFoldersNow(chosen) {
     if (view.running) return;
     const { folders, trashed } = state.trashNow(chosen);
@@ -153,7 +135,7 @@ export function sessions(ctx, result) {
     else ctx.redraw.pane();
   }
 
-  /** Works out the Emptied Folders again a moment after a change, with the duplicates; only the latest answer counts. */
+  /** Changes can outrun the backend, so only the latest answer counts. */
   let emptiedTimer = 0;
   let emptiedAsked = 0;
   const refreshEmptied = () => {

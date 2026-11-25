@@ -1,7 +1,4 @@
-// The Review screen's folder panes: a Suggested Folder, with its name, its ⋯ menu acting on the whole folder,
-// why it was suggested and its one Location popup, and the files left where they are, shown as Unsorted, which
-// says no folder is made for them. Rows have no buttons: a trashed file is dimmed with a trash icon, and every
-// action on files comes from the toolbar.
+// Rows have no buttons on purpose: every action on files comes from the toolbar or a menu.
 import { describeError, onAnotherDisk, pickFolder } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";
 import { drawMore } from "../../shared/plan/file-list.js";
@@ -13,7 +10,6 @@ import { describeRule } from "../rules/rule-text.js";
 import { byKindNewestFirst, nameMissing, otherKeptCopies } from "./review-choices.js";
 import { FILES_SHOWN, fileName, trashedMark, UNSORTED } from "./pane-helpers.js";
 
-/** Why the tool suggested `folder`, in a few words, given the name of the existing folder it matches, if any; "" for a folder the user added. */
 function basisText(folder, existingName) {
   const fits = existingName ? ` · fits your folder “${existingName}”` : "";
   if (folder.basis === "topic") return `Topic: most files are about “${folder.name}”${fits}`;
@@ -23,16 +19,11 @@ function basisText(folder, existingName) {
   return "";
 }
 
-/**
- * The folder panes of the Review screen with context `ctx`: `panel(choice)`, a Suggested Folder's, made the
- * first time it's needed, `drawName(choice)` and `leftPanel()`.
- */
 export function folderPanes(ctx) {
   const { state } = ctx;
   const panels = new WeakMap();
 
   const summaryOf = (path) => state.summaryOf(path) ?? fileName(path);
-  /** The file at `path`'s name, then its one-sentence summary below it if it was read. */
   const fileText = (path) => {
     const summary = state.summaryOf(path);
     return el(
@@ -48,7 +39,7 @@ export function folderPanes(ctx) {
     return panels.get(choice);
   };
 
-  /** The files left where they are, as Unsorted, by kind. A Kept Copy that isn't filed stays where it is, so it can only be opened or shown. */
+  /** A Kept Copy that isn't filed must stay where it is, so it can only be opened or shown. */
   function leftPanel() {
     const others = otherKeptCopies(state.duplicates);
     const row = (path) => {
@@ -68,7 +59,6 @@ export function folderPanes(ctx) {
     ];
   }
 
-  /** The pane for one Suggested Folder: its name and ⋯ menu, why it was suggested, where it goes, and its files. */
   function folderPanel(choice) {
     const name = el("input", { type: "text", className: "folder-name", value: choice.name, ariaLabel: "Folder name", spellcheck: false });
     const nameError = el("p", { className: "status error folder-name-error" });
@@ -80,12 +70,11 @@ export function folderPanes(ctx) {
     const list = el("ul", { className: "folder-files", ariaLabel: "Files" });
     const empty = el("p", { className: "note" }, "Empty");
     const more = el("div", { className: "plan-more" });
-    // The folder's actions, as its sidebar item's right-click menu has them.
     const actions = el("button", { type: "button", className: "folder-actions", ariaLabel: "Folder actions", title: "Folder actions", ariaHasPopup: "menu" }, icon("more"));
     actions.addEventListener("click", () => showMenu(ctx.sidebar.folderMenuItems(choice)));
     let limit = FILES_SHOWN;
 
-    /** Asks for a folder on the files' disk to make the folder in; one on another disk is refused, beside the popup. */
+    /** Another disk is refused: a move there would be a copy and a delete. */
     const pickElsewhere = async () => {
       showStatus(locationError, "");
       try {
@@ -110,7 +99,7 @@ export function folderPanes(ctx) {
       ctx.redraw.all();
     });
 
-    /** The name and whether it's missing, also when it was renamed in the sidebar. */
+    /** Also called when the sidebar renames it. */
     const drawName = () => {
       if (name.value !== choice.name) name.value = choice.name;
       const missing = nameMissing(choice);
@@ -118,7 +107,6 @@ export function folderPanes(ctx) {
       name.ariaInvalid = String(missing);
     };
 
-    /** The Location popup: the existing folder it matched, if any, the Scan Root, the folder picked with Other… before, if any, and Other…. */
     function drawLocation() {
       const options = [
         ...(existingName ? [el("option", { value: "addTo", title: choice.folder.existing }, existingName)] : []),
@@ -170,7 +158,6 @@ export function folderPanes(ctx) {
     return { node, draw, drawName };
   }
 
-  /** A file left where it is: its name, with its summary below, when it was last changed, and the trash icon if it's trashed. */
   function leftRow(path) {
     const trashed = state.left.trashed.has(path);
     const row = el(
@@ -183,7 +170,6 @@ export function folderPanes(ctx) {
     return row;
   }
 
-  /** `paths` under a heading per kind, each kind newest first, with `rowFor(path)` per file. */
   function leftLists(paths, rowFor) {
     return byKindNewestFirst(paths, (path) => state.kindOf(path), (path) => state.modifiedOf(path)).flatMap(([kind, files]) => [
       el("h3", { className: "left-kind" }, `${kind} (${count(files.length)})`),

@@ -27,8 +27,6 @@ fn set_modified(path: &Path, secs: u64) {
         .unwrap();
 }
 
-/// Every file and folder under `root` (relative, `/`-separated), with each
-/// file's contents and modified date.
 fn snapshot(root: &Path) -> BTreeMap<String, Option<(String, i64)>> {
     let mut found = BTreeMap::new();
     let mut folders = vec![root.to_path_buf()];
@@ -53,8 +51,6 @@ fn snapshot(root: &Path) -> BTreeMap<String, Option<(String, i64)>> {
     found
 }
 
-/// A Scan Root with `keep.txt` (the Keeper) and two older copies,
-/// `a/copy.txt` and `b/c/copy.txt`, plus an unrelated file.
 fn messy_folder() -> TempDir {
     let dir = scan_root();
     for (path, secs) in [
@@ -82,7 +78,6 @@ fn id_of(plan: &Plan, relative: &str) -> String {
         .clone()
 }
 
-/// Where Session `id` says the item from `relative` landed.
 fn landed(journal: &Path, id: &str, relative: &str) -> PathBuf {
     let details = session_details(id, journal).unwrap();
     let op = details
@@ -92,13 +87,10 @@ fn landed(journal: &Path, id: &str, relative: &str) -> PathBuf {
     op.unwrap().destination.clone().unwrap()
 }
 
-/// Every Session, newest first.
 fn all_sessions(journal: &Path) -> Vec<SessionInfo> {
     list_sessions(journal, 0, usize::MAX).unwrap().sessions
 }
 
-/// The Operations ticked when the Plan is shown: all but trashing the
-/// folders it empties.
 fn all_ids(plan: &Plan) -> Vec<String> {
     plan.operations
         .iter()
@@ -225,7 +217,7 @@ fn scan_plan_run_undo_restores_the_original_folder_exactly() {
     assert_eq!(summary.done.len(), 2);
     assert_ne!(snapshot(dir.path()), before);
 
-    // A fresh call that only knows the Journal folder, as after a restart.
+    // Only knows the Journal folder, as after a restart.
     let journal_dir: PathBuf = journal.path().to_path_buf();
     let undone = undo(summary.session_id.as_deref().unwrap(), &journal_dir).unwrap();
 
@@ -433,7 +425,6 @@ fn deleting_every_session_starts_a_damaged_journal_again() {
     assert!(summary.session_id.is_some());
 }
 
-/// Session `id`'s Operations as `(relative source, state)`, in run order.
 fn states(journal: &Path, root: &Path, id: &str) -> Vec<(String, OperationState)> {
     let root = real_path(root);
     session_details(id, journal)
@@ -693,8 +684,6 @@ fn undo_and_redo_leave_operations_in_the_wrong_state_alone() {
     );
 }
 
-/// Writes a finished Journal for Session `id`, with one done Trash of
-/// `size` bytes, as `run` would have.
 fn fake_journal(journal: &Path, id: &str, size: u64) {
     let records = [
         serde_json::json!({ "id": id, "scanRoot": "/root", "trashDestination": "holdingFolder", "startedAt": 0 }),
@@ -710,7 +699,6 @@ fn fake_journal(journal: &Path, id: &str, size: u64) {
     fs::write(journal.join(format!("{id}.jsonl")), lines).unwrap();
 }
 
-/// `count` Journals, Session IDs one second apart, oldest first.
 fn fake_journals(journal: &Path, count: usize) -> Vec<String> {
     (0..count)
         .map(|i| {
@@ -775,7 +763,6 @@ fn an_old_journal_that_cant_be_read_is_left_out_of_the_pages() {
     let journal = journal_dir();
     let mut ids = fake_journals(journal.path(), 12);
     ids.reverse();
-    // The newest Session's old Journal file was cut short by a crash.
     fs::write(journal.path().join(format!("{}.jsonl", ids[0])), "").unwrap();
 
     assert_eq!(page_ids(journal.path(), 0, 10), ids[1..11]);
@@ -787,7 +774,7 @@ fn each_session_counts_its_carried_out_operations_by_kind_with_their_total_size(
     let dir = messy_folder();
     let journal = journal_dir();
     let plan = plan_for(dir.path());
-    // One of the two copies vanishes, so its Operation is skipped.
+    // One copy vanishes, so its Operation is skipped.
     fs::remove_file(dir.path().join("b/c/copy.txt")).unwrap();
     run(&plan, &all_ids(&plan), journal.path()).unwrap();
 
@@ -839,7 +826,6 @@ fn sessions_started_in_the_same_millisecond_keep_their_order() {
     );
 }
 
-/// Appends `record` to Session `id`'s Journal, as a crash would leave it.
 fn append_record(journal: &Path, id: &str, record: serde_json::Value) {
     journal_database(journal)
         .execute(
@@ -983,7 +969,7 @@ fn a_move_cut_short_after_it_happened_can_still_be_undone() {
     let plan = talk_into_slides(dir.path());
     let before = snapshot(dir.path());
     let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
-    // The Journal as if the app crashed right after the move.
+    // As if the app crashed right after the move.
     drop_outcomes(journal.path(), summary.session_id.as_deref().unwrap());
     assert_eq!(
         all_sessions(journal.path())[0].status,
@@ -996,9 +982,6 @@ fn a_move_cut_short_after_it_happened_can_still_be_undone() {
     assert_eq!(snapshot(dir.path()), before);
 }
 
-/// A Plan for `root` putting `lecture.pdf` and `slides.pptx` into a new
-/// `CS101` folder, with the move of `slides.pptx` blocked as one to another
-/// disk would be.
 fn folder_plan_with_a_blocked_move(root: &Path) -> Plan {
     write(root, "lecture.pdf", "one");
     write(root, "slides.pptx", "two");
@@ -1110,8 +1093,6 @@ fn retrying_a_move_skipped_for_its_missing_folder_does_it_in_the_same_session() 
     assert!(dir.path().join("lecture.pdf").exists() && dir.path().join("invoice.pdf").exists());
 }
 
-/// A Scan Root with `talk.pptx` and a `Slides` folder, and the Plan that
-/// moves `talk.pptx` into `Slides`.
 fn talk_into_slides(root: &Path) -> Plan {
     write(root, "talk.pptx", "talk");
     write(root, "Slides/other.txt", "other");
@@ -1172,7 +1153,6 @@ fn undo_leaves_a_file_the_user_moved_again_where_they_put_it() {
     assert!(!dir.path().join("talk.pptx").exists());
 }
 
-/// How many records Session `id` has in the Journal database.
 fn record_count(journal: &Path, id: &str) -> i64 {
     journal_database(journal)
         .query_row(
@@ -1183,8 +1163,7 @@ fn record_count(journal: &Path, id: &str) -> i64 {
         .unwrap()
 }
 
-/// Writes Session `id` out as the Journal file it would have been before
-/// the database, and deletes the database, as an older version left them.
+/// As an older version left it.
 fn as_old_journal_file(journal: &Path, id: &str) {
     let db = journal_database(journal);
     let (root, started_at): (String, i64) = db

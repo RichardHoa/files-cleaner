@@ -1,4 +1,3 @@
-// History: every Session, newest first, ten to a page with numbered page links.
 import { describeError, listSessions, pathSeparator } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";
 import { count, plural } from "../../shared/format.js";
@@ -17,7 +16,6 @@ export function render(root, nav, page) {
   show(content, total, nav, page);
 }
 
-/** Draws page `page` (from 1) into `node`, with an Undo's result above it. */
 async function show(node, totalLine, nav, page, undoResult = null) {
   let result;
   try {
@@ -41,7 +39,6 @@ async function show(node, totalLine, nav, page, undoResult = null) {
   node.replaceChildren(...(undoResult ? undoSections(undoResult, pathSeparator) : []), list, pager(page, pages, (to) => nav.history(to)));
 }
 
-/** Previous, the page numbers and Next; nothing for a single page. */
 function pager(page, pages, go) {
   if (pages <= 1) return "";
   const link = (label, to, ariaLabel) => {

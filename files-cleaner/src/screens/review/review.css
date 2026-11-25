@@ -1,6 +1,4 @@
-/* Review: laid out like Finder or Mail, a sidebar of the Plan's sections beside a pane listing the one
-   picked. The sidebar stays in view while the pane scrolls. Flat surfaces and hairline dividers; the name
-   field looks like text until it's edited. Rows have no buttons. */
+/* Laid out like Finder or Mail. The sidebar stays in view while the pane scrolls. */
 .reading-estimate {
   margin: var(--space-1) 0 var(--space-3);
   font-variant-numeric: tabular-nums;
@@ -82,7 +80,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The Suggested Folders wait on the user: a dot as Mail's unread one. */
+/* As Mail's unread dot: something waits on the user. */
 .folder-sidebar-dot {
   flex: none;
   width: 8px;
@@ -99,7 +97,6 @@
   color: var(--error);
 }
 
-/* Every file of the folder goes to the System Trash. */
 .folder-sidebar-item.trashed .folder-sidebar-name,
 .folder-sidebar-item.trashed .icon {
   color: var(--muted);
@@ -126,7 +123,6 @@
   font-size: var(--font-sm);
 }
 
-/* A section of the sidebar, named in small grey type as in Finder. */
 .folder-sidebar-section {
   margin: var(--space-3) 0 var(--space-0-5);
   padding: 0 var(--space-2);
@@ -144,8 +140,7 @@
   margin-top: 0;
 }
 
-/* Always shown above the list, its buttons disabled with nothing selected, so the list never moves. It stays
-   at the top while the list scrolls under it, lifted off the rows by a soft shadow. */
+/* Always shown, so the list never moves once a selection enables its buttons. */
 .review-toolbar {
   position: sticky;
   top: 0;
@@ -157,7 +152,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
-  /* As tall as a small button, so the list doesn't move once a selection shows the buttons. */
+  /* As tall as a small button, so showing the buttons doesn't move the list. */
   min-height: calc(var(--font-sm) * 1.6 + 2px);
   margin-bottom: var(--space-3);
   padding-bottom: var(--space-2);
@@ -193,7 +188,7 @@
   gap: var(--space-1-5);
 }
 
-/* Right after the folder's size, a recessed pill as macOS's inline ⋯ buttons: a faint fill, darker on hover or while its menu is open. */
+/* Recessed like macOS's inline ⋯ buttons. */
 .folder-actions {
   display: inline-flex;
   align-items: center;
@@ -322,7 +317,6 @@
   gap: var(--space-1-5);
 }
 
-/* A trashed file: dimmed, with a small trash icon. */
 .folder-file-trashed {
   display: inline-flex;
   flex-shrink: 0;
@@ -357,7 +351,6 @@
   margin-bottom: var(--space-2);
 }
 
-/* The button trashing the unticked copies, or a Suggested Folder's files, now, on their own, and what it frees beside it. */
 .duplicates-trash-now,
 .duplicates-trash-now button {
   display: inline-flex;
@@ -373,10 +366,7 @@
   display: none;
 }
 
-/*
- * The Duplicate Groups as one table: a "Keep" header over the copies' Keep boxes, then each group's name and
- * warning, then its copies, each on the same columns: Keep box, folder, modified date.
- */
+/* One table, so every group's copies line up on the same columns. */
 .duplicate-columns,
 .duplicate-copy {
   display: grid;
@@ -471,7 +461,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The header's button, with "Also trash N emptied folders" beside it and what it's doing, or why it did nothing, under it. */
 .review-run .actions {
   flex-wrap: wrap;
   align-items: center;
@@ -497,7 +486,6 @@
   display: none;
 }
 
-/* Shown only when this scan skipped something: a click opens the detail under it. */
 .skipped {
   position: relative;
 }

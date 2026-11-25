@@ -1,17 +1,12 @@
-// What the scan leaves out of the Suggested Folders, as one line under the review's scan summary, with the
-// detail opening under it on a click.
+// One quiet line: what was left out matters only to some.
 import { count } from "../../shared/format.js";
 
-/** What every scan leaves out, said in the detail but never showing the line on its own. */
+/** True of every scan, so not worth showing the line for. */
 const ALWAYS = [
   "Only files directly in the folder are sorted into folders. Files deeper down are checked for duplicates.",
   "Hidden files and symlinks are left alone.",
 ];
 
-/**
- * The line for the scan `result`, `{ label, detail }`, or null when it skipped nothing: no files without an
- * extension, no Protected Paths and nothing unreadable. The detail lists each with its count.
- */
 export function skippedLine({ skipped, noExtension, unreadable }) {
   const lines = [
     noExtension > 0 && `Files without an extension: ${count(noExtension)}. They're checked for duplicates but not sorted.`,

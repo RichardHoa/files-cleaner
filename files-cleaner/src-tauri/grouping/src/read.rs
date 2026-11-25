@@ -1,6 +1,4 @@
-//! Reading a short text for each file: its name, plus what's inside it when
-//! the format is one we can read. PDFs without a usable text layer are read
-//! by OCR (`ocr.rs`). Files are only ever opened for reading.
+//! Files are only ever opened for reading.
 
 use pdfium_render::prelude::{PdfRenderConfig, Pdfium};
 use std::io::Read;
@@ -10,36 +8,27 @@ use std::time::{Duration, Instant};
 
 use crate::{ocr, trace};
 
-/// What the models are given about one file.
 #[derive(Debug, Clone)]
 pub struct Content {
-    /// The file name as words.
     pub name: String,
-    /// The file name as it is on disk, which names its trace.
     pub file_name: String,
-    /// What's inside, at most `MAX_CHARS`; empty when read by name only.
     pub body: String,
-    /// A PDF with no text layer, such as a scan, that OCR couldn't read
-    /// either: OCR's languages aren't bundled, or its pages are pictures.
+    /// No text layer, and OCR couldn't read it either.
     pub scanned: bool,
 }
 
-/// Changes when the same file would be read differently, so cards made
-/// from the old reading aren't used.
+/// Raise it when a file would be read differently, so cards from the old
+/// reading aren't used.
 pub const READER_VERSION: u32 = 4;
 
-/// Most characters of content read from each file.
 const MAX_CHARS: usize = 2000;
-/// A PDF whose text isn't out by then is read by its name.
 const PDF_TIMEOUT: Duration = Duration::from_secs(10);
-/// Pages of a PDF read for its text; the rest of the document is never decoded.
+/// The rest of the document is never decoded.
 const PDF_PAGES: i32 = 3;
-/// A PDF whose pages aren't through OCR by then is read without them.
 const OCR_TIMEOUT: Duration = Duration::from_secs(45);
-/// Pages of a PDF read by OCR, which takes a second or more each.
+/// OCR takes a second or more per page.
 const OCR_PAGES: i32 = 2;
-/// Pages are rendered for OCR at this many pixels per point (216 dpi),
-/// and at most `OCR_MAX_PIXELS` on a side.
+/// Pixels per point (216 dpi), capped by `OCR_MAX_PIXELS` on a side.
 const OCR_SCALE: f32 = 3.0;
 const OCR_MAX_PIXELS: i32 = 3000;
 
@@ -50,26 +39,20 @@ const PLAIN_TEXT: &[&str] = &[
     "sql", "css", "scss", "r", "m", "lua", "dart", "scala", "svelte", "vue", "ipynb",
 ];
 
-/// Of the words in a PDF's text, the fewest that must be plain words or
-/// numbers. Below it the text layer is garbled, as when a font maps its
-/// glyphs to the wrong characters ("Collocations" comes out as
-/// `.;!!;)7°—;J©`), and the PDF is read by its name.
+/// Below this share the text layer is garbled, as when a font maps glyphs to
+/// the wrong characters ("Collocations" reads `.;!!;)7°—;J©`).
 const PDF_PLAIN_WORDS: f32 = 0.5;
 
-/// Most bytes read from one part of an Office file, so a zip bomb can't
-/// exhaust memory.
+/// So a zip bomb can't exhaust memory.
 const MAX_XML_BYTES: u64 = 4 * 1024 * 1024;
 
-/// Most bytes read from an HTML file: its text can come after long style
-/// and script blocks.
+/// Larger than for other text: it can come after long style and script blocks.
 const MAX_HTML_BYTES: u64 = 1024 * 1024;
 
-/// HTML elements whose content is never shown as text.
 const HTML_HIDDEN: &[&str] = &[
     "script", "style", "template", "svg", "math", "noscript", "iframe", "object", "canvas",
 ];
 
-/// HTML elements that start a new line of text.
 const HTML_BLOCKS: &[&str] = &[
     "title",
     "p",
@@ -103,9 +86,6 @@ const HTML_BLOCKS: &[&str] = &[
     "figcaption",
 ];
 
-/// Reads the file at `path` named `name`. `pdfium` is the PDFium library;
-/// without it, PDFs are read by name. `tessdata` is the folder of OCR's
-/// language files; without it, PDFs aren't read by OCR.
 pub fn read(path: &Path, name: &str, pdfium: Option<&Path>, tessdata: Option<&Path>) -> Content {
     let ext = name
         .rsplit_once('.')
@@ -147,9 +127,8 @@ pub fn read(path: &Path, name: &str, pdfium: Option<&Path>, tessdata: Option<&Pa
             scanned: false,
         };
     }
-    // A PDF that opened with next to no text is pages of images, as a scan
-    // is; one with garbled text still shows it right. Either way the pages
-    // are read as pictures.
+    // Next to no text means pages of images; garbled text still shows right.
+    // Both can be read as pictures.
     match pdfium
         .zip(tessdata)
         .and_then(|(pdfium, tessdata)| pdf_text(pdfium, path, PdfReading::Ocr, Some(tessdata)))
@@ -170,8 +149,7 @@ pub fn read(path: &Path, name: &str, pdfium: Option<&Path>, tessdata: Option<&Pa
     }
 }
 
-/// The share of `text`'s words that, without the punctuation around them,
-/// are all letters or all digits (with `.,:/-` between them, as in dates).
+/// Dates and amounts count as plain, so `.,:/-` is allowed between digits.
 fn plain_word_share(text: &str) -> f32 {
     let words: Vec<&str> = text.split_whitespace().collect();
     let plain = words
@@ -186,9 +164,6 @@ fn plain_word_share(text: &str) -> f32 {
     plain as f32 / words.len().max(1) as f32
 }
 
-/// The file name without its extension, with separators and camelCase
-/// turned into spaces: `Screenshot_2026-10-03 at 14.22.01.png` becomes
-/// `Screenshot 2026 10 03 at 14 22 01`.
 pub fn name_words(name: &str) -> String {
     let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
     let mut out = String::with_capacity(stem.len() + 8);
@@ -212,7 +187,6 @@ pub fn name_words(name: &str) -> String {
     out.trim_end().to_string()
 }
 
-/// Runs of spaces become one space; line breaks stay, one per run.
 fn collapse_whitespace(text: &str) -> String {
     text.lines()
         .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
@@ -228,20 +202,15 @@ fn truncate(text: &str, max_chars: usize) -> String {
     }
 }
 
-/// How often the parent checks whether the PDF child has finished.
 const PDF_POLL: Duration = Duration::from_millis(20);
 
-/// How a PDF is read in the child process: see `pdf_child_main`.
 #[derive(Clone, Copy)]
 enum PdfReading {
-    /// Its text layer, from `PDF_PAGES` pages.
     TextLayer,
-    /// Its pages rendered and read by OCR, `OCR_PAGES` of them.
     Ocr,
 }
 
 impl PdfReading {
-    /// The flag the app is started with to read one PDF this way.
     fn flag(self) -> &'static str {
         match self {
             PdfReading::TextLayer => "--read-pdf",
@@ -257,11 +226,8 @@ impl PdfReading {
     }
 }
 
-/// The PDF's text, read the given way, with OCR's languages from
-/// `tessdata`. PDFium and Tesseract are C++ and can crash or take long on
-/// odd files, so they run in a child process of the app itself
-/// (`PdfReading::flag`), which is killed after `PdfReading::timeout`; the
-/// OS then frees everything it held.
+/// PDFium and Tesseract are C++ and can crash or hang on odd files, so a child
+/// process runs them and can be killed.
 fn pdf_text(
     pdfium: &Path,
     path: &Path,
@@ -275,7 +241,7 @@ fn pdf_text(
         .args(tessdata)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        // The child's timings, on stderr, are kept only when tracing.
+        // Piped only when tracing reads it.
         .stderr(if trace::enabled() {
             Stdio::piped()
         } else {
@@ -284,9 +250,8 @@ fn pdf_text(
         .spawn()
         .ok()?;
     let started = Instant::now();
-    // The child prints at most `MAX_CHARS` characters, and a few lines of
-    // timings, well under a pipe's buffer, so it never blocks on a full
-    // pipe while we wait.
+    // The output is capped well under a pipe's buffer, so the child never
+    // blocks while we wait.
     let outcome = loop {
         match child.try_wait() {
             Ok(Some(status)) if status.success() => break "done",
@@ -317,10 +282,7 @@ fn pdf_text(
     Some(text)
 }
 
-/// When the app was started to read one PDF, reads it and says how the
-/// process should exit; otherwise `None`, and the app starts as usual. The
-/// app's `main` calls this first. The text of the first pages, at most
-/// `MAX_CHARS` characters, goes to stdout.
+/// `main` must call this first: the app is its own PDF child.
 pub fn pdf_child_main() -> Option<i32> {
     let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
     let reading = [PdfReading::TextLayer, PdfReading::Ocr]
@@ -330,8 +292,7 @@ pub fn pdf_child_main() -> Option<i32> {
         return Some(1);
     };
     let tessdata = args.get(4).map(Path::new);
-    // A panic or a crash in PDFium or Tesseract just ends this process; the
-    // parent sees a failure.
+    // A crash here only ends this process; the parent sees a failure.
     Some(
         match pdf_child(Path::new(pdfium), Path::new(path), reading, tessdata) {
             Ok(()) => 0,
@@ -340,8 +301,7 @@ pub fn pdf_child_main() -> Option<i32> {
     )
 }
 
-/// Each step's time goes to stderr as it ends, so the parent sees how far
-/// a child it killed got.
+/// As each step ends, so the parent sees how far a child it killed got.
 fn pdf_child(
     pdfium: &Path,
     path: &Path,
@@ -350,9 +310,8 @@ fn pdf_child(
 ) -> Result<(), String> {
     let step = Instant::now();
     let pdfium = Pdfium::new(Pdfium::bind_to_library(pdfium).map_err(|e| e.to_string())?);
-    // Opened through a seekable reader, not read into memory: PDFium reads
-    // the cross-reference table and then only the objects of the pages it
-    // is asked for, so a 2 GB PDF costs about what a 2 MB one does.
+    // Seekable, not read into memory: PDFium reads only the pages asked for, so
+    // a 2 GB PDF costs about what a 2 MB one does.
     let doc = pdfium
         .load_pdf_from_file(path, None)
         .map_err(|e| e.to_string())?;
@@ -472,9 +431,7 @@ fn office_text(path: &Path, ext: &str) -> Option<String> {
     Some(text)
 }
 
-/// Appends the text nodes of an Office XML part to `out`. Runs inside one
-/// paragraph join directly (Word splits words across runs); the ends of
-/// paragraphs, cells, shared strings and line breaks become spaces.
+/// Word splits words across runs, so runs inside one paragraph join directly.
 fn strip_xml(xml: &str, out: &mut String) {
     let mut rest = xml;
     let mut chars = out.chars().count();
@@ -513,9 +470,7 @@ fn html_text(path: &Path) -> Option<String> {
     Some(strip_html(&String::from_utf8_lossy(&bytes)))
 }
 
-/// The text of `html` as a browser shows it, at most about `MAX_CHARS`
-/// characters: tags, comments and the content of `HTML_HIDDEN` elements
-/// are dropped, so the models never see styles, scripts or markup.
+/// The models must never see styles, scripts or markup.
 fn strip_html(html: &str) -> String {
     // ASCII lowercasing keeps every byte where it was, so offsets found in
     // `lower` index `html` too.
@@ -559,7 +514,6 @@ fn strip_html(html: &str) -> String {
     out
 }
 
-/// Decodes the named entities of XML, `&nbsp;`, and numeric references.
 fn decode_entities(text: &str) -> String {
     if !text.contains('&') {
         return text.to_string();

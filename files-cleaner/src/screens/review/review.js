@@ -1,29 +1,5 @@
-// Review: the one screen after the scan, holding the whole Plan, laid out like Finder or Mail. A sidebar
-// lists the Duplicates, then the Suggested Folders and New folder, then the files left where they are (shown
-// as Unsorted), and the pane beside it lists the one picked. The Duplicate Groups show at once. The loose
-// files are read in the background meanwhile, which needs the Grouping Models (without them, they're
-// offered in the Suggested Folders' place); the Rules' folders show at once, and the other Suggested Folders
-// are added once that's done.
-// Rows have no buttons: files, and copies, are selected as in Finder, by clicking or with the arrow keys,
-// then trashed or put back (or kept, for copies) from the toolbar always shown above the list of files, its buttons
-// once some are selected, their right-click menu or Edit › Trash (⌘⌫). The Duplicates pane has no toolbar: its Keep boxes choose, and
-// its own button trashes the unticked copies at once, apart from the rest of the Plan. Files not marked Trash are
-// moved with the toolbar's "Move to…" or their right-click menu, which also offers any other folder on disk, or
-// left unsorted; nothing on the screen is dragged. A file
-// opens in its default app by double-clicking it or from its right-click menu. The sidebar counts the files in
-// each item, and grays out a folder whose every file is trashed. Its Suggested Folders are selected as files
-// are; it adds a folder, and merges one into another, trashes the selected ones' files now (with Edit › Trash Now,
-// ⇧⌘⌫, too) or leaves their files not marked Trash unsorted, from its right-click menu. The listed Suggested Folder's
-// ⋯ menu has the same items. Those
-// Trash Nows, and the copies', are Sessions of their own; nothing else happens to the files until the
-// header's button, which waits for the reading (it can be stopped early to group only what was read), carries
-// out the whole Plan as one Session; Cancel stops the reading and goes Home.
-//
-// This module only lays the screen out and connects its parts, each in a module of its own: the folder
-// panes, the Duplicates pane, the reading, the sidebar, the selection with the toolbar, and the header.
-// They share one context, `ctx`, and never import one another; each part's own functions are reached
-// through it, as `ctx.sessions`, `ctx.selection` and so on. Every right-click menu is the OS's own, and the menu
-// bar's Edit items act on what's selected here (see `menuItems`).
+// One screen for the whole Plan. This module only lays it out: the parts share `ctx` and never
+// import one another, so each can be read alone.
 import { pathSeparator } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";
 import { plural, splitPath } from "../../shared/format.js";
@@ -39,7 +15,7 @@ import { sessions } from "./sessions.js";
 import { sidebar } from "./sidebar.js";
 
 export async function render(root, appNav, result, duplicateGroups) {
-  // Cancel and Run leave the Review for good: nothing goes back to it.
+  // After Cancel or Run, going back would show a Plan that no longer applies.
   const nav = {
     ...appNav,
     home: (...args) => (appNav.leaveReview(), appNav.home(...args)),
@@ -47,30 +23,26 @@ export async function render(root, appNav, result, duplicateGroups) {
   };
   const state = new ReviewState(result, duplicateGroups);
   const view = {
-    // What the pane lists: "duplicates", "folders" (until they're ready), "left" (the files left where they
-    // are), "picked" (several Suggested Folders selected, none listed), or a Suggested Folder's choice.
+    // "duplicates", "folders" (until they're ready), "left", "picked" (several folders selected),
+    // or a Suggested Folder's choice.
     current: state.duplicates.length > 0 ? "duplicates" : "folders",
-    // The Suggested Folders selected in the sidebar, and the one last clicked there without Shift.
     picked: new Set(),
+    // Where a Shift-click selects from.
     pickAnchor: null,
-    // The files selected in the pane, and the one last clicked without Shift.
     selection: new Set(),
+    // Where a Shift-click selects from.
     anchor: null,
-    // The Suggested Folder being renamed in the sidebar, if any: `{ choice, node }`, its name field kept
-    // across redraws of the sidebar, so the name from before and the focus stay.
+    // The field is kept across sidebar redraws, so its text and focus survive.
     renaming: null,
-    // Set while the sidebar is redrawn, when moving the name field can blur it.
+    // Moving the name field during a redraw can blur it, which must not end the rename.
     redrawing: false,
     duplicatesShown: FILES_SHOWN,
-    // How far the reading is, shown in the sidebar while the files are read.
     readingProgress: "",
-    // Whether the Session is running.
     running: false,
-    // Whether the user has once selected several items, after which the selection line no longer says how.
+    // Assumed seen until loaded, so the hint doesn't flash.
     multiSelectSeen: true,
   };
 
-  /** Lists `to`, with `picked` the Suggested Folders selected in the sidebar: `to` alone when it is one. */
   const show = (to, picked = state.choices.includes(to) ? new Set([to]) : new Set()) => {
     view.current = to;
     view.picked = picked;
@@ -80,11 +52,7 @@ export async function render(root, appNav, result, duplicateGroups) {
     ctx.selection.clearStatus();
     drawPane();
   };
-  /**
-   * What every part of the screen shares: the Review state and the view, the Scan Root's name, the pane, `show(section, picked)` listing a section, and the redraws, among them
-   * `section(name)`, redrawing the pane if it lists `name` and everything around it otherwise. Each part adds
-   * its own functions to it below.
-   */
+  /** Parts add their own functions below, which is how they reach one another. */
   const ctx = {
     nav,
     state,
@@ -117,11 +85,7 @@ export async function render(root, appNav, result, duplicateGroups) {
     ctx.selection.draw();
   });
 
-  /**
-   * The menu bar's items for what's selected: the selection's and the sidebar's, then Trash Now on the selected
-   * Suggested Folders, or the copies marked Trash when the Duplicates are listed, and Trash on several folders
-   * selected, as ⌘⌫ there before. While a Session runs, nothing that changes the Plan or leaves the screen applies.
-   */
+  /** While a Session runs, nothing that changes the Plan or leaves the screen applies. */
   function menuItems() {
     if (view.running) return { newScan: null, recent: [], rules: null, history: null, settings: null };
     const picked = state.choices.filter((choice) => view.picked.has(choice));
@@ -132,7 +96,7 @@ export async function render(root, appNav, result, duplicateGroups) {
     return items;
   }
 
-  /** The pane: the listed section of the Plan, under the toolbar when it lists files (not copies). A toolbar button or a file's row that had focus keeps it. */
+  /** Redrawing drops the focus, so it is put back. */
   function drawPane() {
     const { toolbar } = ctx.selection;
     const focused = toolbar.contains(document.activeElement) ? document.activeElement : null;
@@ -155,7 +119,6 @@ export async function render(root, appNav, result, duplicateGroups) {
     else if (focusedPath) ctx.pane.querySelector(`[data-path="${CSS.escape(focusedPath)}"]`)?.focus();
   }
 
-  /** Brings the sidebar, the selection, the header, the menu bar and the Emptied Folders up to date after the pane changed. */
   function changed() {
     ctx.redraw.sidebar();
     ctx.selection.draw();

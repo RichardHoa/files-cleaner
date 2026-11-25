@@ -1,10 +1,5 @@
-//! Times `scan` on a folder, for measuring the scanner's speed:
-//!
-//!     cargo run --release --bin bench-scan -- <folder> [runs]
-//!
-//! Run it under `/usr/bin/time -l` for peak memory and CPU time too. The
-//! first run usually reads from disk and later ones from the OS's cache, so
-//! it scans `runs` times (2 by default) and reports each.
+//! The first run usually reads from disk and later ones from the OS's cache, so
+//! each is timed apart: cargo run --release --bin bench-scan -- <folder> [runs]
 
 use std::env;
 use std::path::PathBuf;

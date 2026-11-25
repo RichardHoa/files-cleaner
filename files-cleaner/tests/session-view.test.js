@@ -3,7 +3,6 @@ import { test } from "node:test";
 import { PAGE_SIZE, paging, selectedFile, visibleFiles } from "../src/shared/plan/plan-view.js";
 import { actionFor, groupByState, paneSentence, sessionHeading, sessionLead, whereNow } from "../src/screens/session/session-view.js";
 
-/** A Session's Trash Operation for the `/`-separated `path`, in `state`. */
 function op(path, state = "done", { size = 0, note = null } = {}) {
   const relativePath = path.split("/");
   return { id: `trash:${path}`, kind: "trash", inSystemTrash: true, relativePath, size, state, note };
@@ -92,7 +91,6 @@ test("when search hides the selected file, the first file still shown is selecte
   assert.equal(selectedFile(shown, "trash:Zoom/notes.txt").id, "trash:Zoom/notes.txt");
 });
 
-/** A Session's Operation of `kind` for `path`, which went to the absolute `destination`. */
 function movedOp(kind, path, destination, state = "done") {
   const relativePath = path.split("/");
   return { id: `${kind}:${path}`, kind, relativePath, destination, size: 0, state, note: null };
@@ -116,7 +114,6 @@ test("the pane says where a file moved out of the Scan Root is, and what happene
   assert.equal(paneSentence(movedOp("createFolder", "Study", "/r/Study", "undone"), "Downloads"), "Removed again.");
 });
 
-/** A Session's Move Operation of `path` into `Sorted/`, in `state`. */
 const moveOp = (path, state = "done") => ({ ...op(path, state), id: `move:${path}`, kind: "move", inSystemTrash: false, destination: `/d/Sorted/${path}` });
 
 test("moved and trashed files are grouped apart, and the heading counts each", () => {

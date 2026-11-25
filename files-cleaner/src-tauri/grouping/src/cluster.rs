@@ -1,8 +1,6 @@
-//! Average-linkage agglomerative clustering on cosine similarity: start with
-//! one cluster per file, keep merging the most similar pair while their
-//! average similarity is at least the threshold.
+//! Average linkage, so one stray similarity can't chain two unrelated groups
+//! together.
 
-/// An L2-normalized embedding.
 pub type Vector = Vec<f32>;
 
 pub struct Clusters {
@@ -12,8 +10,7 @@ pub struct Clusters {
     pub ungrouped: Vec<usize>,
 }
 
-/// Pairwise similarities between files, symmetric. n×n floats: 16 MB for
-/// 2,000 files.
+/// n×n floats: 16 MB for 2,000 files.
 struct Similarities {
     n: usize,
     values: Vec<f32>,
@@ -30,9 +27,8 @@ impl Similarities {
     }
 }
 
-/// Clusters files by their vectors, counting two files `same_topic` says
-/// share a topic as similarity 1: the LLM has already said they belong
-/// together, however differently they are worded.
+/// A shared topic counts as similarity 1: the LLM has already said they belong
+/// together.
 pub fn cluster(
     vectors: &[Vector],
     same_topic: impl Fn(usize, usize) -> bool,
@@ -52,7 +48,7 @@ pub fn cluster(
     agglomerate(sims, threshold, min_size)
 }
 
-/// Consumes the matrix: its rows become the linkage between live clusters.
+/// Consumes the matrix, as n×n floats are too many to copy.
 fn agglomerate(mut link: Similarities, threshold: f32, min_size: usize) -> Clusters {
     let n = link.n;
     let mut sizes = vec![1usize; n];
@@ -64,7 +60,6 @@ fn agglomerate(mut link: Similarities, threshold: f32, min_size: usize) -> Clust
             .map(|j| (j, link.get(i, j)))
             .max_by(|a, b| a.1.total_cmp(&b.1))
     };
-    // Each live cluster's most similar live neighbour.
     let mut best: Vec<Option<(usize, f32)>> = (0..n).map(|i| nearest(i, &alive, &link)).collect();
 
     while let Some((a, (b, _))) = (0..n)
@@ -73,8 +68,7 @@ fn agglomerate(mut link: Similarities, threshold: f32, min_size: usize) -> Clust
         .max_by(|x, y| x.1 .1.total_cmp(&y.1 .1))
         .filter(|(_, (_, s))| *s >= threshold)
     {
-        // Merge b into a: the average similarity to the merged cluster is
-        // the size-weighted average of the similarities to a and to b.
+        // Average linkage is the size-weighted average of the two.
         let (sa, sb) = (sizes[a] as f32, sizes[b] as f32);
         for k in (0..n).filter(|&k| alive[k] && k != a && k != b) {
             link.set(
@@ -88,9 +82,8 @@ fn agglomerate(mut link: Similarities, threshold: f32, min_size: usize) -> Clust
         members[a].extend(moved);
         alive[b] = false;
         best[b] = None;
-        // Only rows whose neighbour was a or b need a new one: anyone else's
-        // similarity to the merged cluster is a weighted average of its old
-        // similarities to a and b, so it can't beat that row's best.
+        // For any other row, the merged similarity is an average of its old
+        // ones, so it can't beat that row's best.
         for k in 0..n {
             if alive[k] && (k == a || matches!(best[k], Some((j, _)) if j == a || j == b)) {
                 best[k] = nearest(k, &alive, &link);
@@ -116,7 +109,6 @@ fn agglomerate(mut link: Similarities, threshold: f32, min_size: usize) -> Clust
     Clusters { groups, ungrouped }
 }
 
-/// How alike two files are: 1 when they share a topic, else their cosine.
 pub fn similarity(a: &[f32], b: &[f32], same_topic: bool) -> f32 {
     if same_topic {
         1.0
@@ -137,7 +129,6 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
 }
 
-/// The normalized mean of normalized vectors.
 pub fn centroid<'a>(vectors: impl IntoIterator<Item = &'a Vector>) -> Option<Vector> {
     let mut sum: Option<Vector> = None;
     for v in vectors {

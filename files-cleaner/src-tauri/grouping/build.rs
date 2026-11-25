@@ -1,7 +1,5 @@
-//! Links clang's runtime library on macOS. llama.cpp's Metal code checks the
-//! OS version with `@available`, which below the newest macOS it checks for
-//! (the app supports 10.15) compiles to calls into that library, and rustc
-//! links with `-nodefaultlibs`, so it isn't linked otherwise.
+//! llama.cpp's `@available` checks call clang's runtime library when targeting
+//! older macOS, and rustc's `-nodefaultlibs` leaves it out.
 
 use std::env;
 use std::path::Path;

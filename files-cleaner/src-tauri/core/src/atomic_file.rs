@@ -1,5 +1,5 @@
-//! Replacing a small file so a crash or a power cut leaves either the old
-//! contents or the new, never an empty or half-written file.
+//! A crash or power cut must leave either the old contents or the new, never
+//! half a file.
 
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -11,10 +11,8 @@ use std::time::{Duration, SystemTime};
 /// Tells apart the temporary files of writes in this process.
 static WRITES: AtomicU64 = AtomicU64::new(0);
 
-/// Replaces the file at `path` with `bytes`: written to a temporary file
-/// next to it and flushed to disk, then renamed over it, then the folder
-/// flushed too so the rename itself survives a power cut. Each write has
-/// its own temporary file, so two at once each install a whole file.
+/// The folder is flushed too, so the rename itself survives a power cut. Each
+/// write has its own temporary file, so two at once can't mix.
 pub fn write_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let mut temporary = path.as_os_str().to_owned();
     let write = WRITES.fetch_add(1, Ordering::Relaxed);
@@ -37,8 +35,7 @@ pub fn write_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
     }
 }
 
-/// Deletes the temporary files of writes to `path` that a crash cut short.
-/// A write takes moments, so one an hour old is never still going.
+/// A write takes moments, so a temporary file an hour old was left by a crash.
 fn remove_left_over(folder: &Path, path: &Path) {
     const LEFT_OVER_AFTER: Duration = Duration::from_secs(60 * 60);
     let (Some(name), Ok(children)) = (path.file_name(), fs::read_dir(folder)) else {
@@ -63,8 +60,7 @@ fn remove_left_over(folder: &Path, path: &Path) {
     }
 }
 
-/// Waits until the names in `folder` are on disk, not just the files'
-/// contents. Windows can't open a folder to sync it, and doesn't need to.
+/// Windows can't open a folder to sync it, and doesn't need to.
 fn sync_folder(folder: &Path) -> io::Result<()> {
     if cfg!(windows) {
         return Ok(());

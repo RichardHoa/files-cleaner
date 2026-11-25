@@ -7,8 +7,6 @@ use std::sync::atomic::AtomicBool;
 use common::{empty_config, real_path, scan_root, symlink, write};
 use files_cleaner_core::{scan, scan_with_progress, ScanError, ScanResult};
 
-/// Paths of the scanned entries relative to the Scan Root, `/`-separated
-/// and sorted. Also checks each entry's `relative_path` names the same path.
 fn relative_paths(result: &ScanResult, root: &Path) -> Vec<String> {
     let root = real_path(root);
     let mut paths: Vec<String> = result

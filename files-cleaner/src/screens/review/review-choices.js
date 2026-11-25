@@ -1,18 +1,9 @@
-// What the user chose on the review screen, and what that does to the files: for each Duplicate Group,
-// which copies are kept and which are trashed; for each Suggested Folder, where it goes and what happens
-// to each of its files. A folder's choice is "addTo" (into an existing folder, the subfolder it matched or one
-// the user picked), "createHere" (a new folder in the Scan Root) or "createIn" (a new folder inside
-// `elsewhere`, a folder the user picked); each of its files is "inFolder" (goes wherever the folder's choice
-// sends it) or "trash". The user can also add a folder, merge one into another, or leave its files unsorted. The
-// files left where they are stay there, unless the user trashes one or moves it to a folder, suggested or any other
-// on disk. A file marked Trash stays where it's listed: moving files, or leaving them unsorted, takes only the
-// others. The whole Plan is carried out at once.
+// Pure rules on the user's choices, with no DOM, so they can be tested. A file marked Trash stays
+// where it's listed, so moving never silently untrashes it.
 import { count, splitPath } from "../../shared/format.js";
 
-/** What the Plan calls the files trashed from those left where they are. */
 const LEFT_NAME = "Left where they are";
 
-/** The files left where they are, and in `trashed` those of them the user trashes. A file that leaves is no longer trashed. */
 export class LeftFiles extends Set {
   trashed = new Set();
 
@@ -23,10 +14,8 @@ export class LeftFiles extends Set {
 }
 
 /**
- * The starting choice for each Duplicate Group of `groups` (`{ size, copies }`, as `findDuplicates` gives
- * them): its first copy is kept and every other copy is trashed. Each copy is "keep" or "trash", by path.
- * `placed` is the copy holding the group's place among the Suggested Folders and the files left where they
- * are, and `emptyPlace` where that was while no copy is kept.
+ * `emptyPlace` remembers where a group was while no copy is kept, so keeping one again restores
+ * it.
  */
 export function initialDuplicates(groups) {
   return groups.map((group) => ({
@@ -37,19 +26,15 @@ export function initialDuplicates(groups) {
   }));
 }
 
-/** The folder holding `copy`, from the Scan Root: "" for the Scan Root itself. */
 export const copyFolder = (copy) => copy.relativePath.slice(0, -1).join("/");
 
-/** How many copies of the Duplicate Group `duplicate` are trashed. */
 export const trashedCopies = (duplicate) => [...duplicate.copies.values()].filter((fate) => fate === "trash").length;
 
-/** How many copies of all the Duplicate Groups `duplicates` are trashed. */
 export const trashedCopiesIn = (duplicates) => duplicates.reduce((n, duplicate) => n + trashedCopies(duplicate), 0);
 
-/** The path of the Filed Copy of the Duplicate Group `duplicate`: its first Kept Copy, or null if no copy is kept. */
 export const filedCopy = (duplicate) => [...duplicate.copies].find(([, fate]) => fate === "keep")?.[0] ?? null;
 
-/** The Kept Copies of `duplicates` that aren't filed: they stay where they are, so they're listed with the files left there and can't be moved. */
+/** Not filed, so they can't be moved. */
 export const otherKeptCopies = (duplicates) =>
   new Set(
     duplicates.flatMap((duplicate) => {
@@ -58,10 +43,9 @@ export const otherKeptCopies = (duplicates) =>
     }),
   );
 
-/** The choice a Kept Copy takes over from the file whose place it takes: the same, except that a Trash clicked on that file was never about this copy. */
+/** A Trash clicked on the file it replaces was never about this copy. */
 const handedOver = (file) => (file === "trash" ? "inFolder" : file);
 
-/** Puts the file `to` wherever `from` is among `choices` and the Set `left`, with its choice handed over and in the same place in its folder. */
 function replaceFile(choices, left, from, to) {
   if (from === to) return;
   for (const choice of choices) {
@@ -71,7 +55,6 @@ function replaceFile(choices, left, from, to) {
   if (left.delete(from)) left.add(to);
 }
 
-/** Removes `path` from `choices` and the Set `left`, returning where it was: `{ choice, file }`, `choice` null for `left`, or null if it was in neither. */
 function removeFile(choices, left, path) {
   const choice = choices.find((candidate) => candidate.files.has(path));
   if (choice) {
@@ -82,17 +65,12 @@ function removeFile(choices, left, path) {
   return left.delete(path) ? { choice: null } : null;
 }
 
-/** Puts the Kept Copy `path` at `place`, as `removeFile` gave it. */
 function putBack(left, path, { choice, file }) {
   if (choice) choice.files.set(path, handedOver(file));
   else left.add(path);
 }
 
-/**
- * Brings the copies of `duplicate` in line with its choices: the Filed Copy takes the group's place, needing
- * no reading as it's the same as the copy read, the other Kept Copies are listed in `left`, and a trashed
- * copy is nowhere. With no copy kept the group's place is remembered, for when one is kept again.
- */
+/** The Filed Copy takes the group's place without reading, as it is the same as the copy read. */
 function placeCopies(duplicate, choices, left) {
   const filed = filedCopy(duplicate);
   const { placed, emptyPlace } = duplicate;
@@ -106,16 +84,12 @@ function placeCopies(duplicate, choices, left) {
   for (const path of otherKeptCopies([duplicate])) left.add(path);
 }
 
-/** The user sets the copy at `path` of the Duplicate Group `duplicate` to `fate`, "keep" or "trash", and puts its copies where that leaves them. */
 export function setCopy(duplicate, path, fate, choices, left) {
   duplicate.copies.set(path, fate);
   placeCopies(duplicate, choices, left);
 }
 
-/**
- * The Filed Copy of `duplicate` went to the System Trash with its Suggested Folder: it leaves the group,
- * another copy is kept if none is, so one always survives, and the group's place is with the files left where they are.
- */
+/** Another copy is kept if none is, so one always survives. */
 export function filedCopyTrashed(duplicate, choices, left) {
   const filed = filedCopy(duplicate);
   duplicate.copies.delete(filed);
@@ -126,7 +100,7 @@ export function filedCopyTrashed(duplicate, choices, left) {
   placeCopies(duplicate, choices, left);
 }
 
-/** Puts the copies of `duplicates` where the choices made while the files were read leave them; the copy read, the first, holds each group's place until then. */
+/** Until now the copy read, the first, held each group's place. */
 export function placeDuplicates(choices, left, duplicates) {
   for (const duplicate of duplicates) {
     duplicate.placed = duplicate.group.copies[0].path;
@@ -134,7 +108,6 @@ export function placeDuplicates(choices, left, duplicates) {
   }
 }
 
-/** `duplicates` as `buildReviewPlan` takes them: each group's Filed Copy, or null, and the copies it trashes. */
 export function planDuplicates(duplicates) {
   return duplicates
     .map((duplicate) => ({
@@ -144,7 +117,6 @@ export function planDuplicates(duplicates) {
     .filter(({ trash }) => trash.length > 0);
 }
 
-/** The starting choice for each Suggested Folder of `folders`: into its matched subfolder if it has one, else a new folder in the Scan Root, with every file. */
 export function initialChoices(folders) {
   return folders.map((folder) => ({
     folder,
@@ -155,14 +127,13 @@ export function initialChoices(folders) {
   }));
 }
 
-/** Adds a Suggested Folder of the user's own to `choices`, with no files, going into the folder `existing` or else in the Scan Root, and returns it. */
 export function addFolder(choices, name = "untitled folder", existing = null) {
   const [choice] = initialChoices([{ name, files: [], existing }]);
   choices.push(choice);
   return choice;
 }
 
-/** Takes the Suggested Folder `choice` off `choices`; a Duplicate Group that remembers its place there remembers `to` instead, the folder its files went to, or null for the files left where they are. */
+/** A Duplicate Group may remember its place there, so that is redirected to `to`. */
 function dropFolder(choices, duplicates, choice, to) {
   choices.splice(choices.indexOf(choice), 1);
   for (const { emptyPlace } of duplicates) {
@@ -170,7 +141,7 @@ function dropFolder(choices, duplicates, choice, to) {
   }
 }
 
-/** Merges the Suggested Folder `from` into `into`, which keeps its name and where it goes: each file comes along with the choice made on it. */
+/** Each file keeps the choice made on it. */
 export function mergeFolder(choices, duplicates, from, into) {
   for (const [path, file] of from.files) into.files.set(path, file);
   // Its files no longer share what the tool grouped them by.
@@ -178,10 +149,7 @@ export function mergeFolder(choices, duplicates, from, into) {
   dropFolder(choices, duplicates, from, into);
 }
 
-/**
- * Leaves the files of the Suggested Folder `choice` not marked Trash where they are, in the Set `left`. The folder
- * keeps those marked Trash, and is dropped once it has none.
- */
+/** Files marked Trash keep their folder until it is run. */
 export function leaveUnsorted(choices, left, duplicates, choice) {
   for (const [path, file] of choice.files) {
     if (file === "trash") continue;
@@ -194,17 +162,12 @@ export function leaveUnsorted(choices, left, duplicates, choice) {
   if (choice.files.size === 0) dropFolder(choices, duplicates, choice, null);
 }
 
-/** What happens to `path` of the Suggested Folder `choice`: "move", "trash" or "stay", as for a file already directly in the folder it goes to. */
 function fileFate(choice, path, separator) {
   if (choice.files.get(path) === "trash") return "trash";
   if (choice.choice === "addTo" && splitPath(path, separator).parent === choice.folder.existing) return "stay";
   return "move";
 }
 
-/**
- * `{ moved, trashed }`: how many files of all `choices` go into a folder, and how many are trashed, those
- * trashed from `left` and the copies `duplicates` trash included.
- */
 export function totals(choices, left, separator, duplicates = []) {
   const sum = { moved: 0, trashed: left.trashed.size + trashedCopiesIn(duplicates) };
   for (const choice of choices) {
@@ -217,28 +180,22 @@ export function totals(choices, left, separator, duplicates = []) {
   return sum;
 }
 
-/** The header's button for `totals`, and `emptied`, the ticked Emptied Folders, trashed too: "Move 48, Trash 12", or "Nothing to apply". */
 export function describeChange({ moved, trashed }, emptied = 0) {
   const parts = [...(moved > 0 ? [`Move ${count(moved)}`] : []), ...(trashed + emptied > 0 ? [`Trash ${count(trashed + emptied)}`] : [])];
   return parts.length > 0 ? parts.join(", ") : "Nothing to apply";
 }
 
-/** What the sidebar says about the Suggested Folder `choice`: `going`, how many files go into it, and `trashed`, whether every file it has goes to the System Trash. */
 export function folderTally(choice) {
   const files = [...choice.files.values()];
   return { going: files.filter((file) => file === "inFolder").length, trashed: files.length > 0 && files.every((file) => file === "trash") };
 }
 
-/** Whether the Suggested Folder `choice` lacks the name it needs: it needs one once it has files, and an empty name is never read as "trash". */
+/** An empty name must never be read as "trash". */
 export const nameMissing = (choice) => choice.files.size > 0 && choice.name.trim() === "";
 
-/** Whether the file at `path` is marked Trash, in a Suggested Folder of `choices` or in the Set `left`. */
 export const markedTrash = (choices, left, path) => Boolean(left.trashed?.has(path)) || choices.some((choice) => choice.files.get(path) === "trash");
 
-/**
- * Moves `path` into the Suggested Folder `to`, in with the rest, or into the Set `left` of files left where they
- * are when `to` is null. A file marked Trash stays where it is, with its mark.
- */
+/** A file marked Trash stays where it is, with its mark. */
 export function moveFile(choices, left, path, to) {
   if (markedTrash(choices, left, path)) return;
   for (const choice of choices) choice.files.delete(path);
@@ -247,11 +204,7 @@ export function moveFile(choices, left, path, to) {
   else left.add(path);
 }
 
-/**
- * Moves `paths` into the Suggested Folder going into `folder`, a folder on disk the user picked, adding it if
- * there's none yet, and returns it. A file already directly in `folder` is left where it is instead, and a file
- * marked Trash stays where it is; returns null when that's all of them.
- */
+/** Null when nothing moved: files already in `folder` or marked Trash stay put. */
 export function moveToOtherFolder(choices, left, paths, folder, separator) {
   const unmarked = paths.filter((path) => !markedTrash(choices, left, path));
   const moving = unmarked.filter((path) => splitPath(path, separator).parent !== folder);
@@ -266,7 +219,7 @@ export function moveToOtherFolder(choices, left, paths, folder, separator) {
   return to;
 }
 
-/** Where the Suggested Folder `choice` goes, as `buildReviewPlan` takes it: nowhere when every file of it is trashed, so no empty folder is made. */
+/** Nowhere when every file is trashed, so no empty folder is made. */
 const planChoice = (choice) =>
   ![...choice.files.values()].includes("inFolder")
     ? { type: "trashAll" }
@@ -276,17 +229,13 @@ const planChoice = (choice) =>
       ? { type: "createIn", folder: choice.elsewhere }
       : { type: choice.choice };
 
-/**
- * The whole of `choices` as `buildReviewPlan` takes it: each folder with its files, leaving out a folder with
- * none, so no empty folder is made, then the files of `left` being trashed, as a folder that trashes all of its own.
- */
+/** Folders with no files are left out, so no empty folder is made. */
 export function planChoices(choices, left = new LeftFiles()) {
   const folders = choices.filter((choice) => choice.files.size > 0).map((choice) => ({ name: choice.name, choice: planChoice(choice), files: [...choice.files] }));
   const trashed = [...left.trashed];
   return [...folders, ...(trashed.length > 0 ? [{ name: LEFT_NAME, choice: { type: "trashAll" }, files: trashed.map((path) => [path, "inFolder"]) }] : [])];
 }
 
-/** `paths` by kind, A–Z with "Other" last, each kind's files newest first: `[[kind, paths], …]`. */
 export function byKindNewestFirst(paths, kindOf, modifiedOf) {
   const kinds = new Map();
   for (const path of paths) {

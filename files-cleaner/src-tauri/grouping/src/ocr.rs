@@ -1,27 +1,20 @@
-//! Reading the text in a picture of a page, for PDFs with no text layer
-//! (scans) or a garbled one, with Tesseract, built into the app on every
-//! OS. Its language files are bundled with the app, in one folder put in
-//! place by the app crate's build script. Runs in the PDF child process
-//! (`read::pdf_child_main`).
+//! For PDFs with no text layer or a garbled one. Runs in the PDF child process
+//! (`read::pdf_child_main`), as Tesseract can crash.
 
 use std::path::Path;
 
 use tesseract_rs::TesseractAPI;
 
-/// One rendered page, RGBA, 8 bits a channel, rows top to bottom.
 pub struct Page {
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
 }
 
-/// Tesseract, loaded with every language in the folder it was made from.
 pub struct Reader(TesseractAPI);
 
 impl Reader {
-    /// Tesseract with every `.traineddata` file in `tessdata`, English
-    /// first so it's tried first; `None` when there are none or they don't
-    /// load.
+    /// English first, so it is tried first.
     pub fn new(tessdata: &Path) -> Option<Reader> {
         let mut languages: Vec<String> = std::fs::read_dir(tessdata)
             .ok()?
@@ -40,7 +33,6 @@ impl Reader {
         Some(Reader(api))
     }
 
-    /// The page's text, one line per line found; `None` when Tesseract failed.
     pub fn recognize(&self, page: &Page) -> Option<String> {
         let (width, height) = (page.width as i32, page.height as i32);
         self.0

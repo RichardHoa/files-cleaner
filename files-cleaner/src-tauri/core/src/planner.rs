@@ -1,5 +1,3 @@
-//! Turns a scan into a Plan: the Operations the user is asked to approve.
-
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -15,67 +13,50 @@ use crate::protection::is_os_metadata_file;
 use crate::scanner::{ScanEntry, ScanResult};
 use crate::volume::different_disks;
 
-/// The proposed Operations for one Scan Root.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Plan {
-    /// The Scan Root, with symlinks resolved.
     pub root: PathBuf,
-    /// Create Folder Operations first, each folder before the ones inside
-    /// it, so a Plan run in order has every folder before it is needed;
-    /// Trash of the folders the Plan empties last, once they are empty.
+    /// Ordered so folders exist before they're needed and are empty before
+    /// they're trashed.
     pub operations: Vec<Operation>,
 }
 
-/// One proposed file-system change.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Operation {
-    /// The same for the same change every time a Plan is built.
+    /// Stable across rebuilds, so ticks survive a new Plan.
     pub id: String,
     pub kind: OperationKind,
-    /// The item it changes; for Create Folder, the folder it creates.
     pub source: PathBuf,
-    /// The names from the Scan Root down to the source, its own name last.
-    /// A source outside the Scan Root is given in full.
     pub relative_path: Vec<String>,
-    /// The names from the Scan Root down to where the item will be once the
-    /// Plan runs, its own name last. A destination outside the Scan Root is
-    /// given in full. Empty for Trash, which goes to the System Trash.
     pub destination: Vec<String>,
-    /// Where the item will be once the Plan runs. `None` for Trash: only the
-    /// OS knows where it lands, and only once it has.
+    /// `None` for Trash: only the OS knows where it lands, and only once it
+    /// has.
     pub destination_path: Option<PathBuf>,
-    /// The source when scanned; it is skipped if it has changed when the
-    /// Plan runs.
+    /// What it was when scanned; if it has changed since, it is skipped.
     #[serde(flatten)]
     pub planned: SourceState,
     /// Why the Plan proposes it.
     pub reason: Reason,
-    /// Whether it starts ticked. Trashing an emptied folder starts
-    /// unticked, as does an Operation that can't happen.
+    /// Trashing an emptied folder starts unticked.
     pub ticked: bool,
-    /// Why it can't happen, such as a move to another disk or a Trash on a
-    /// disk with no System Trash. Such an Operation can't be ticked, and is
-    /// never run; a blocked Trash that is approved anyway is journaled as
-    /// skipped, with this as its Note.
+    /// An Operation with one can't be ticked and never runs.
     pub error: Option<String>,
 }
 
-/// What an Operation's source was like when planned: if it differs when
-/// the Operation runs, or is redone, the Operation is skipped. A folder to
-/// create has none of its own, so it is all zeros.
+/// Compared again before running, so a changed item is never touched. All zeros
+/// for a folder to create.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceState {
-    /// Bytes; for a Package, the total of everything inside it.
+    /// Bytes; for a Package, everything inside it.
     pub size: u64,
     /// Milliseconds since the Unix epoch.
     pub modified: i64,
     pub is_package: bool,
-    /// An ordinary folder the Plan empties: it is trashed only if, when the
-    /// time comes, it holds nothing but OS Metadata Files and folders that
-    /// hold nothing either.
+    /// Its own date changes as it empties, so it is checked by its contents
+    /// instead.
     #[serde(default)]
     pub is_folder: bool,
 }
@@ -84,37 +65,29 @@ pub struct SourceState {
 #[serde(rename_all = "camelCase")]
 pub enum OperationKind {
     Trash,
-    /// To another folder, under a new name if its name was taken there.
     Move,
     CreateFolder,
 }
 
-/// Why the Plan proposes an Operation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Reason {
-    /// The item is a copy of `kept`, the names from the Scan Root down to a
-    /// Kept Copy of its Duplicate Group, or `None` if no copy is kept.
-    Duplicate { kept: Option<Vec<String>> },
-    /// Every item in the folder leaves it, so the folder would be left
-    /// empty.
+    /// `None` if no copy is kept.
+    Duplicate {
+        kept: Option<Vec<String>>,
+    },
     EmptiedFolder,
-    /// The item goes into, or is trashed from, the Suggested Folder named
-    /// `folder`, or, for Create Folder, is that folder.
-    SuggestedFolder { folder: String },
+    SuggestedFolder {
+        folder: String,
+    },
 }
 
-/// Proposes the duplicate step: every copy but the first in a Duplicate Group
-/// is trashed, and nothing else. A folder the Plan would empty is offered
-/// for Trash, unticked. A Move that would cross from one disk to another,
-/// or a Trash `os_trash` says can't happen, is kept, as an error that can't be
-/// ticked.
+/// Anything that can't happen stays in the Plan as an error, so the user sees
+/// why.
 pub fn build_plan(scan: &ScanResult, config: &Config, os_trash: &dyn OsTrash) -> Plan {
     build_plan_with_progress(scan, config, os_trash, |_| {})
 }
 
-/// Like `build_plan`, calling `on_progress` while finding duplicates (see
-/// `duplicates::find`).
 pub fn build_plan_with_progress(
     scan: &ScanResult,
     config: &Config,
@@ -123,7 +96,6 @@ pub fn build_plan_with_progress(
 ) -> Plan {
     let root = &scan.root;
     let mut operations = Vec::new();
-    // Never cancelled, so every group is found.
     let found = duplicates::find(
         &scan.entries,
         config.default_copy_rule,
@@ -144,10 +116,6 @@ pub fn build_plan_with_progress(
     finish(root, os_trash, operations, Vec::new())
 }
 
-/// Makes a Plan of `operations` and of creating the folders in `created`,
-/// each with the Reason it is needed: in order, with the folders the Plan
-/// empties offered for Trash, and moves to another disk and Trash that
-/// `os_trash` says can't happen marked as errors.
 pub(crate) fn finish(
     root: &Path,
     os_trash: &dyn OsTrash,
@@ -194,7 +162,6 @@ pub(crate) fn finish(
     }
 }
 
-/// Why `op` can't happen, if it would move its item to another disk.
 fn across_disks(op: &Operation) -> Option<String> {
     let destination = op
         .destination_path
@@ -213,10 +180,7 @@ fn across_disks(op: &Operation) -> Option<String> {
     ))
 }
 
-/// The folders inside `root` that `operations` would leave empty, apart
-/// from OS Metadata Files: every item in them leaves, and nothing arrives.
-/// Only the topmost of nested ones is given, as trashing it takes the
-/// others along.
+/// Only the topmost of nested ones: trashing it takes the others along.
 fn emptied_folders(root: &Path, operations: &[Operation]) -> Vec<PathBuf> {
     let runs = |op: &&Operation| op.error.is_none();
     let leaving: HashSet<&Path> = operations
@@ -253,8 +217,6 @@ fn emptied_folders(root: &Path, operations: &[Operation]) -> Vec<PathBuf> {
     emptied
 }
 
-/// True if everything in `folder` is `leaving`, an OS Metadata File, or a
-/// folder that `empties` too, and nothing in `arriving` goes into it.
 fn empties(
     folder: &Path,
     leaving: &HashSet<&Path>,
@@ -285,7 +247,6 @@ fn empties(
     answer
 }
 
-/// Sends `entry` to the System Trash.
 pub(crate) fn trash(entry: &ScanEntry, reason: Reason) -> Operation {
     Operation {
         id: format!("trash:{}", entry.relative_path.join("/")),
@@ -301,8 +262,6 @@ pub(crate) fn trash(entry: &ScanEntry, reason: Reason) -> Operation {
     }
 }
 
-/// Trashes `folder`, which the Plan empties, like any other item; it starts
-/// unticked.
 fn trash_emptied_folder(root: &Path, folder: &Path) -> Operation {
     let relative_path = names_below(root, folder);
     Operation {
@@ -374,8 +333,6 @@ fn planned(entry: &ScanEntry) -> SourceState {
     }
 }
 
-/// The names from `root` down to `path`, its own name last. A path outside
-/// `root` is given in full.
 pub(crate) fn names_below(root: &Path, path: &Path) -> Vec<String> {
     let below = path.strip_prefix(root).unwrap_or(path);
     below

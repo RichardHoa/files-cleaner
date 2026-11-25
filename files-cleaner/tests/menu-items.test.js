@@ -48,7 +48,7 @@ test("the menu bar enables only what the screen offers, runs it by id, and leave
   bar.run("trash");
   bar.run("trashNow");
 
-  // In a text field ⌘A selects its text and ⌘⌫ deletes in it, so Trash isn't offered.
+  // ⌘⌫ deletes text in a field, so Trash isn't offered.
   const typing = menuBar(items, { typing: true, selectText: () => ran.push("selectText") });
   assert.deepEqual(typing.state.enabled, ["newScan", "selectAll"]);
   typing.run("selectAll");

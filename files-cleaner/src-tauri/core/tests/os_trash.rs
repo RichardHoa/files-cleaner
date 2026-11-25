@@ -1,6 +1,3 @@
-//! Trash through the OS Trash: where items land, what Undo does with that,
-//! and what happens when the OS Trash refuses.
-
 mod common;
 
 use std::fs;
@@ -13,7 +10,6 @@ use common::{
 };
 use files_cleaner_core::{self as core, scan, session_details, OperationState, Plan};
 
-/// A Scan Root with `keep.txt` (the Kept Copy) and two older copies.
 fn folder_with_copies(root: &Path) {
     for (path, secs) in [
         ("keep.txt", 3_000),
@@ -40,7 +36,6 @@ fn ticked(plan: &Plan) -> Vec<String> {
     ticked.map(|op| op.id.clone()).collect()
 }
 
-/// Where Session `id` says the item trashed from `relative` landed.
 fn landed(journal: &Path, id: &str, relative: &str) -> PathBuf {
     let details = session_details(id, journal).unwrap();
     let op = details

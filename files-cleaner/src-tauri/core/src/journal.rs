@@ -1,7 +1,5 @@
-//! The Journal: every Session's records, appended to one SQLite database
-//! and committed to disk one by one, so a Session can be undone after a
-//! crash or a restart (ADR-0012). Also the lock that lets one
-//! Session run at a time.
+//! Committed record by record, so a Session can be undone after a crash
+//! (ADR-0012).
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -20,11 +18,10 @@ use crate::scanner::millis;
 use crate::session_id;
 
 const DATABASE_FILE_NAME: &str = "journal.sqlite";
-/// Each Session's Journal before ADR-0012, imported into the database.
+/// One file per Session, before ADR-0012.
 const OLD_EXTENSION: &str = "jsonl";
 const LOCK_FILE_NAME: &str = "sessions.lock";
 
-/// The first line of a Journal.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionHeader {
@@ -34,80 +31,65 @@ pub struct SessionHeader {
     pub started_at: i64,
 }
 
-/// Which pass over a Session's Operations a record belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Phase {
-    /// The Session itself: source to destination.
     Run,
-    /// Destination back to source.
     Undo,
-    /// Source to destination again, after an Undo.
     Redo,
 }
 
-/// How one Operation's pass ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum OutcomeKind {
-    /// The item moved.
     Done,
-    /// Not moved, but nothing is wrong with the Operation: it can be tried
-    /// again later.
+    /// Nothing is wrong with the Operation: it can be tried again later.
     Skipped,
-    /// The Run's move failed.
     Failed,
     /// The trashed copy is gone, or its location was never recorded.
     Unrecoverable,
 }
 
-/// Every line of a Journal after the header.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "record", rename_all = "camelCase")]
 pub enum Record {
-    /// Written before the Run touches the item, with everything known so
-    /// far: the Run's intent.
+    /// Before the item is touched, so a crash midway shows.
     #[serde(rename_all = "camelCase")]
     Operation {
         operation_id: String,
         kind: OperationKind,
         source: PathBuf,
-        /// Where it goes. A Trash's isn't known until it has happened, so it
-        /// comes with the outcome instead; only older Journals have one here.
+        /// Only older Journals have a Trash's here; it isn't known until it has
+        /// happened, so it comes with the outcome.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         destination: Option<PathBuf>,
-        /// The source as planned, which Redo checks it against.
+        /// Redo checks the item against it.
         planned: SourceState,
     },
-    /// Written before an Undo or a Redo touches the item.
+    /// Before the item is touched, so a crash midway shows.
     #[serde(rename_all = "camelCase")]
-    Intent { operation_id: String, phase: Phase },
-    /// How the last intent for the Operation ended. An intent with no
-    /// outcome after it was cut short by a crash.
+    Intent {
+        operation_id: String,
+        phase: Phase,
+    },
+    /// An intent with no outcome after it was cut short by a crash.
     #[serde(rename_all = "camelCase")]
     Outcome {
         operation_id: String,
         phase: Phase,
         outcome: OutcomeKind,
         reason: Option<String>,
-        /// Where a Run or Redo's Trash put the item in the System Trash.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         landed: Option<PathBuf>,
     },
-    /// The Run has recorded its last Operation.
     Finished,
 }
 
 #[derive(Debug)]
 pub enum SessionError {
-    /// Another Session, or an Undo, is in progress.
     Busy,
     UnknownSession(String),
-    /// A Journal that can't be understood.
-    BadJournal {
-        session: String,
-        problem: String,
-    },
+    BadJournal { session: String, problem: String },
     Io(io::Error),
 }
 
@@ -134,14 +116,11 @@ impl From<io::Error> for SessionError {
     }
 }
 
-/// Held while a Session or an Undo runs; dropping it lets the next start.
-/// The OS releases it if the app crashes.
+/// The OS releases it if the app crashes, so a crash never leaves it locked.
 pub struct SessionLock {
     _file: File,
 }
 
-/// Takes the lock that lets one Session or Undo use `journal_dir` at a
-/// time, or fails with `SessionError::Busy`. Also works across processes.
 pub fn lock_sessions(journal_dir: &Path) -> Result<SessionLock, SessionError> {
     fs::create_dir_all(journal_dir)?;
     let file = OpenOptions::new()
@@ -156,15 +135,12 @@ pub fn lock_sessions(journal_dir: &Path) -> Result<SessionLock, SessionError> {
     }
 }
 
-/// An open Journal that records are appended to.
 pub struct Journal {
     journals: Journals,
     id: String,
 }
 
 impl Journal {
-    /// Starts the Journal of a new Session of `scan_root`, starting now,
-    /// and writes its header.
     pub fn create(journal_dir: &Path, scan_root: PathBuf) -> io::Result<(SessionHeader, Journal)> {
         let journals = Journals::open(journal_dir)?;
         let now = SystemTime::now();
@@ -190,7 +166,6 @@ impl Journal {
         unreachable!("there is always another Session ID to try")
     }
 
-    /// Writes `record` and waits until it is on disk.
     pub fn append(&mut self, record: &Record) -> io::Result<()> {
         let json = serde_json::to_string(record).expect("records always serialise");
         self.journals
@@ -203,27 +178,21 @@ impl Journal {
             .map_err(sql)
     }
 
-    /// Every Session's Journal, through this one's connection.
     pub fn journals(&self) -> &Journals {
         &self.journals
     }
 
-    /// Deletes this Session's Journal.
     pub fn discard(mut self) -> io::Result<()> {
         self.journals.remove(&self.id)
     }
 }
 
-/// Every Session's Journal: the database in a Journal folder, open, so a
-/// pass over many Sessions opens it once.
+/// Kept open, so a pass over many Sessions opens the database once.
 pub struct Journals {
     db: Connection,
 }
 
 impl Journals {
-    /// The database in `journal_dir`, created or brought up to date, with
-    /// any Journals left from before ADR-0012 imported. Every committed
-    /// write is on disk before the commit returns.
     pub fn open(journal_dir: &Path) -> io::Result<Journals> {
         fs::create_dir_all(journal_dir)?;
         let mut db = open_database(
@@ -236,7 +205,6 @@ impl Journals {
         Ok(Journals { db })
     }
 
-    /// Reopens Session `id`'s Journal to add to it.
     pub fn reopen(self, id: &str) -> io::Result<Journal> {
         if header(&self.db, id).map_err(sql)?.is_none() {
             return Err(io::Error::new(
@@ -250,8 +218,6 @@ impl Journals {
         })
     }
 
-    /// Session `id`'s header and every record after it, in the order they
-    /// were written.
     pub fn read(&self, id: &str) -> Result<(SessionHeader, Vec<Record>), SessionError> {
         if !session_id::is_valid(id) {
             return Err(SessionError::UnknownSession(id.to_string()));
@@ -280,7 +246,6 @@ impl Journals {
         Ok((header, records))
     }
 
-    /// The IDs of every Session with a Journal.
     pub fn session_ids(&self) -> io::Result<Vec<String>> {
         let mut query = self.db.prepare("SELECT id FROM sessions").map_err(sql)?;
         let ids = query
@@ -291,7 +256,6 @@ impl Journals {
         Ok(ids)
     }
 
-    /// Deletes Session `id`'s Journal; one already gone is fine.
     pub fn remove(&mut self, id: &str) -> io::Result<()> {
         let tx = self.db.transaction().map_err(sql)?;
         tx.execute("DELETE FROM records WHERE session_id = ?1", [id])
@@ -301,10 +265,8 @@ impl Journals {
         tx.commit().map_err(sql)
     }
 
-    /// Deletes every Session's Journal in `journal_dir`, which these are
-    /// open from, and returns how many there were. Any old Journal file
-    /// that couldn't be imported goes too, though it was never a Session
-    /// anyone saw.
+    /// Old Journal files that couldn't be imported go too, or they would
+    /// outlive "delete all".
     pub fn remove_all(&mut self, journal_dir: &Path) -> io::Result<usize> {
         let tx = self.db.transaction().map_err(sql)?;
         tx.execute("DELETE FROM records", []).map_err(sql)?;
@@ -315,9 +277,8 @@ impl Journals {
     }
 }
 
-/// Deletes every Session's Journal in `journal_dir` and returns how many
-/// there were. A database too damaged to open or empty is deleted whole,
-/// with no count, so the Journal can always be started again.
+/// A database too damaged to empty is deleted whole, so the Journal can always
+/// start again.
 pub fn remove_all_sessions(journal_dir: &Path) -> io::Result<usize> {
     // Closed before it is deleted.
     let removed =
@@ -333,7 +294,6 @@ pub fn remove_all_sessions(journal_dir: &Path) -> io::Result<usize> {
     }
 }
 
-/// Whether `e` is a database only deleting fixes: see `is_damaged`.
 fn damaged(e: &io::Error) -> bool {
     e.get_ref()
         .and_then(|e| e.downcast_ref::<rusqlite::Error>())
@@ -347,7 +307,6 @@ fn remove_old_journals(journal_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// The database's layout: see `open_database`.
 const MIGRATIONS: &[&str] = &["CREATE TABLE sessions (
          id TEXT PRIMARY KEY,
          scan_root TEXT NOT NULL,
@@ -362,17 +321,12 @@ const MIGRATIONS: &[&str] = &["CREATE TABLE sessions (
      ) STRICT;
      CREATE INDEX records_by_session ON records (session_id, seq);"];
 
-/// Old Journal files this process found it couldn't understand, so they
-/// aren't read again on every open.
+/// So unreadable old files aren't read again on every open.
 static UNREADABLE: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
 
-/// Moves each Journal file left from before ADR-0012 into the database, so
-/// those Sessions can still be undone. A file is deleted only once its
-/// Session is committed; one that can't be understood is left where it is,
-/// until every Session is deleted. Another open may import the same file
-/// at the same time; the Session is inserted once. A file that can't be
-/// imported or deleted now is left for the next open, so it never stops
-/// the Journal being used.
+/// So Sessions from before ADR-0012 can still be undone. A file goes only once
+/// its Session is committed, and one that fails is left for the next open, so
+/// it never stops the Journal being used.
 fn import_old_journals(db: &mut Connection, journal_dir: &Path) {
     let Ok(paths) = old_journals(journal_dir) else {
         return;
@@ -423,7 +377,6 @@ fn import_old_journal(
     tx.commit().map_err(sql)
 }
 
-/// The Journal files in `journal_dir` from before ADR-0012.
 fn old_journals(journal_dir: &Path) -> io::Result<Vec<PathBuf>> {
     let mut paths = Vec::new();
     for child in fs::read_dir(journal_dir)? {
@@ -435,7 +388,6 @@ fn old_journals(journal_dir: &Path) -> io::Result<Vec<PathBuf>> {
     Ok(paths)
 }
 
-/// Deletes the file at `path`, and says whether it was still there.
 fn remove_if_there(path: &Path) -> io::Result<bool> {
     match fs::remove_file(path) {
         Ok(()) => Ok(true),
@@ -444,8 +396,7 @@ fn remove_if_there(path: &Path) -> io::Result<bool> {
     }
 }
 
-/// An old Journal file's header and the text of each record after it. A
-/// last line cut short by a crash is ignored.
+/// A last line cut short by a crash is ignored.
 fn read_old_journal(text: &str) -> Option<(SessionHeader, Vec<String>)> {
     let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
     let (first, rest) = lines.split_first()?;
@@ -479,7 +430,6 @@ fn header(db: &Connection, id: &str) -> rusqlite::Result<Option<SessionHeader>> 
     .optional()
 }
 
-/// Paths are journaled as text, as JSON writes them.
 fn utf8(path: &Path) -> io::Result<&str> {
     path.to_str().ok_or_else(|| {
         io::Error::new(

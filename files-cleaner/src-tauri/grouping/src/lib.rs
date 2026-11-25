@@ -1,25 +1,7 @@
-//! Suggested Folders from what's inside the loose files of a Scan Root
-//! A small LLM writes a card per file, an embedding model embeds
-//! the cards, and the cards are clustered; each group is named after the
-//! topic most of its files share and anchored to a matching existing
-//! subfolder, and a group sharing none stays where it is. Then
-//! the LLM is asked where each read file left out of every group belongs,
-//! if anywhere, among the groups and subfolders nearest it.
-//! Archives, images and installers are never read. PDFs with no text
-//! (scans) are read by OCR, and the ones it can't read, or all of them
-//! without OCR's languages, are a kind too: each kind is one group, unless the
-//! file's name ties it to a group of read files.
-//!
-//! The user's Rules go first: the Loose Files a Rule matches go where it
-//! says, by code alone, and only the rest are read and grouped. A Rule's
-//! folder of one name is offered to the LLM too, for read files left out.
-//! A Rule by meaning's files are read like the rest but sorted apart: each
-//! into the folder the user named that its card is most like, the LLM
-//! breaking close ties, or into folders proposed from them alone.
-//!
-//! Everything that needs llama.cpp, PDFium or Tesseract lives in this crate, so `core`
-//! stays pure Rust. `analyse` is the entry point; `Analysis::regroup` groups
-//! again with new settings and runs no model.
+//! What needs llama.cpp, PDFium or Tesseract lives in this crate, so `core`
+//! stays pure Rust. The user's Rules go first, by code alone; only the rest is
+//! read by the models. `Analysis::regroup` runs no model, so settings can
+//! change without reading again.
 
 mod card;
 mod cluster;
@@ -55,87 +37,63 @@ use cluster::{centroid, cosine, normalized};
 use place::Answer;
 use store::{content_hash, ModelIds, Stored};
 
-/// The two Grouping Models, behind an interface so the engine can be driven
-/// with fakes.
+/// An interface, so the engine can be tested with fakes.
 pub trait Models {
-    /// Identifies the model that writes cards: stored cards made by
-    /// another are not used.
+    /// Stored cards made by another model are not used.
     fn card_model_id(&self) -> String;
-    /// Identifies the embedding model, likewise.
+    /// Stored vectors made by another model are not used.
     fn embedding_model_id(&self) -> String;
-    /// The card for a file. An error leaves the file with an empty card, so
-    /// it is grouped by its name alone.
+    /// An error only means the file is grouped by its name alone.
     fn card(&mut self, content: &Content) -> Result<Card, String>;
-    /// The folder a file left out of every Suggested Folder belongs in, by
-    /// its place in `question.folders`, or `None`. An error leaves it out.
+    /// An error only leaves the file out.
     fn place(&mut self, question: &Question) -> Result<Option<usize>, String>;
-    /// One vector per text, in order.
     fn embed(&mut self, texts: &[String]) -> Result<Vec<Vector>, String>;
-    /// Where the models ran, such as "Metal GPU" or "CPU"; `None` if they
-    /// haven't run.
     fn device(&self) -> Option<String>;
-    /// Loads the models ahead of their first use, so the wait can be told
-    /// apart from reading. A model that fails to load fails again where
-    /// it's used.
+    /// Apart from first use, so the wait can be told apart from reading. A
+    /// failure comes back where the model is used.
     fn load(&mut self) {}
 }
 
-/// How the files are grouped: the config's `grouping` section.
 pub use files_cleaner_core::GroupingSettings as Settings;
 
-/// What `analyse` works from.
 pub struct Input<'a> {
-    /// The scan of the Scan Root, without the copies trashed as duplicates:
-    /// its loose files are grouped, and its subfolders are where groups may
-    /// go.
+    /// Without the copies trashed as duplicates.
     pub scan: &'a ScanResult,
     pub settings: Settings,
     pub store: &'a CardStore,
-    /// The PDFium library bundled with the app; without it, PDFs are read
-    /// by name.
+    /// Without it, PDFs are read by name.
     pub pdfium: Option<&'a Path>,
-    /// The folder of OCR's language files bundled with the app; without it,
-    /// scanned PDFs are read by name.
+    /// Without it, scanned PDFs are read by name.
     pub tessdata: Option<&'a Path>,
-    /// The user's Rules, in order: the Loose Files they match go where they
-    /// say, and only the rest are read and grouped.
+    /// In order of priority.
     pub rules: &'a [Rule],
 }
 
-/// How far an analysis has got.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Progress {
-    /// Files read, or placed, so far.
     pub finished: usize,
     pub total: usize,
-    /// The file being checked, read or placed.
     pub current: PathBuf,
     pub phase: Phase,
 }
 
-/// What an analysis is doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Phase {
-    /// Finding which files were read before; `total` counts every file.
+    /// `total` counts every file.
     Checking,
-    /// Loading the models, before the first file is read.
     Loading,
-    /// Reading the files with no stored card; `total` counts only those.
+    /// `total` counts only the files with no stored card.
     Reading,
-    /// Placing the files left out of every Suggested Folder.
     Placing,
 }
 
-/// The longest an analysis waits between progress reports.
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 
-/// Why an analysis ended without a result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stopped {
     Cancelled,
-    /// The embedding model failed, so nothing can be compared.
     Failed(String),
 }
 
@@ -150,17 +108,12 @@ impl fmt::Display for Stopped {
 
 impl std::error::Error for Stopped {}
 
-/// The Suggested Folders for a Scan Root's loose files.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Grouping {
-    /// Largest first.
     pub folders: Vec<SuggestedFolder>,
-    /// Files in no Suggested Folder, which stay where they are.
     pub ungrouped: Vec<PathBuf>,
-    /// The kind of each file, grouped or not, such as "Documents".
     pub kinds: BTreeMap<PathBuf, &'static str>,
-    /// Each read file's one-sentence summary, where it has one.
     pub summaries: BTreeMap<PathBuf, String>,
 }
 
@@ -169,7 +122,6 @@ pub struct Grouping {
 pub struct SuggestedFolder {
     pub name: String,
     pub files: Vec<PathBuf>,
-    /// The existing subfolder of the Scan Root it matches, if any.
     pub existing: Option<PathBuf>,
     pub basis: Basis,
     /// The Rule that made it, for `Basis::Rule`.
@@ -177,116 +129,80 @@ pub struct SuggestedFolder {
     pub rule: Option<Rule>,
 }
 
-/// What a Suggested Folder's files have in common, for the user to see why
-/// they're together.
+/// Shown to the user as why the files are together.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Basis {
-    /// Most of them share a topic, which names the folder.
     Topic,
-    /// They're one kind that is never read: archives, images, installers or
-    /// scanned PDFs.
     Kind,
-    /// The LLM placed each in the existing subfolder it goes into.
     Existing,
-    /// A Rule of the user's put them there.
     Rule,
 }
 
-/// Everything the models said about a Scan Root, enough to group again
-/// with other settings.
 pub struct Analysis {
     pub grouping: Grouping,
-    /// Where the models ran; `None` when every file's card was stored.
+    /// `None` when every file's card was stored, so no model ran.
     pub device: Option<String>,
-    /// The loose files that were read, with their cards and vectors.
     files: Vec<PathBuf>,
     cards: Vec<Card>,
     vectors: Vec<Vector>,
-    /// The loose files of each kind that is never read, scanned PDFs among them.
     fixed: BTreeMap<&'static str, Vec<PathBuf>>,
-    /// The loose files left unread because reading was stopped.
     unread: Vec<PathBuf>,
-    /// The Suggested Folders the Rules made, of files never read.
     ruled: Vec<SuggestedFolder>,
-    /// The Rules by meaning, with the read files each takes.
     meaning: Vec<Meaning>,
-    /// For each of `ruled` that files left out may be placed in, its
-    /// centroid and topics: those of the subfolder it goes into, or else
-    /// its name's vector and none.
+    /// What files left out are compared with; `None` for folders they can't be
+    /// placed in.
     rule_places: Vec<Option<(Vector, Vec<String>)>>,
     subfolders: Vec<Subfolder>,
-    /// What the LLM answered for each placing question, by its prompt: the
-    /// folder's label, or none.
+    /// By prompt, so a regroup that asks the same question needs no model.
     answers: HashMap<String, Option<String>>,
 }
 
-/// A Rule by meaning and what it sorts.
 struct Meaning {
     rule: Rule,
-    /// Its files, by their place in the read files.
     files: Vec<usize>,
-    /// The folders the user named; none to propose them from the files.
     folders: Vec<Named>,
 }
 
-/// A folder the user named for a Rule by meaning.
 struct Named {
     folder: MeaningFolder,
-    /// The existing folder of its name below the Scan Root, if any.
+    /// Where it already exists on disk, if it does.
     existing: Option<PathBuf>,
-    /// The vector of its name and description.
     vector: Vector,
 }
 
-/// Where a Rule by meaning's file goes among its named folders.
 enum Fit {
-    /// The folder it's clearly most like, by its place in the folders.
     Folder(usize),
-    /// Too close to call between several, each by its place: the LLM picks
-    /// one or none.
+    /// Too close to call: the LLM picks one or none.
     Tie(Question, Vec<usize>),
-    /// Like none of them enough: it stays where it is.
     Stays,
 }
 
-/// How like a named folder a file must be to go into it.
 const MEANING_THRESHOLD: f32 = 0.5;
-/// Folders this close to the most like one are a tie the LLM breaks.
+/// Closer than this, embeddings can't tell folders apart, so the LLM decides.
 const TIE_MARGIN: f32 = 0.03;
 
-/// An existing subfolder of the Scan Root, a place a group may go.
 struct Subfolder {
     path: PathBuf,
     name: String,
-    /// The centroid of its sampled files' vectors, or of its name's.
+    /// Of its sampled files, or of its name when there are none.
     centroid: Vector,
-    /// Its sampled files' topics, each once.
     topics: Vec<String>,
-    /// Its sampled files' names.
     files: Vec<String>,
 }
 
-/// Where a file the LLM places goes.
 #[derive(Clone, Copy)]
 enum Target {
-    /// A Suggested Folder, by its place in the folders.
     Folder(usize),
     Subfolder(usize),
 }
 
-/// A placing question the LLM hasn't answered: the file, by its place in
-/// the read files, the prompt and the question.
 type Unanswered = (usize, String, Question);
 
-/// Files sampled from inside each existing subfolder to describe it.
 const FOLDER_SAMPLE: usize = 5;
-/// Texts embedded between checks for cancel.
 const EMBED_CHUNK: usize = 16;
 
-/// How many of the files `analyse` would read with `models` have no stored
-/// card, so reading them takes time. Every file is hashed to find out;
-/// `cancel` is checked between files.
+/// Lets the user be asked before a long read. Every file is hashed to find out.
 pub fn files_to_read(
     input: &Input,
     models: &dyn Models,
@@ -311,9 +227,6 @@ pub fn files_to_read(
     Ok(count)
 }
 
-/// The loose files of a scan sorted out before any is read: those the
-/// Rules take, those of a kind never read, those to read, and a sample of
-/// each subfolder's files to describe it.
 struct SortedOut<'a> {
     ruled: Vec<SuggestedFolder>,
     by_meaning: Vec<rules::ByMeaning>,
@@ -374,7 +287,6 @@ fn sort_out<'a>(input: &Input<'a>) -> SortedOut<'a> {
     }
 }
 
-/// The files to read, then each subfolder's sample, in the order `analyse` reads them.
 fn files_to_check<'a>(
     to_read: &[&'a ScanEntry],
     samples: &[(&'a str, Vec<&'a ScanEntry>)],
@@ -386,15 +298,8 @@ fn files_to_check<'a>(
         .collect()
 }
 
-/// Reads the loose files of `input.scan`, has `models` card and embed them
-/// (or takes their stored cards), groups them by `input.settings`, and has
-/// `models` place the files left out (or takes the stored answers). Cards
-/// and answers are stored as they're made, so a cancelled analysis keeps them.
-/// `cancel` is checked between files. Once `stop` is set, reading ends
-/// between files and the files read so far are grouped: the files not read
-/// are left where they are, and only stored answers place files left out.
-/// `on_progress` is called at most every `PROGRESS_INTERVAL` in each
-/// `Phase`, before the models load, and once at the end of reading.
+/// Cards are stored as they're made, so a cancelled analysis keeps them. `stop`
+/// differs from `cancel`: the files read so far are still grouped.
 pub fn analyse(
     input: &Input,
     models: &mut dyn Models,
@@ -528,9 +433,7 @@ pub fn analyse(
             phase: Phase::Reading,
         });
     }
-    // Stopped early: the loose files not read stay where they are, and a
-    // subfolder is described by those of its files that were read.
-    // One flag per file of `all`: `to_read`'s files first, then each subfolder's sample.
+    // `all` is `to_read`, then each subfolder's sample; flags line up with it.
     let read: Vec<bool> = stored.iter().map(|(_, found)| found.is_some()).collect();
     let mut unread = Vec::new();
     let mut flags = read.iter();
@@ -554,8 +457,7 @@ pub fn analyse(
         return Err(Stopped::Cancelled);
     }
 
-    // Loose scanned PDFs are a kind of their own, grouped like images; one
-    // sampled from a subfolder still stands for it by its name.
+    // A sampled one still stands for its subfolder by name.
     let scanned: Vec<bool> = stored
         .iter()
         .enumerate()
@@ -574,10 +476,8 @@ pub fn analyse(
     let mut flags = scanned.iter();
     stored.retain(|_| !flags.next().unwrap());
 
-    // Every file is carded before any is embedded, then the cards missing a
-    // vector, the names of subfolders with nothing to sample, the names of
-    // the Rules' folders offered for placing and the folders named for
-    // Rules by meaning are embedded.
+    // All cards before any embedding, then every missing text is embedded
+    // together.
     let missing: Vec<usize> = (0..stored.len())
         .filter(|&i| stored[i].1.embedding.is_none())
         .collect();
@@ -694,7 +594,7 @@ pub fn analyse(
                     vector,
                 })
                 .collect();
-            // A file not read, or read as a scan, isn't sorted by meaning.
+            // There is nothing to sort it by.
             let files = taken
                 .files
                 .iter()
@@ -747,7 +647,8 @@ pub fn analyse(
         let started = Instant::now();
         let name = &question.file_name;
         let answer = match input.store.get_answer(&card_id, prompt) {
-            // Once stopped, the model isn't asked: the file stays where it is.
+            // The user is waiting, so the model isn't asked: the file stays
+            // where it is.
             None if stop.load(Ordering::Relaxed) => continue,
             Some(saved) => {
                 trace::time(&format!(
@@ -793,7 +694,6 @@ pub fn analyse(
     Ok(analysis)
 }
 
-/// The folders `rule` names, if it groups by meaning.
 fn named_folders(rule: &Rule) -> &[MeaningFolder] {
     match &rule.group_by {
         GroupBy::Meaning { folders } => folders,
@@ -801,7 +701,6 @@ fn named_folders(rule: &Rule) -> &[MeaningFolder] {
     }
 }
 
-/// What is embedded for a folder named for a Rule by meaning.
 fn folder_text(folder: &MeaningFolder) -> String {
     match folder.description.as_deref().map(str::trim) {
         Some(about) if !about.is_empty() => format!("{}. {about}", folder.name.trim()),
@@ -809,9 +708,8 @@ fn folder_text(folder: &MeaningFolder) -> String {
     }
 }
 
-/// Whether the LLM may place files left out in `folder`, a Rule's: only
-/// when the Rule puts its files into one named folder, as grouping by date
-/// or kind has nothing to do with what a file is about.
+/// Only a Rule's single named folder: grouping by date or kind has nothing to
+/// do with what a file is about.
 fn offered(folder: &SuggestedFolder) -> bool {
     matches!(
         folder.rule.as_ref().map(|rule| &rule.group_by),
@@ -819,10 +717,8 @@ fn offered(folder: &SuggestedFolder) -> bool {
     )
 }
 
-/// The Suggested Folders `rules` make of the Loose Files of `scan`, with no
-/// Grouping Models: every file no Rule matches stays where it is. The files
-/// a Rule by meaning takes stay too when `by_meaning`, waiting for the
-/// models; otherwise that Rule is passed over, as without the models.
+/// `by_meaning` holds back files that wait for the models; without them those
+/// Rules are passed over.
 pub fn group_by_rules(scan: &ScanResult, rules: &[Rule], by_meaning: bool) -> Grouping {
     let (mut folders, _) = rules::apply(scan, rules, chrono::Local::now().date_naive(), by_meaning);
     let matched: HashSet<&PathBuf> = folders.iter().flat_map(|f| &f.files).collect();
@@ -854,14 +750,11 @@ pub fn group_by_rules(scan: &ScanResult, rules: &[Rule], by_meaning: bool) -> Gr
 }
 
 impl Analysis {
-    /// The Suggested Folders by `settings`, from what the models already
-    /// said: no model runs. A file left out goes where the LLM placed it
-    /// when it was asked the same question.
+    /// Runs no model, so it can follow a settings change at once.
     pub fn regroup(&self, settings: &Settings) -> Grouping {
         self.grouped(settings).0
     }
 
-    /// The grouping, and the placing questions that have no answer yet.
     fn grouped(&self, settings: &Settings) -> (Grouping, Vec<Unanswered>) {
         let folder_names: Vec<String> = self.subfolders.iter().map(|f| f.name.clone()).collect();
         // A Rule's folders come first: no other folder takes their names.
@@ -895,12 +788,10 @@ impl Analysis {
         let rest: Vec<usize> = (0..self.files.len())
             .filter(|i| !taken.contains(i))
             .collect();
-        // A group whose files share no topic is no folder: its files are left out of every group,
-        // to be placed one by one like the others left out.
+        // A folder nobody can name isn't useful, so its files are placed one by
+        // one instead.
         let (groups, left_out) = self.topic_groups(&rest, &topics, settings);
         let mut named: Vec<(String, &[usize])> = Vec::new();
-        // Each Suggested Folder files left out may be placed in, by its place in `folders`, with its
-        // centroid and topics: a Rule's offered folders (first in `folders`), then those of read files.
         let mut topical: Vec<(usize, Vector, Vec<String>)> = self
             .rule_places
             .iter()
@@ -911,8 +802,8 @@ impl Analysis {
             })
             .collect();
 
-        // A file that is never read joins the first group with a file name
-        // sharing a mark with its own: `Lab5_StudentID.zip` with `Lab5_Report.docx`.
+        // Never read, so only its name can tie it to a group:
+        // `Lab5_StudentID.zip` with `Lab5_Report.docx`.
         let group_marks: Vec<HashSet<String>> = groups
             .iter()
             .map(|(members, _)| {
@@ -942,7 +833,7 @@ impl Analysis {
                 ungrouped.extend(files);
                 continue;
             }
-            // A Rule's folder may have the kind's name, or go into its subfolder.
+            // A Rule's folder may already have the kind's name.
             let name = unused_name(&mut used_names, kind);
             let existing = kinds::matching_folder(kind, &folder_names)
                 .and_then(|name| self.subfolders.iter().find(|f| f.name == name))
@@ -1001,7 +892,6 @@ impl Analysis {
             })
             .collect();
         let mut placed: BTreeMap<usize, String> = BTreeMap::new();
-        // The Suggested Folder made for each subfolder a file was placed in.
         let mut made: HashMap<usize, usize> = HashMap::new();
         for (i, prompt, question, targets) in questions {
             let Some(answer) = self.answers.get(&prompt) else {
@@ -1079,9 +969,8 @@ impl Analysis {
         )
     }
 
-    /// Whether read files `i` and `j` share a topic, or topics sharing a
-    /// mark: "IELTS Speaking" and "IELTS Writing". `topics` are the cards'
-    /// topic keys.
+    /// The LLM names topics too narrowly, so a shared mark is enough: "IELTS
+    /// Speaking" and "IELTS Writing".
     fn same_topic(&self, topics: &[Option<String>], i: usize, j: usize) -> bool {
         match (&topics[i], &topics[j]) {
             (Some(a), Some(b)) => {
@@ -1091,9 +980,6 @@ impl Analysis {
         }
     }
 
-    /// The read files `members` clustered by `settings`, each by its place
-    /// in the read files: the groups whose files share a topic, each with
-    /// that topic, and the files in no such group.
     fn topic_groups(
         &self,
         members: &[usize],
@@ -1119,11 +1005,6 @@ impl Analysis {
         (groups, left_out)
     }
 
-    /// Sorts the files `meaning` takes into `folders`, or `ungrouped` where
-    /// they stay. With named folders, each file goes into the one it's most
-    /// like, a close tie going to the LLM's answer (or into `unanswered`
-    /// when it has none yet); with none, into folders proposed by clustering
-    /// them and named after their topics.
     #[allow(clippy::too_many_arguments)]
     fn sort_by_meaning(
         &self,
@@ -1189,7 +1070,7 @@ impl Analysis {
                 continue;
             }
             let name = named.folder.name.trim();
-            // A folder of the same name an earlier Rule made is the same folder.
+            // Two Rules naming one folder mean the same folder.
             match folders
                 .iter()
                 .position(|f| f.name.eq_ignore_ascii_case(name))
@@ -1203,8 +1084,7 @@ impl Analysis {
         }
     }
 
-    /// Where read file `i` goes among the folders `meaning` names. A tie
-    /// with an empty card can't be asked about, so the file stays.
+    /// An empty card leaves nothing to ask about, so a tie with one stays.
     fn meaning_fit(&self, i: usize, meaning: &Meaning) -> Fit {
         let mut scores: Vec<(f32, usize)> = meaning
             .folders
@@ -1249,10 +1129,7 @@ impl Analysis {
         Fit::Tie(question, close)
     }
 
-    /// The placing question for read file `i`, left out of every folder,
-    /// and where each of its choices goes: the Suggested Folders of read
-    /// files and the subfolders none of them goes into, most like it first.
-    /// `None` when its card is empty or there's nowhere to go.
+    /// `None` when there is nothing to ask about or nowhere to go.
     fn question(
         &self,
         i: usize,
@@ -1313,10 +1190,7 @@ impl Analysis {
         ))
     }
 
-    /// For tuning the thresholds: each Suggested Folder made of read files,
-    /// with the files outside it most like it, then each file left out of
-    /// every folder with the folder most like it and where the LLM placed it. "Like" is the average similarity to
-    /// the folder's files, what clustering compares with the folder threshold.
+    /// For tuning the thresholds: compares what clustering compares.
     fn similarity_report(
         &self,
         settings: &Settings,
@@ -1325,7 +1199,6 @@ impl Analysis {
         placed: &BTreeMap<usize, String>,
         similarity: impl Fn(usize, usize) -> f32,
     ) -> String {
-        /// Outside files listed per folder.
         const NEAREST: usize = 10;
         let n = self.files.len();
         let mut home: Vec<Option<&str>> = vec![None; n];
@@ -1414,10 +1287,8 @@ impl Analysis {
         out
     }
 
-    /// What the read files `members` are about, to name their folder
-    /// after: a mark their differing topics share ("IELTS"), or else the
-    /// topic most of them have. Either needs at least half of them, and at
-    /// least two; `None` when they share no topic.
+    /// A shared mark is preferred over the commonest topic, as topics are often
+    /// too narrow ("IELTS" over "IELTS Writing").
     fn shared_topic(&self, members: &[usize], topics: &[Option<String>]) -> Option<String> {
         let enough = |n: usize| n >= 2 && n * 2 >= members.len();
         let member_topics: Vec<&str> = members
@@ -1444,8 +1315,6 @@ impl Analysis {
     }
 }
 
-/// `base`, with a Clash Suffix if it's in `used` (ignoring case), as for
-/// names taken on disk; the name is then used.
 fn unused_name(used: &mut HashSet<String>, base: &str) -> String {
     let mut name = base.to_string();
     let mut n = 1;
@@ -1456,7 +1325,6 @@ fn unused_name(used: &mut HashSet<String>, base: &str) -> String {
     name
 }
 
-/// The non-empty labels, trimmed, each once (ignoring case), as first written.
 fn distinct<'a>(labels: impl Iterator<Item = &'a str>) -> Vec<String> {
     let mut seen = HashSet::new();
     labels
@@ -1466,22 +1334,18 @@ fn distinct<'a>(labels: impl Iterator<Item = &'a str>) -> Vec<String> {
         .collect()
 }
 
-/// The extension of `path`, lowercased; empty if none.
 fn extension(path: &Path) -> String {
     path.extension()
         .map(|e| e.to_string_lossy().to_lowercase())
         .unwrap_or_default()
 }
 
-/// The file name of `path`, or nothing.
 fn file_name(path: &Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default()
 }
 
-/// The non-empty label most files carry (ignoring case and spacing), as first written,
-/// with how many carry it; the first of equals wins.
 fn most_common<'a>(labels: impl Iterator<Item = &'a str>) -> Option<(String, usize)> {
     let mut counts: Vec<(&str, usize)> = Vec::new();
     for label in labels.map(str::trim).filter(|l| !l.is_empty()) {

@@ -1,16 +1,11 @@
-//! Marks: the words in a topic or a file name that pick out one subject on
-//! their own, such as `IELTS` in "IELTS Speaking" or `Lab5` in
-//! `Lab5_Report.docx`. The LLM names topics too narrowly ("IELTS Speaking",
-//! "IELTS Writing"), and archives and images are never read, so a shared
-//! mark is what ties those files to the rest of their subject.
+//! The LLM names topics too narrowly, and archives and images are never read: a
+//! shared mark ("IELTS", "Lab5") is what ties those files to their subject.
 
 /// Acronyms too common to pick out a subject.
 const GENERIC: &[&str] = &[
     "PDF", "HTML", "DOC", "DOCX", "CSV", "API", "FAQ", "USA", "PPT", "JSON", "XML",
 ];
 
-/// The marks of a topic, as written: acronyms of three or more capitals
-/// ("IELTS") and codes mixing letters and digits ("CS203").
 pub fn topic_marks(topic: &str) -> Vec<&str> {
     words(topic)
         .filter(|w| {
@@ -22,8 +17,7 @@ pub fn topic_marks(topic: &str) -> Vec<&str> {
         .collect()
 }
 
-/// The marks of a file name: codes of four or more characters mixing
-/// letters and digits ("Lab5", "CS203"), lowercased.
+/// Four characters or more, as shorter codes pick out too little.
 pub fn name_marks(name: &str) -> Vec<String> {
     let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
     words(stem)
@@ -32,7 +26,6 @@ pub fn name_marks(name: &str) -> Vec<String> {
         .collect()
 }
 
-/// Whether two topics share a mark, ignoring case.
 pub fn share_mark(a: &str, b: &str) -> bool {
     let b_marks = topic_marks(b);
     topic_marks(a)
@@ -40,7 +33,6 @@ pub fn share_mark(a: &str, b: &str) -> bool {
         .any(|m| b_marks.iter().any(|n| m.to_lowercase() == n.to_lowercase()))
 }
 
-/// The first mark of the first topic that every topic has, as written.
 pub fn shared_mark<'a>(topics: &[&'a str]) -> Option<&'a str> {
     let (first, rest) = topics.split_first()?;
     topic_marks(first).into_iter().find(|m| {
@@ -57,7 +49,7 @@ fn words(text: &str) -> impl Iterator<Item = &str> {
         .filter(|w| !w.is_empty())
 }
 
-/// Letters and digits both, but not an ordinal like "2nd" or "10th".
+/// Ordinals ("2nd", "10th") mix letters and digits without being codes.
 fn is_code(word: &str) -> bool {
     let has_letter = word.chars().any(char::is_alphabetic);
     let has_digit = word.chars().any(|c| c.is_ascii_digit());

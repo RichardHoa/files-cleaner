@@ -125,7 +125,6 @@ fn deleting_a_database_that_isnt_there_is_fine() {
     delete_database(&dir.path().join("a.sqlite")).unwrap();
 }
 
-/// Every name in `folder`.
 fn names(folder: &Path) -> Vec<String> {
     let mut names: Vec<String> = fs::read_dir(folder)
         .unwrap()

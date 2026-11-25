@@ -1,11 +1,5 @@
-// Rules: the user's Rules (ADR 0013), in order, each read back in one line. A Rule is picked by clicking its
-// row, then edited, turned off or on, moved or deleted from the toolbar, by double-clicking or pressing Return,
-// Space, ⌥⌘↑/↓ or ⌘⌫ (Ctrl+Alt+↑/↓ or Delete on Windows and Linux); rows have no buttons. A file goes by the first enabled Rule it fits, so the order is
-// the priority. The editor builds a Rule from ordinary controls, read back as it changes. Grouping by meaning
-// needs the Grouping Models, so without them it isn't offered for a new Rule. Every
-// change saves the whole list at once; a Rule that can't be saved says why and isn't saved. Rules apply at the
-// next scan. A Rule that some file could share with an earlier one is marked, since that file goes by the
-// earlier one (ADR 0014).
+// A file goes by the first enabled Rule it fits (ADR 0013), so the order is the priority and
+// overlaps are marked (ADR 0014).
 import { changeSetting, describeError, groupingModelsStatus, loadConfig, ruleOverlaps } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";
 import { icon } from "../../shared/icons.js";
@@ -26,10 +20,7 @@ import {
   parseWords,
 } from "./rule-text.js";
 
-/**
- * `rule` in one row's words: what files it picks, then an arrow and where they go, set apart so the eye finds
- * the folder. Read aloud, it's the one line `describeRule` gives.
- */
+/** Split so the eye finds the folder; read aloud as one line. */
 const ruleText = (rule) =>
   el(
     "span",
@@ -39,7 +30,6 @@ const ruleText = (rule) =>
     el("span", { className: "rules-goes" }, describeGroupBy(rule.groupBy)),
   );
 
-/** The group-by choices: one folder, a date grouping (`by`), by kind or by meaning. */
 const GROUP_BY = [
   { value: "folder", label: "Into one folder" },
   { value: "buckets", label: "Today, Yesterday, Older…" },
@@ -49,7 +39,6 @@ const GROUP_BY = [
   { value: "meaning", label: "By meaning" },
 ];
 
-/** `render(root, nav, from)`: `from` is "settings" when opened from Settings, so Back returns there. */
 export function render(root, nav, from = "home") {
   const back = el("button", { type: "button" }, from === "settings" ? "Settings" : "Home");
   back.addEventListener("click", () => (from === "settings" ? nav.settings() : nav.home()));
@@ -68,10 +57,7 @@ async function load(body) {
   }
 }
 
-/**
- * The list of `initial` Rules in `body`, with its toolbar, or the editor in its place while one is edited. `withModels`
- * is whether the Grouping Models are in, to group by meaning.
- */
+/** Grouping by meaning is only offered `withModels`, as it needs them. */
 function rulesList(body, initial, withModels) {
   let rules = initial;
   let overlaps = [];
@@ -85,11 +71,9 @@ function rulesList(body, initial, withModels) {
   const down = el("button", { type: "button", title: withShortcut("Move Down", "moveDown"), ariaLabel: "Move Down" }, icon("down"));
   const remove = el("button", { type: "button", title: withShortcut("Delete", "deleteRule") }, icon("trash"), "Delete");
   const toolbar = el("div", { className: "rules-toolbar" }, add, edit, toggle, up, down, remove);
-  // With no Rules: the introduction's Rules drawing, one line and a way to start.
   const start = el("button", { type: "button", className: "primary" }, "New Rule");
   const empty = el("div", { className: "rules-empty" }, drawing("rules"), el("p", {}, "Sort files your way at every scan"), start);
 
-  /** Saves `next` as the whole list; resolves to whether it was saved, saying why not in `where`. */
   const save = async (next, where = status) => {
     try {
       rules = (await changeSetting("rules", next)).config.rules;
@@ -102,7 +86,7 @@ function rulesList(body, initial, withModels) {
     }
   };
 
-  /** Marks the Rules some file could share with an earlier one; unmarked if that can't be worked out. */
+  /** Unmarked if that can't be worked out: the Rules still work. */
   const findOverlaps = async () => {
     const shown = rules;
     const found = await ruleOverlaps(shown).catch(() => []);
@@ -111,7 +95,6 @@ function rulesList(body, initial, withModels) {
     draw();
   };
 
-  /** Opens the editor on the Rule at `index`, or on a new Rule when null to add one. */
   const openEditor = (index) => {
     const editing = index === null ? newRule() : rules[index];
     body.replaceChildren(
@@ -139,7 +122,6 @@ function rulesList(body, initial, withModels) {
     list.children[selected]?.focus();
   };
 
-  /** Moves the selected Rule `by` places, so it wins over (or yields to) the Rules it passes. */
   const moveSelected = async (by) => {
     if (selected === null) return;
     const to = selected + by;
@@ -168,7 +150,6 @@ function rulesList(body, initial, withModels) {
     toggle.title = withShortcut(toggle.textContent, "toggle");
     list.replaceChildren(
       ...rules.map((rule, index) => {
-        // Its place in the order, since a file goes by the first Rule it fits.
         const classes = ["rules-row", index === selected ? "selected" : "", rule.enabled ? "" : "off"].filter(Boolean).join(" ");
         const row = el(
           "li",
@@ -228,21 +209,16 @@ function rulesList(body, initial, withModels) {
   findOverlaps();
 }
 
-/** A labelled control in the editor. */
 const field = (label, ...controls) =>
   el("label", { className: "rules-field" }, el("span", { className: "rules-label" }, label), el("span", { className: "rules-controls" }, ...controls));
 
 const select = (options, value) =>
   el("select", {}, ...options.map(([v, label]) => el("option", { value: v, selected: v === value }, label)));
 
-/** Megabytes from `bytes`, or "" for none; a saved size reads back as it was. */
+/** Not rounded, so a saved size reads back as it was. */
 const megabytes = (bytes) => (bytes == null ? "" : String(bytes / MEGABYTE));
 
-/**
- * The editor for `rule`, its match and group-by as controls and read back in one line below. Grouping by meaning
- * is offered only `withModels`, or when `rule` already does. `save(rule, where)` resolves to whether it was saved,
- * saying why not in `where`; `done(saved)` goes back to the list.
- */
+/** A Rule that already groups by meaning keeps that choice without the models. */
 function editor(rule, withModels, { save, done }) {
   const match = rule.match ?? {};
   const date = match.date ?? null;
@@ -277,7 +253,6 @@ function editor(rule, withModels, { save, done }) {
   const readBack = el("p", { className: "rules-readback" });
   const status = el("p", { className: "status" });
 
-  /** The Rule the controls show. */
   const read = () => {
     const m = {};
     if (kind.value) m.kind = kind.value;

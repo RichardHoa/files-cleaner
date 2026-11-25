@@ -1,8 +1,3 @@
-// Session: what one past Session did and where its files are now. One card per group (Moved,
-// Trashed, Put back, Needs attention) picks which files are listed; the selected file is shown beside
-// the list. Files can be put back, moved again, or tried again if skipped or failed, all at once,
-// ticked, or one at a time, and a file not in the System Trash can be opened, by double-clicking it or
-// from its right-click menu.
 import { describeError, openSessionFile, pathSeparator, redoOperations, retryOperations, revealInFileManager, sessionDetails, undo } from "../../shared/api.js";
 import { el } from "../../shared/dom.js";
 import { drawMore, fileMenuItems } from "../../shared/plan/file-list.js";
@@ -14,7 +9,6 @@ import { PAGE_SIZE, fileName, folderLabel, paging, selectedFile, visibleFiles } 
 import { actionFor, groupByState, paneSentence, sessionHeading, sessionLead, whereNow } from "./session-view.js";
 import { showStatus } from "../../shared/status.js";
 
-/** "3 moved": how many files a group has, as its card and list heading say it. */
 const GROUP_COUNTS = {
   moved: (n) => `${count(n)} moved`,
   trashed: (n) => `${count(n)} trashed`,
@@ -22,7 +16,6 @@ const GROUP_COUNTS = {
   attention: (n) => `${count(n)} ${n === 1 ? "needs" : "need"} attention`,
 };
 
-/** Each action `actionFor` names, and how it is worded. */
 const ACTIONS = {
   undo: {
     bulk: (n) => `Put back ${plural(n, "file")}`,
@@ -50,10 +43,9 @@ const ACTIONS = {
   },
 };
 
-/** The action for `op`'s file, if it has one. */
 const actionOf = (op) => ACTIONS[actionFor(op)] ?? null;
 
-/** The action for a group's files: every file in a group that has one has the same. Under Needs attention, a file stopped part-way has none. */
+/** Every file in a group that has an action has the same one. */
 const groupAction = (group) => group.operations.map(actionOf).find(Boolean) ?? null;
 
 const SORT_NAMES = { size: "biggest first", name: "by name", folder: "by folder" };
@@ -68,10 +60,8 @@ export function render(root, nav, sessionId, from, result) {
 
   // Kept when the Session is drawn again after an action.
   const view = { group: null, query: "", sort: "size", limit: PAGE_SIZE, selectedId: null };
-  // The last action's `{ summary, action, done }`, drawn as its status line and, if it left files, the warning.
   let last = null;
 
-  /** Draws the Session afresh, with `actionResult` (the last action's, if any) in the status line and the warning. */
   async function load(actionResult) {
     last = actionResult;
     let details;
@@ -85,7 +75,6 @@ export function render(root, nav, sessionId, from, result) {
     showStatus(status, last ? describeSummary(last.summary, last.done) : "");
   }
 
-  /** Runs `call`, the action `action` names in ACTIONS, with every control disabled and `label` in the status line, then draws its result. */
   async function act(label, call, action) {
     const enabled = [...root.querySelectorAll("button, input, select")].filter((c) => !c.disabled);
     for (const control of enabled) control.disabled = true;
@@ -106,7 +95,6 @@ export function render(root, nav, sessionId, from, result) {
   function draw({ info, operations }) {
     const rootName = splitPath(info.scanRoot, pathSeparator).name;
     const groups = groupByState(operations);
-    // Stay on the group that was listed, while it still has files.
     let group = groups.find((g) => g.group === view.group) ?? groups[0];
     view.group = group?.group ?? null;
     let ticked = new Set();
@@ -135,7 +123,6 @@ export function render(root, nav, sessionId, from, result) {
       return;
     }
 
-    // Cards: one per group, saying where its files are; they also pick the listed group.
     const line = (...parts) => el("span", { className: "plan-card-line" }, ...parts);
     const muted = (text) => el("span", { className: "muted" }, text);
     const sizeOf = (ops) => formatSize(ops.reduce((sum, op) => sum + op.size, 0));
@@ -166,7 +153,6 @@ export function render(root, nav, sessionId, from, result) {
       }
     };
 
-    // The chosen group's files: search and sort, Select all, then one line per file.
     const search = el("input", {
       type: "search",
       className: "search",
@@ -312,7 +298,6 @@ export function render(root, nav, sessionId, from, result) {
       rows.find((r) => r.op.id === focused)?.target.focus();
     }
 
-    /** Brings the tick boxes, Select all and the action for the ticked files in step with `ticked`. */
     function drawTicks() {
       for (const { op, box } of rows) if (box) box.checked = ticked.has(op.id);
       const ids = tickable();
@@ -348,7 +333,7 @@ export function render(root, nav, sessionId, from, result) {
       );
     }
 
-    /** For the warning's "Show which files": lists the group holding the first file the last action left, with that file selected. */
+    /** For the warning's "Show which files". */
     function showLeft() {
       const left = new Set(["unrecoverable", "failed", "skipped"].flatMap((kind) => last.summary[kind].map((o) => o.operationId)));
       const g = groups.find((candidate) => candidate.operations.some((op) => left.has(op.id)));

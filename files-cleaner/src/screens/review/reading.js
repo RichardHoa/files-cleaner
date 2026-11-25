@@ -1,9 +1,5 @@
-// The Review screen's reading: the loose files are read in the background, which needs the Grouping Models
-// (without them, they're offered in the Suggested Folders' place, or the user's Rules alone sort the files), with a counter, an estimate and a wait
-// note, and how far it is on the sidebar. The Rules' folders need no reading, so they're shown at once, and the
-// other Suggested Folders are added once that's done. The reading can be stopped early to group only what was
-// read; Cancel stops it and goes Home. Reading that would take long waits for the user to say so: until then,
-// or instead, the files read before are grouped and the rest left where they are.
+// Read in the background, as it is slow; the Rules' folders need no reading, so they show at once.
+// A long read asks first.
 import {
   analyseLooseFiles,
   answerNotifications,
@@ -27,15 +23,9 @@ import { progressBar } from "../../shared/progress-bar.js";
 import { showStatus } from "../../shared/status.js";
 import { describeEstimate, readingEstimate, readingNeedsAsking, readingTime, updatedAverage } from "./reading-estimate.js";
 
-/** What the reading screen says about the wait. */
 const WAIT_TEXT = "This takes a while. Feel free to switch apps.";
-/** What the reading estimate calls this computer. */
 const COMPUTER = thisComputer();
 
-/**
- * The analysis's `{ finished, total, current, phase }` progress as "Reading 12 of 85 files…", or what comes
- * before and after, then the file it is on, or that the models are loading.
- */
 const describeAnalysisProgress = ({ finished, total, current, phase }) =>
   ({
     checking: () => `Checking which files were read before: ${count(finished)} of ${count(total)}…\n${current}`,
@@ -44,23 +34,19 @@ const describeAnalysisProgress = ({ finished, total, current, phase }) =>
     placing: () => `Finding folders for files left out: ${count(finished)} of ${count(total)}…\n${current}`,
   })[phase]();
 
-/** "about 50 min" or "about 2 h" for `seconds`, a time over 10 minutes. */
+/** Rounded roughly: only used for times over 10 minutes. */
 function aboutTime(seconds) {
   const minutes = Math.round(seconds / 60);
   return minutes < 90 ? `about ${minutes} min` : `about ${Math.round(minutes / 60)} h`;
 }
 
-/**
- * The line saying how long a file takes to read on this computer and how long until the folders are shown,
- * from the stored pace and the analysis's progress, kept counting down each second. `save()` stores this
- * run's pace once it has finished; `stop()` stops the countdown either way.
- */
+/** Counts down by itself each second, as progress only comes once per file. */
 function estimateLine() {
   const node = el("p", { className: "reading-estimate muted" });
   const started = performance.now();
   const elapsed = () => (performance.now() - started) / 1000;
   let average = null;
-  // The files that need reading, and how many are read; the last pass is counted within the time per file.
+  // The last pass is already counted within the time per file.
   let reading = null;
   const draw = () => {
     node.textContent =
@@ -91,10 +77,7 @@ function estimateLine() {
   };
 }
 
-/**
- * The wait text, and the first time, a question whether to notify the user when the folders are ready. The
- * answer is kept in the config, so it's asked only once.
- */
+/** Asked only once: the answer is kept in the config. */
 function waitNote() {
   const text = el("p", { className: "note" }, WAIT_TEXT);
   const ask = el("p", { className: "notify-ask", hidden: true });
@@ -117,25 +100,16 @@ function waitNote() {
   return [text, ask];
 }
 
-/**
- * The reading of the Review screen with context `ctx`: `waiting()`, what the Suggested Folders' pane shows
- * until they're ready, `footer`, saying where the files were read, `start()` and `cancel()`.
- */
 export function reading(ctx) {
   const { nav, state, view } = ctx;
   const footer = el("div");
-  // Until the Suggested Folders are ready, their pane shows `waiting`: the reading, the offer or the error.
   let waiting = [el("h2", {}, "Suggested Folders"), el("p", { className: "status" }, "Reading the files…")];
-  // Set while the files are being read, and once Cancel was clicked then: the screen goes Home once
-  // the reading has stopped. Once Stop reading was clicked, the files read so far are grouped instead.
+  // Cancel waits for the reading to stop before going Home; Stop groups what was read.
   let analysing = false;
   let cancelled = false;
   let stopped = false;
 
-  /**
-   * Goes Home, once the reading has stopped if the files are being read, so it isn't still running when the
-   * user moves on. Returns whether it's waiting for that.
-   */
+  /** Waits for the reading to stop, so it isn't still running when the user moves on. */
   function cancel() {
     if (!analysing) {
       nav.home();
@@ -149,7 +123,6 @@ export function reading(ctx) {
     return true;
   }
 
-  /** Shows `nodes` in the Suggested Folders' pane until they're ready, with `phase` as their phase. */
   function waitFor(phase, nodes) {
     state.waitFor(phase);
     if (phase !== "reading") ctx.sidebar.showProgress("");
@@ -157,11 +130,7 @@ export function reading(ctx) {
     ctx.redraw.section("folders");
   }
 
-  /**
-   * Reads the files, with a counter, the time a file takes on this computer and a countdown to the folders,
-   * while the rest of the Plan can be reviewed. A finished run updates that time; the user is notified when
-   * it ends while the app is in the background.
-   */
+  /** In the background, so the rest of the Plan can be reviewed meanwhile. */
   async function analyse() {
     const progress = el("p", { className: "status" }, "Reading the files…");
     const bar = progressBar();
@@ -187,7 +156,7 @@ export function reading(ctx) {
         // Every file is read by the last pass: stopping then would only skip it.
         if (update.phase === "placing") stop.hidden = true;
         showStatus(progress, describeAnalysisProgress(update));
-        // Moves back and forth while the models load, as nothing is read meanwhile.
+        // Nothing is read while the models load, so there is nothing to measure.
         bar.set(update.finished, update.phase === "loading" ? 0 : update.total);
         estimate.update(update);
         ctx.sidebar.showProgress(update.phase === "reading" && update.total > 0 ? `${Math.floor((100 * update.finished) / update.total)}%` : "");
@@ -209,29 +178,25 @@ export function reading(ctx) {
     }
   }
 
-  /** Lists the first of `added`, the Suggested Folders just filled in, if the pane shows the reading; else brings the screen up to date. */
   function showFolders(added) {
     if (view.current === "folders") ctx.show(added[0] ?? state.choices[0] ?? "left");
     else ctx.redraw.all();
   }
 
-  /** Fills in the Suggested Folders and the files left where they are, from the analysis, with the choices made on the copies meanwhile. */
+  /** Choices made on copies while reading must survive. */
   function ready(analysis) {
     const added = state.ready(analysis.grouping);
     if (analysis.device) footer.replaceChildren(el("p", { className: "note" }, `Files read on ${analysis.device}.`));
     showFolders(added);
   }
 
-  /**
-   * Counts the files that need reading and reads them, once the user says so if that takes over 10 minutes
-   * on this computer.
-   */
+  /** Over 10 minutes of reading should be the user's own decision. */
   async function readOrAsk() {
     waitFor("reading", [el("p", { className: "status" }, "Checking which files were read before…")]);
     analysing = true;
     let toRead;
     let average;
-    // Both while `analysing`, so a Cancel meanwhile is seen here rather than leaving the reading to start.
+    // Both while `analysing`, so a Cancel meanwhile doesn't leave the reading to start.
     try {
       toRead = await filesToRead();
       // No history to go by: the first guess.
@@ -252,7 +217,6 @@ export function reading(ctx) {
     waitFor("ask", [el("p", {}, `Reading ${plural(toRead, "file")} takes ${time} on this ${COMPUTER}`), el("div", { className: "actions" }, read, skip)]);
   }
 
-  /** Groups the files read before, the Rules' and the kinds never read, leaving the rest where they are, with a button to read them after all. */
   async function groupWithoutReading() {
     waitFor("reading", [el("p", { className: "status" }, "Sorting the files…")]);
     analysing = true;
@@ -274,7 +238,7 @@ export function reading(ctx) {
     }
   }
 
-  /** Reads the files if the Grouping Models are installed; without them, sorts by the Rules alone if there are any, or else offers the models. */
+  /** Without the models, Rules alone can still sort files. */
   async function start() {
     try {
       const models = await groupingModelsStatus();

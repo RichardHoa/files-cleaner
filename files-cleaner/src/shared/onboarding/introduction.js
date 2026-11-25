@@ -1,5 +1,4 @@
-// The introduction: a sheet of cards, one at a time, shown once over Home and again from Settings. Its
-// last card offers the Grouping Models; after "Not now" they're still offered in the Suggested Folders step.
+// Declining the models here isn't final: the Suggested Folders step still offers them.
 import { describeError, downloadGroupingModels, groupingModelsStatus } from "../api.js";
 import { el } from "../dom.js";
 import { formatSize } from "../format.js";
@@ -9,26 +8,25 @@ import { drawing } from "./drawings.js";
 import { introductionCards } from "./onboarding.js";
 import { seen, updateSeen } from "./seen.js";
 
-/** Shows the introduction unless the user has finished or skipped it before. */
 export async function showIntroductionOnce() {
   if (!(await seen()).introductionSeen) showIntroduction();
 }
 
-/** Shows the introduction; closing it, however, counts as having seen it. */
+/** Closing it in any way counts as having seen it. */
 export async function showIntroduction() {
   let models = null;
   try {
     models = await groupingModelsStatus();
   } catch {
-    // The download card is left out: the Suggested Folders step still offers the models.
+    // The Suggested Folders step still offers the models.
   }
-  // A download already started counts as installed here: the Suggested Folders step shows its progress.
+  // A download already started counts too: the Suggested Folders step shows its progress.
   const cards = introductionCards(models?.state !== "notInstalled", models && formatSize(models.total), thisComputer());
 
   let index = 0;
   const picture = el("div", { className: "intro-picture" });
   const text = el("p", { className: "intro-text" });
-  // Only the download card says more: what is downloaded and why.
+  // Only the download card asks for something, so only it explains more.
   const details = el("div", { className: "intro-details" });
   const dots = el("div", { className: "intro-dots", ariaHidden: "true" }, ...cards.map(() => el("span")));
   const error = el("p", { className: "status error" });
@@ -58,7 +56,7 @@ export async function showIntroduction() {
       await downloadGroupingModels();
       close();
     } catch (e) {
-      // Too little space, say: the user reads why and can still say "Not now".
+      // Too little space, say: the user can still choose "Not now".
       showStatus(error, describeError(e), true);
       node.disabled = false;
     }
@@ -86,7 +84,7 @@ export async function showIntroduction() {
     primary.focus();
   }
 
-  // Escape skips, as "Not now" on the download card.
+  // Escape skips, as "Not now" does.
   sheet.addEventListener("cancel", (event) => {
     event.preventDefault();
     close();

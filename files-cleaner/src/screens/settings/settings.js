@@ -1,9 +1,5 @@
-// Settings: the Never-Touch Paths, the Default Copy Rule, how files are grouped, the way to the Rules,
-// notifications, the Grouping Models, deleting all Sessions, and help. The headings say these in plain
-// words ("Folders to leave alone"); the glossary and the code keep the exact terms.
-// This is the only way settings change: the config file behind them is never edited by hand. Each change
-// is saved as soon as it's made; an invalid value says why beside it and isn't saved. Grouping changes
-// apply the next time files are grouped.
+// The only way settings change: the config file is never edited by hand. Headings use plain words;
+// the code keeps the glossary's terms.
 import {
   changeSetting,
   clearGroupingCards,
@@ -31,16 +27,13 @@ import { progressBar } from "../../shared/progress-bar.js";
 import { showStatus } from "../../shared/status.js";
 import { EXISTING_FOLDER_LEVELS, FOLDER_LEVELS, nearestLevel, onLevel } from "./grouping-levels.js";
 
-/** What this OS calls its file manager, for "Show in Finder". */
 const FILE_MANAGER = pathSeparator === "\\" ? "Explorer" : /Mac/.test(navigator.userAgent) ? "Finder" : "File Manager";
 
-/** The Default Copy Rule's choices. */
 const COPY_RULES = [
   { value: "newest", label: "Newest", detail: "the copy modified last" },
   { value: "oldest", label: "Oldest", detail: "the copy modified longest ago" },
   { value: "shortestPath", label: "Shortest path", detail: "the copy with the shortest folder and file name" },
 ];
-
 
 export function render(root, nav) {
   const home = el("button", { type: "button" }, "Home");
@@ -60,21 +53,19 @@ export function render(root, nav) {
   showConfigSections(configSections, nav);
 }
 
-/** Replays the introduction. */
 function helpSection() {
   const replay = el("button", { type: "button" }, "Replay introduction");
   replay.addEventListener("click", () => showIntroduction());
   return section("Help", el("div", { className: "actions" }, replay));
 }
 
-/** Credits the app icon's author, linking to their page in the default browser. */
 function iconCredit() {
   const author = el("button", { type: "button", className: "link" }, "juicy_fish");
   author.addEventListener("click", () => openWebPage("https://www.flaticon.com/authors/juicy-fish"));
   return el("p", { className: "note" }, "App icon by ", author, " on Flaticon.");
 }
 
-/** The sections kept in the config, or why it can't be read, with "Reset settings" to start again from the defaults. */
+/** An unreadable config can only be fixed by resetting it, so that is offered here. */
 async function showConfigSections(node, nav) {
   let config;
   try {
@@ -112,10 +103,8 @@ async function showConfigSections(node, nav) {
   );
 }
 
-/** `title`'s section, holding `children`. */
 const section = (title, ...children) => el("section", { className: "settings-section" }, el("h2", {}, title), ...children);
 
-/** One radio button of the group `name`, with `label` and a muted `detail`. */
 const choice = (name, label, detail, props) =>
   el(
     "label",
@@ -124,7 +113,6 @@ const choice = (name, label, detail, props) =>
     el("span", {}, label, el("span", { className: "muted" }, ` · ${detail}`)),
   );
 
-/** The Default Copy Rule: which copy of each Duplicate Group starts out kept. A failure says why and puts the choice back. */
 function duplicatesSection(initial) {
   const status = el("p", { className: "status" });
   const choices = el(
@@ -190,7 +178,6 @@ function neverTouchSection(initial) {
   );
 }
 
-/** How many Rules there are, and the way to the Rules screen. */
 function rulesSection(rules, nav) {
   const open = el("button", { type: "button" }, "Edit Rules…");
   open.addEventListener("click", () => nav.rules("settings"));
@@ -206,7 +193,6 @@ function groupingSection(grouping) {
   );
 }
 
-/** Saves `value` (null for the default) as the grouping setting `key`; resolves to the value saved, or shows why not in `error` and resolves to undefined. */
 async function saveGrouping(key, value, error) {
   try {
     const saved = (await changeSetting(key, value)).config.grouping[key];
@@ -219,9 +205,8 @@ async function saveGrouping(key, value, error) {
 }
 
 /**
- * The grouping threshold `key` as one of `levels`, shown by `show(index)`; returns `save(threshold)`, null
- * for the default, which shows the level saved, or puts the last one back if saving fails. A stored value
- * between levels is snapped to the nearest one and saved, without a word.
+ * A stored value between levels is snapped to the nearest and saved, so what is shown is what
+ * applies.
  */
 function levelSetting(key, levels, initial, show, error) {
   let level = nearestLevel(levels, initial);
@@ -235,7 +220,6 @@ function levelSetting(key, levels, initial, show, error) {
   return save;
 }
 
-/** How many Suggested Folders: five levels on a slider, from a few broad folders to many specific ones. */
 function folderLevelSetting(initial) {
   const slider = el("input", { type: "range", min: 0, max: FOLDER_LEVELS.length - 1, step: 1, ariaLabel: "How many folders" });
   const current = el("span", { className: "muted" });
@@ -267,7 +251,6 @@ function folderLevelSetting(initial) {
   );
 }
 
-/** How often a Suggested Folder goes into a folder already in the scanned folder: Often, Sometimes or Rarely. */
 function existingFolderSetting(initial) {
   const reset = el("button", { type: "button", className: "link" }, "Reset to default");
   const error = el("p", { className: "status" });
@@ -297,7 +280,6 @@ function existingFolderSetting(initial) {
   );
 }
 
-/** The fewest files a Suggested Folder holds, 2–10, as a sentence with a stepper. */
 function smallestFolderSetting(initial) {
   const number = el("input", { type: "number", min: 2, max: 10, step: 1, value: initial, className: "settings-number", ariaLabel: "Fewest files in a folder" });
   const reset = el("button", { type: "button", className: "link" }, "Reset to default");
@@ -327,7 +309,6 @@ function smallestFolderSetting(initial) {
   );
 }
 
-/** Whether to notify the user when the folders are ready, or reading failed, while the app is in the background. */
 function notificationsSection(initial) {
   const box = el("input", { type: "checkbox", checked: initial === true });
   const status = el("p", { className: "status" });
@@ -347,7 +328,6 @@ function notificationsSection(initial) {
   );
 }
 
-/** "Read every file again": forgets what the Grouping Models read, so the next grouping reads every file afresh. */
 function readAgainSection() {
   const button = el(
     "button",
@@ -373,7 +353,6 @@ function readAgainSection() {
   );
 }
 
-/** The Grouping Models: their status and controls, each model's name, size on disk and folder, and "Advanced". */
 function modelsSection() {
   const body = el("div");
   const error = el("p", { className: "status error" });
@@ -390,17 +369,12 @@ function modelsSection() {
       ...(onDisk.length ? [modelList(onDisk, error), el("p", { className: "muted" }, `Total: ${formatSize(total)}`)] : []),
       installed ? removeModels(status.total, error) : "",
     );
-    // A failed download says why in the orange warning, in place of its text.
     showStatus(error, "");
   });
   return node;
 }
 
-/**
- * "Advanced": a box for a Hugging Face link to one `.gguf` file, to describe files with that model instead of
- * the default, and the picked model's download, check or switch. Built once and fed each status,
- * so what's typed in the box stays; shown only once the Grouping Models are installed.
- */
+/** Built once and fed each status, so what's typed in the box stays. */
 function describingModelSetting() {
   const link = el("input", {
     type: "url",
@@ -449,10 +423,6 @@ function describingModelSetting() {
   };
 }
 
-/**
- * What describes files now, or the picked model's download with its progress in `bar`, or its check. A
- * download that failed, or a model refused, says why in the orange warning; a failing button says why in `error`.
- */
 function describingModelControls({ custom, customError, models }, error, bar) {
   const button = (label, command, primary = false) => modelsButton(label, command, error, primary);
   const warning = customError ? [warningBlock(customError)] : [];
@@ -502,7 +472,7 @@ function describingModelControls({ custom, customError, models }, error, bar) {
   ];
 }
 
-/** "Remove", which asks first, as getting the models back means downloading `total` bytes again; a failure says why in `error`. */
+/** Asks first, as getting the models back means a long download. */
 function removeModels(total, error) {
   const node = el("div", { className: "actions" });
   const ask = el("button", { type: "button" }, "Remove…");
@@ -519,7 +489,6 @@ function removeModels(total, error) {
   return node;
 }
 
-/** Each model on disk: its name, size and folder, with "Show in Finder"; a failure says why in `error`. */
 function modelList(models, error) {
   return el(
     "ul",
@@ -538,7 +507,7 @@ function modelList(models, error) {
   );
 }
 
-/** "Delete all Sessions…", which asks first with how many; unavailable with none. It clears History and the Journals, never a file. */
+/** Asks first, as past Sessions can't be undone afterwards. */
 function sessionsSection() {
   const actions = el("div", { className: "actions" });
   const status = el("p", { className: "status" });

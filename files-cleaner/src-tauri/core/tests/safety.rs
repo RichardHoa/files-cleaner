@@ -1,6 +1,3 @@
-//! The safety edges of a Plan: folders it empties, Operations it can't
-//! carry out, and undoing an older Session after a newer one.
-
 mod common;
 
 use std::collections::BTreeMap;
@@ -27,7 +24,6 @@ fn set_modified(path: &Path, secs: u64) {
         .unwrap();
 }
 
-/// Writes a copy of the Keeper `keep.txt` at each of `copies`, all older.
 fn with_copies(root: &Path, copies: &[&str]) {
     set_modified(&write(root, "keep.txt", "same contents"), 9_000);
     for (i, copy) in copies.iter().enumerate() {
@@ -40,8 +36,6 @@ fn plan_for(root: &Path) -> Plan {
     build_plan(&scan(root, &config).unwrap(), &config)
 }
 
-/// The folders the Plan offers to trash because it empties them, as
-/// relative paths.
 fn emptied(plan: &Plan) -> Vec<String> {
     plan.operations
         .iter()
@@ -62,8 +56,6 @@ fn every_id(plan: &Plan) -> Vec<String> {
     plan.operations.iter().map(|op| op.id.clone()).collect()
 }
 
-/// Every file and folder under `root`, `/`-separated, with each file's
-/// contents.
 fn snapshot(root: &Path) -> BTreeMap<String, Option<String>> {
     let mut found = BTreeMap::new();
     let mut folders = vec![root.to_path_buf()];
@@ -363,7 +355,6 @@ fn undoing_an_older_session_skips_a_place_a_newer_one_filled() {
         &["inbox/report.pdf"],
     );
     let older = run(&plan, &ticked(&plan), journal.path()).unwrap();
-    // A newer Session puts a new download where the old one was.
     write(dir.path(), "downloads/report.pdf", "second");
     let inbox = FolderChoice::AddTo {
         folder: real_path(&dir.path().join("inbox")),

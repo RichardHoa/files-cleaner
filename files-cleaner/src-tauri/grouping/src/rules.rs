@@ -1,8 +1,5 @@
-//! Rules applied to Loose Files by code alone (ADR 0013): dates, kinds,
-//! extensions, names and sizes are checked here, never by a model. Each
-//! file goes where the first enabled Rule that matches it says, even when
-//! a later one matches it too (ADR 0014). A Rule by meaning only takes its
-//! files here; the models sort them.
+//! By code alone (ADR 0013), so results are exact. The first enabled Rule that
+//! matches wins (ADR 0014).
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -17,24 +14,17 @@ use unicode_normalization::{char::is_combining_mark, UnicodeNormalization};
 
 use crate::{kinds, Basis, SuggestedFolder};
 
-/// Whether `entry` is a Loose File: directly in the Scan Root, with an
-/// extension, and not a Package.
 pub fn is_loose(entry: &ScanEntry) -> bool {
     entry.relative_path.len() == 1 && !entry.is_package && !entry.extension.is_empty()
 }
 
-/// The Loose Files a Rule groups by meaning, which the models sort.
 pub struct ByMeaning {
     pub rule: Rule,
     pub files: Vec<PathBuf>,
 }
 
-/// The Suggested Folders `rules` make of the Loose Files of `scan`, dates
-/// counted from `today`, in the order they were first filled, and the files
-/// each Rule by meaning takes, in the Rules' order. Folders of the same name
-/// are one, made by the first Rule that filled it. Rules by meaning take
-/// only files that are read, and only `by_meaning`: otherwise their files
-/// go by the next Rule they fit.
+/// Without `by_meaning`, files of Rules by meaning go by the next Rule they
+/// fit.
 pub fn apply(
     scan: &ScanResult,
     rules: &[Rule],
@@ -84,11 +74,8 @@ fn is_by_meaning(rule: &Rule) -> bool {
     matches!(rule.group_by, GroupBy::Meaning { .. })
 }
 
-/// For each of `rules`, the first enabled Rule before it that some file
-/// could match too, if it's enabled itself: such a file goes where that
-/// earlier Rule says. Two Rules are kept apart only where a field rules
-/// out every file one of them matches, so this can warn of an overlap no
-/// file has, never miss one.
+/// Rules count as apart only where a field rules out every shared file, so this
+/// may warn of an overlap no file has but never miss one.
 pub fn overlaps(rules: &[Rule]) -> Vec<Option<usize>> {
     rules
         .iter()
@@ -132,8 +119,6 @@ fn kinds_overlap(a: &RuleMatch, b: &RuleMatch) -> bool {
     }
 }
 
-/// The extensions `m` matches, lowercase and without the dot, if it names
-/// any: those of its kind only, when it has one.
 fn extensions_of(m: &RuleMatch) -> Option<Vec<String>> {
     if m.extensions.is_empty() {
         return None;
@@ -151,8 +136,7 @@ fn extensions_of(m: &RuleMatch) -> Option<Vec<String>> {
     )
 }
 
-/// Whether some day before today fits both; dates of different fields
-/// always may.
+/// Dates of different fields may always overlap.
 fn dates_overlap(a: Option<&DateMatch>, b: Option<&DateMatch>) -> bool {
     let (Some(a), Some(b)) = (a, b) else {
         return true;
@@ -168,7 +152,6 @@ fn dates_overlap(a: Option<&DateMatch>, b: Option<&DateMatch>) -> bool {
     a.field != b.field || (a_low <= b_high && b_low <= a_high)
 }
 
-/// Whether no file name fits both `a` and `b`.
 fn names_apart(a: &RuleMatch, b: &RuleMatch) -> bool {
     left_out(a, b)
         || left_out(b, a)
@@ -181,7 +164,6 @@ fn names_apart(a: &RuleMatch, b: &RuleMatch) -> bool {
         })
 }
 
-/// Whether every name `a` matches contains a word `b` leaves out.
 fn left_out(a: &RuleMatch, b: &RuleMatch) -> bool {
     a.name.as_ref().is_some_and(|name| {
         name.how != NameHow::Pattern
@@ -195,10 +177,8 @@ fn left_out(a: &RuleMatch, b: &RuleMatch) -> bool {
     })
 }
 
-/// Whether no name fits both folded words, `a` held as `a_how` and `b` as
-/// `b_how`. A name fits as itself or as its stem, which begins it before a
-/// space, so starts and whole names are apart only when neither word could
-/// begin the other; anything else may always overlap.
+/// A name fits as itself or as its stem, so only starts and whole names can be
+/// told apart; anything else may overlap.
 fn words_apart(a_how: NameHow, a: &str, b_how: NameHow, b: &str) -> bool {
     match (a_how, b_how) {
         (NameHow::Is, NameHow::Is) => {
@@ -239,7 +219,6 @@ fn matches(rule: &Rule, entry: &ScanEntry, today: NaiveDate) -> bool {
         })
 }
 
-/// The Suggested Folder `rule` puts `entry` in.
 fn folder_name(rule: &Rule, entry: &ScanEntry, today: NaiveDate) -> String {
     match &rule.group_by {
         GroupBy::Folder { name, date } => {
@@ -261,8 +240,7 @@ fn folder_name(rule: &Rule, entry: &ScanEntry, today: NaiveDate) -> String {
     }
 }
 
-/// Today, Yesterday, This week (from Monday), This month or Older; a date
-/// after today is today.
+/// Weeks start on Monday. A date after today counts as today.
 fn bucket(today: NaiveDate, date: NaiveDate) -> &'static str {
     let days = days_before(today, date);
     let monday = today - chrono::Days::new(u64::from(today.weekday().num_days_from_monday()));
@@ -279,8 +257,7 @@ fn bucket(today: NaiveDate, date: NaiveDate) -> &'static str {
     }
 }
 
-/// The local date of `entry`'s `field`; the date changed where the date
-/// added isn't recorded.
+/// Falls back on the date changed where the date added isn't recorded.
 fn date_of(entry: &ScanEntry, field: DateField) -> NaiveDate {
     let millis = match field {
         DateField::Changed => entry.modified,
@@ -297,8 +274,6 @@ fn days_before(today: NaiveDate, date: NaiveDate) -> i64 {
     (today - date).num_days()
 }
 
-/// Whether the file name `name`, with or without its extension, fits any
-/// of `m`'s words.
 fn name_fits(m: &NameMatch, name: &str) -> bool {
     let stem = Path::new(name)
         .file_stem()
@@ -316,8 +291,8 @@ fn name_fits(m: &NameMatch, name: &str) -> bool {
     })
 }
 
-/// `text` as names are compared: lowercase, without accents ("đ" is "d"),
-/// and each run of spaces, `_`, `-` and `.` one space, trimmed.
+/// So names compare as users read them; "đ" doesn't decompose, so it is mapped
+/// by hand.
 fn fold(text: &str) -> String {
     let mut folded = String::new();
     for c in text.nfd().filter(|&c| !is_combining_mark(c)) {
@@ -335,8 +310,6 @@ fn fold(text: &str) -> String {
     folded
 }
 
-/// Whether `name` is all of `pattern`, both folded: `*` is any run of
-/// characters and `?` any one.
 fn pattern_matches(pattern: &str, name: &str) -> bool {
     let pattern: Vec<char> = pattern.chars().collect();
     let name: Vec<char> = name.chars().collect();
@@ -357,8 +330,6 @@ fn pattern_matches(pattern: &str, name: &str) -> bool {
     fits[name.len()]
 }
 
-/// The folder at `name` below `root`, each `/`-separated part matched
-/// ignoring case, if it's there.
 pub fn existing_folder(root: &Path, name: &str) -> Option<PathBuf> {
     name.split('/')
         .try_fold(root.to_path_buf(), |parent, part| {

@@ -17,14 +17,11 @@ const SYSTEM_FOLDERS: &[&str] = &[
     "/private",
 ];
 
-/// True if `path` is a Disk Root: `/`, `/Volumes` or `/Volumes/<disk>`.
 pub fn is_disk_root(path: &Path) -> bool {
     path == Path::new("/")
         || (is_within(path, Path::new("/Volumes")) && path.components().count() <= 3)
 }
 
-/// Why `path`, and so everything inside it, is one of macOS's System
-/// Folders, if it is.
 pub fn builtin_reason(path: &Path, home: &Path) -> Option<String> {
     SYSTEM_FOLDERS
         .iter()
@@ -34,14 +31,12 @@ pub fn builtin_reason(path: &Path, home: &Path) -> Option<String> {
         .map(|folder| format!("{} is a System Folder", folder.display()))
 }
 
-/// macOS marks hidden files by a leading dot only, which is checked on
-/// every OS.
+/// A leading dot is all there is, and that is checked on every OS.
 pub fn is_hidden(_entry: &DirEntry) -> bool {
     false
 }
 
-/// True if macOS says `folder` is a Package, which also covers third-party
-/// Package types.
+/// Asking macOS also covers third-party Package types.
 pub fn is_package(folder: &Path) -> bool {
     let url = NSURL::fileURLWithPath(&NSString::from_str(&folder.to_string_lossy()));
     let mut value: Option<Retained<AnyObject>> = None;

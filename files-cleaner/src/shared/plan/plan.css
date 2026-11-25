@@ -1,6 +1,4 @@
-/* Shared by the review and Session screens: a header with the actions, then cards picking a group
-   and its files beside the selected one. Flat surfaces and hairline dividers; colour only for the
-   primary button, the selected row and each card's one kind icon. */
+/* Shared by the review and Session screens. Colour only where it carries meaning. */
 .plan-head {
   display: flex;
   flex-wrap: wrap;
@@ -31,12 +29,12 @@
   background: var(--surface);
 }
 
-/* Selected like a sidebar item: a quiet grey fill, not a coloured outline. */
+/* Selected like a sidebar item, not outlined. */
 .plan-card.current {
   background: color-mix(in srgb, var(--text) 7%, var(--surface));
 }
 
-/* Fills the card above Include all, so most of the card picks it. */
+/* Most of the card should pick it, not just its text. */
 .plan-card-pick {
   display: block;
   width: 100%;
@@ -68,7 +66,6 @@
   padding: var(--space-1) var(--space-3) var(--space-3);
 }
 
-/* The list, and the selected file's pane beside it once there is room for both. */
 .plan-split {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -114,7 +111,7 @@
   text-overflow: ellipsis;
 }
 
-/* Right to left, so a folder too long to fit loses its start and keeps its nearest folder. */
+/* Right to left, so a folder too long to fit keeps its nearest part. */
 .plan-file-folder {
   direction: rtl;
   text-align: left;
@@ -144,7 +141,6 @@
   display: none;
 }
 
-/* Stays in view while the list scrolls. */
 .plan-pane {
   position: sticky;
   top: var(--space-4);
@@ -170,7 +166,6 @@
   margin-top: var(--space-2);
 }
 
-/* Search, sort and Show above a list of files. */
 .filters {
   display: flex;
   flex-wrap: wrap;

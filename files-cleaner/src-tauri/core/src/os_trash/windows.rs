@@ -1,11 +1,6 @@
-//! The Windows System Trash: `IFileOperation` with `FOFX_RECYCLEONDELETE`,
-//! and a progress sink to learn where each item landed.
-//!
-//! A trash must never become a permanent delete, and this operation
-//! deletes outright when the Recycle Bin can't take an item. So the drive is
-//! checked first, and the sink vetoes any delete not flagged as a recycle. If
-//! Windows leaves that flag off a real recycle, items are refused and stay in
-//! place: the safe way to be wrong.
+//! `IFileOperation` deletes outright when the Recycle Bin can't take an item,
+//! so the drive is checked first and the sink vetoes any delete not flagged as
+//! a recycle. A wrong refusal is the safe way to be wrong.
 
 use std::ffi::{c_void, OsString};
 use std::fs;
@@ -239,7 +234,8 @@ pub fn trash(path: &Path) -> Result<PathBuf, String> {
     performed.map_err(|e| format!("The Recycle Bin refused it: {e}"))?;
     match &observed.landing {
         Some(Ok(landing)) => Ok(landing.clone()),
-        // It may have left all the same: its record in the Recycle Bin says where to.
+        // It may have left all the same: its record in the Recycle Bin says
+        // where to.
         _ if fs::symlink_metadata(path).is_err() => {
             find_landing(path, started).ok_or_else(|| match &observed.landing {
                 Some(Err(error)) => format!("The Recycle Bin gave no file path for it: {error}"),
@@ -254,16 +250,14 @@ pub fn trash(path: &Path) -> Result<PathBuf, String> {
 /// Seconds from 1601, where a FILETIME starts, to 1970.
 const FILETIME_TO_UNIX_SECS: u64 = 11_644_473_600;
 
-/// `time` as a FILETIME: 100 ns steps since 1601.
 fn filetime(time: SystemTime) -> u64 {
     let since_1970 = time.duration_since(UNIX_EPOCH).unwrap_or_default();
     (since_1970.as_secs() + FILETIME_TO_UNIX_SECS) * 10_000_000
         + u64::from(since_1970.subsec_nanos()) / 100
 }
 
-/// What a `$I` file in the Recycle Bin records of its `$R` item: where it
-/// was, and when it was deleted, as a FILETIME. Version 1 (Vista to 8)
-/// keeps the path in 260 characters; version 2 gives its length first.
+/// Version 1 (Vista to 8) has a fixed 260-character path; version 2 gives its
+/// length first.
 fn parse_deleted_record(bytes: &[u8]) -> Option<(PathBuf, u64)> {
     let u64_at = |at: usize| Some(u64::from_le_bytes(bytes.get(at..at + 8)?.try_into().ok()?));
     let deleted = u64_at(16)?;
@@ -284,10 +278,7 @@ fn parse_deleted_record(bytes: &[u8]) -> Option<(PathBuf, u64)> {
     Some((PathBuf::from(OsString::from_wide(&units)), deleted))
 }
 
-/// Where the Recycle Bin put `source`, when Windows didn't say: the `$R`
-/// item whose `$I` record names `source`, deleted no earlier than `since`
-/// (so never an older item from the same path), the latest if several.
-/// Only the user's own folder in `$Recycle.Bin` can be read.
+/// `since` rules out an older item trashed from the same path.
 fn find_landing(source: &Path, since: SystemTime) -> Option<PathBuf> {
     let drive: PathBuf = source
         .components()

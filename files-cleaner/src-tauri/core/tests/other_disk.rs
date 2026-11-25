@@ -1,7 +1,5 @@
-//! A Plan with an item on another disk. Its own test binary: mounting runs
-//! `mount` and `umount`, and a child process briefly holds a copy of the
-//! parent's open files, Session locks included, so beside other tests it
-//! could make their Undo fail as Busy.
+//! Its own test binary: mounting runs child processes, which briefly hold the
+//! parent's Session locks and could make other tests' Undo fail as Busy.
 #![cfg(target_os = "linux")]
 
 mod common;

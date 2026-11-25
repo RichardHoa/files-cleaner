@@ -1,7 +1,6 @@
-//! The Linux System Trash: the FreeDesktop Trash layout
-//! (https://specifications.freedesktop.org/trash/latest/). The info file goes
-//! first, created atomically, then the item is renamed into `files/`. It never
-//! copies to the home Trash from another disk: it refuses, as the spec allows.
+//! The FreeDesktop layout
+//! (https://specifications.freedesktop.org/trash/latest/). Never copies to the
+//! home Trash from another disk: it refuses, as the spec allows.
 
 use std::env;
 use std::ffi::CString;
@@ -29,15 +28,14 @@ fn home_trash() -> Result<PathBuf, String> {
     Ok(data.join("Trash"))
 }
 
-/// The device of `path`, or of the nearest folder above it that exists.
+/// The nearest existing folder, as the Trash may not have been made yet.
 fn device(path: &Path) -> Option<u64> {
     path.ancestors()
         .find_map(|p| fs::symlink_metadata(p).ok())
         .map(|m| m.dev())
 }
 
-/// The folder at the top of the mount holding `path`, which is `$topdir` in
-/// the spec's words.
+/// `$topdir` in the spec's words.
 fn top_dir(path: &Path) -> Option<PathBuf> {
     let dev = device(path)?;
     path.ancestors()
@@ -46,8 +44,8 @@ fn top_dir(path: &Path) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
-/// `$topdir/.Trash/$uid`, if `$topdir/.Trash` passes the spec's checks: a real
-/// folder, not a symlink, with the sticky bit set.
+/// The checks are the spec's: a symlink or a missing sticky bit would let
+/// others at the items.
 fn shared_trash(top: &Path) -> Option<PathBuf> {
     let shared = top.join(".Trash");
     let meta = fs::symlink_metadata(&shared).ok()?;
@@ -66,9 +64,8 @@ fn make_trash_folders(trash: &Path) -> io::Result<()> {
     builder.create(trash.join("info"))
 }
 
-/// Where an item in `parent` is trashed: the Trash folder, and the folder its
-/// recorded paths are relative to (none for the home Trash, which uses
-/// absolute paths).
+/// The second folder is what recorded paths are relative to; the home Trash has
+/// none, as it uses absolute paths.
 fn find_trash(parent: &Path) -> Result<(PathBuf, Option<PathBuf>), String> {
     let home = home_trash()?;
     if device(&home) == device(parent) {
@@ -91,7 +88,7 @@ fn find_trash(parent: &Path) -> Result<(PathBuf, Option<PathBuf>), String> {
     Ok((own, Some(top)))
 }
 
-/// Tells without creating anything, unlike `find_trash`.
+/// Asking must not create a Trash, which `find_trash` would.
 pub fn blocked(folder: &Path) -> Option<String> {
     if home_trash().is_ok_and(|home| device(&home) == device(folder)) {
         return None;
@@ -106,7 +103,7 @@ pub fn blocked(folder: &Path) -> Option<String> {
     (!usable).then(|| "This disk has no usable Trash".to_string())
 }
 
-/// Percent-encodes as RFC 2396 says, keeping `/`.
+/// As RFC 2396 says, which the spec asks for.
 fn encode_path(path: &Path) -> String {
     let mut out = String::new();
     for &byte in path.as_os_str().as_bytes() {
@@ -141,8 +138,8 @@ fn deletion_date() -> String {
     )
 }
 
-/// Claims a free name by creating its info file exclusively. The name must
-/// also be free in `files/`, which may hold items whose info file went missing.
+/// The exclusive info file claims the name. `files/` is checked too, as it may
+/// hold items whose info file went missing.
 fn reserve_name(trash: &Path, name: &str, record: &str) -> Result<(PathBuf, PathBuf), String> {
     for attempt in 1..=10_000 {
         let candidate = if attempt == 1 {
@@ -199,8 +196,7 @@ pub fn put_back(landed: &Path, to: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Removes the item's info file. One left behind only clutters the Trash's
-/// own bookkeeping, so a failure here doesn't undo a restore.
+/// A record left behind is only clutter, so a failure doesn't undo a restore.
 pub fn forget(landed: &Path) {
     let trash = landed.parent().and_then(Path::parent);
     if let (Some(trash), Some(name)) = (trash, landed.file_name()) {

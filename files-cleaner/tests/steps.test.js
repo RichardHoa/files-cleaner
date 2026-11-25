@@ -5,7 +5,6 @@ import { describeDuplicateProgress, describeScanProgress, stepFlow } from "../sr
 const ROOT = "/Users/me/Downloads";
 const groups = [{ size: 4, copies: [{ path: `${ROOT}/a.pdf` }, { path: `${ROOT}/Old/a.pdf` }] }];
 
-/** A step flow over fake commands: `calls` records each command and each screen shown, in order. */
 function setup() {
   const calls = [];
   const api = {

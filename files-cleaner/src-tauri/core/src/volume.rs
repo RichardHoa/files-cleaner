@@ -1,14 +1,10 @@
-//! Which disk a path is on. A move within one disk is an atomic rename; a
-//! move between disks would be a copy and a delete, which the app never
-//! does, so the Planner marks those as errors.
+//! A move between disks would be a copy and a delete, which the app never does.
 
 use std::fs;
 use std::path::Path;
 
-/// True if `a` and `b` are on different disks. A path that doesn't exist
-/// yet is on the disk of the nearest folder above it that does. If either
-/// can't be told, they count as on the same disk: the move itself still
-/// refuses to copy.
+/// If it can't be told, they count as the same: the move itself still refuses
+/// to copy.
 pub fn different_disks(a: &Path, b: &Path) -> bool {
     match (disk(a), disk(b)) {
         (Some(a), Some(b)) => a != b,
@@ -24,8 +20,8 @@ fn disk(path: &Path) -> Option<u64> {
         .map(|m| m.dev())
 }
 
-/// The drive, such as `c:`, or the network share. Folders mounted into
-/// another drive's folder are rare on Windows and aren't told apart.
+/// Folders mounted into another drive's are rare on Windows and aren't told
+/// apart.
 #[cfg(windows)]
 fn disk(path: &Path) -> Option<String> {
     use std::path::{Component, Prefix};

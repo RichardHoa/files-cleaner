@@ -1,9 +1,6 @@
-//! File kinds by extension. Archives, images and installers are never read:
-//! each of those kinds becomes one Suggested Folder of its own, as do PDFs
-//! found to be scans that OCR can't read either.
+//! Archives, images and installers are never read, so each kind is one
+//! Suggested Folder.
 
-/// The kind of a file with extension `ext` (lowercased, without the dot),
-/// named as its folder would be.
 pub fn kind(ext: &str) -> &'static str {
     match ext {
         "pdf" | "doc" | "docx" | "odt" | "rtf" | "txt" | "md" | "pages" | "tex" => "Documents",
@@ -30,7 +27,6 @@ pub fn kind(ext: &str) -> &'static str {
     }
 }
 
-/// Every kind `kind` names, which the Rules screen lists too.
 #[cfg(test)]
 const KINDS: &[&str] = &[
     "Documents",
@@ -48,20 +44,16 @@ const KINDS: &[&str] = &[
     "Other",
 ];
 
-/// PDFs with no text to read: a kind of their own, found by opening them.
+/// A kind of their own: without text there is nothing to group them by.
 pub const SCANNED_PDFS: &str = "Scanned PDFs";
 
-/// Kinds that are never read: each goes into one folder of its own,
-/// whatever the files are called.
 const FIXED_KINDS: &[&str] = &["Archives", "Images", "Installers"];
 
-/// The file's kind when it is one of the `FIXED_KINDS`.
 pub fn fixed_kind(ext: &str) -> Option<&'static str> {
     Some(kind(ext)).filter(|k| FIXED_KINDS.contains(k))
 }
 
-/// The first of `folder_names` with a word that is `kind`'s, ignoring case
-/// and a plural `s`: "Images" goes into `My images/` or `Image`.
+/// Looser than equality, so "Images" goes into `My images/` or `Image`.
 pub fn matching_folder<'a>(kind: &str, folder_names: &'a [String]) -> Option<&'a str> {
     let stem = |w: &str| w.to_lowercase().trim_end_matches('s').to_string();
     let wanted = stem(kind);
@@ -78,7 +70,6 @@ pub fn matching_folder<'a>(kind: &str, folder_names: &'a [String]) -> Option<&'a
 mod tests {
     use super::KINDS;
 
-    /// The quoted strings in `text`.
     fn quoted(text: &str) -> Vec<&str> {
         text.split('"').skip(1).step_by(2).collect()
     }

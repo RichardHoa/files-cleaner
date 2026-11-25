@@ -231,7 +231,6 @@ fn skips_never_touch_paths_from_the_config() {
     assert_eq!(result.skipped, 2);
 }
 
-/// The warning shown before scanning `root`, which must have one.
 fn warning(root: &Path, home: &Path) -> String {
     scan_root_warning(root, &empty_config(home))
         .unwrap_or_else(|| panic!("expected a warning about {}", root.display()))
@@ -376,8 +375,8 @@ fn warns_about_the_startup_disk_root_as_the_scan_root() {
 #[test]
 #[cfg(target_os = "macos")]
 fn a_folder_on_a_disk_under_volumes_can_be_scanned() {
-    // The startup disk also appears under /Volumes; reach the test folder
-    // through it, as if it were on an external disk.
+    // The startup disk also appears under /Volumes, so it can stand in for an
+    // external disk.
     let Some(disk) = fs::read_dir("/Volumes")
         .unwrap()
         .map(|d| d.unwrap().path())

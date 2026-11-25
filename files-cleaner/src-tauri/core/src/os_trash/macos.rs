@@ -1,5 +1,3 @@
-//! The macOS System Trash: NSFileManager.
-
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -10,9 +8,8 @@ use crate::executor::move_without_overwriting;
 
 pub const PLACE: &str = "Trash";
 
-/// Whether a disk has a Trash hasn't been checked against a real one (ticket
-/// 01), and asking without creating it could say no for a disk that would
-/// make one. So only `trash` decides, and this never blocks.
+/// Asking without creating a Trash could say no for a disk that would make one,
+/// so only `trash` decides.
 pub fn blocked(_folder: &Path) -> Option<String> {
     None
 }

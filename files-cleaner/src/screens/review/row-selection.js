@@ -1,10 +1,6 @@
-// Selecting rows of a list the way Finder does: a click selects one row, Cmd-click (Ctrl-click on
-// Windows and Linux) adds or removes one, and Shift-click selects from the last row clicked to this one.
+// The way Finder selects rows, which users expect on this screen.
 
-/**
- * The selection after a click on `item`, as a new Set. `order` is every item of the list in order,
- * `anchor` the item last clicked without Shift (or null), and `{ toggle, range }` whether Cmd or Shift was held.
- */
+/** `anchor` is the item last clicked without Shift. */
 export function clickSelection(selection, order, anchor, item, { toggle = false, range = false } = {}) {
   const from = anchor === null ? -1 : order.indexOf(anchor);
   if (range && from !== -1) {

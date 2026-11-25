@@ -1,5 +1,3 @@
-// Home: rescan a Recent Scan Root or pick a folder, open Rules or Settings, and see the latest Sessions.
-// File › New Scan and File › Scan Recent come here to start one; while a scan runs they're greyed out.
 import {
   cancelScan,
   describeError,
@@ -22,7 +20,6 @@ import { showStatus, showWarning } from "../../shared/status.js";
 
 const LATEST_SESSIONS = 3;
 
-/** `start` is `{ pick: true }` to pick a folder to scan at once, or `{ folder }` to scan it (see main.js). */
 export function render(root, nav, start = null) {
   const badge = el("button", { type: "button", className: "config-badge" });
   const rulesButton = el("button", { type: "button", className: "config-badge", title: "How files are sorted at every scan" }, "Rules");
@@ -49,7 +46,7 @@ export function render(root, nav, start = null) {
 
   let scanning = false;
   setScreenMenu(() => (scanning ? { newScan: null, recent: [] } : {}));
-  // Set once Cancel was clicked during the scan: Home stays as it was, with nothing kept.
+  // Home stays as it was, with nothing kept.
   let cancelled = false;
   const cancel = () => {
     if (cancelled) return;
@@ -65,14 +62,12 @@ export function render(root, nav, start = null) {
     if (event.key === "Escape") cancel();
   };
 
-  /** Scans `folder`, after the protected-path warning if it has one, then shows the review; Cancel or Escape stops it. */
   const startScan = async (folder) => {
     if (scanning) return;
     scanning = true;
     refreshMenu();
     tiles.classList.add("busy");
     try {
-      // A protected folder can still be scanned, once the user has read why it's protected.
       const warning = await scanRootWarning(folder);
       if (warning && !(await confirmScan(status, warning))) {
         status.replaceChildren();
@@ -116,7 +111,6 @@ export function render(root, nav, start = null) {
   else if (start?.folder) startScan(start.folder);
 }
 
-/** The Settings button, which also says when the config has an error, spelt out below. */
 async function showConfig(badge, errorLine) {
   try {
     await loadConfig();
@@ -132,7 +126,6 @@ async function showConfig(badge, errorLine) {
   }
 }
 
-/** A tile per Recent Scan Root, then the "Pick folder" tile. */
 async function showTiles(node, startScan, pick) {
   const pickTile = el(
     "button",
@@ -194,7 +187,6 @@ function recentTile({ path, lastScanned, exists }, startScan, redraw) {
   return tile;
 }
 
-/** The latest Sessions, with "See all" once there are any; an Undo's result shows above them. */
 async function showSessions(node, seeAll, nav, undoResult = null) {
   let page;
   try {
@@ -215,7 +207,6 @@ async function showSessions(node, seeAll, nav, undoResult = null) {
   node.replaceChildren(...(undoResult ? undoSections(undoResult, pathSeparator) : []), list);
 }
 
-/** Shows `warning` in `node` with "Scan anyway" and "Cancel"; resolves to whether to scan. */
 function confirmScan(node, warning) {
   return new Promise((resolve) => {
     const scanAnyway = el("button", { type: "button", className: "primary" }, "Scan anyway");

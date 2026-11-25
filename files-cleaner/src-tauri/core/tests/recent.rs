@@ -5,8 +5,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use files_cleaner_core::{recent_scan_roots, record_recent_scan_root, remove_recent_scan_root};
 use tempfile::TempDir;
 
-/// An app data folder with a folder per name in it, standing in for Scan
-/// Roots; returns it, the store's path and each folder's path.
 fn setup(names: &[&str]) -> (TempDir, PathBuf, Vec<PathBuf>) {
     let dir = TempDir::new().unwrap();
     let folders = names
@@ -132,7 +130,7 @@ fn the_store_is_created_with_its_folder_and_survives_reopening() {
 
     record_recent_scan_root(&store, &folder).unwrap();
 
-    // Nothing is cached: a fresh read, as after a restart, finds it.
+    // A fresh read, as after a restart.
     assert!(store.exists());
     assert_eq!(paths(&store), [folder]);
 }

@@ -1,4 +1,4 @@
-// Inline SVG icons, drawn on a 24×24 grid in the text colour (ADR-0003: no icon library).
+// Inline, as there is no icon library (ADR-0003).
 const SVG = "http://www.w3.org/2000/svg";
 
 const FOLDER = "M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z";
@@ -21,7 +21,7 @@ const PATHS = {
     "M4 7h9 M17 7h3 M4 12h3 M11 12h9 M4 17h11 M19 17h1 M17 7a2 2 0 1 1-4 0a2 2 0 1 1 4 0 M11 12a2 2 0 1 1-4 0a2 2 0 1 1 4 0 M19 17a2 2 0 1 1-4 0a2 2 0 1 1 4 0",
 };
 
-/** The `name` icon as an `<svg>`. Decorative: say what it means in text beside it. */
+/** Decorative: say what it means in text beside it. */
 export function icon(name, className = "") {
   const svg = document.createElementNS(SVG, "svg");
   svg.setAttribute("viewBox", "0 0 24 24");

@@ -1,5 +1,4 @@
-//! The Files Cleaner core: everything except the UI, with no Tauri
-//! dependency (ADR-0003). The public functions here are the test seam.
+//! No UI and no Tauri (ADR-0003). The public functions here are the test seam.
 
 mod atomic_file;
 mod clash;

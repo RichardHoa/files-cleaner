@@ -1,18 +1,9 @@
-// The steps after picking a Scan Root, in order: the scan, finding its Duplicate Groups, then the review
-// screen with both, which reads the files for Suggested Folders from that same scan.
-// Kept apart from the screens, and given the commands it needs, so the order can be tested.
+// Apart from the screens and given its commands, so the order can be tested.
 import { count, formatSize, plural } from "./shared/format.js";
 
-/**
- * The step flow over `api`, `{ scan, findDuplicates }` as in api.js, showing each step's screen with
- * `nav`. Each step rejects with the command's error, for the screen to show.
- */
 export function stepFlow(api, nav) {
   return {
-    /**
-     * Scans `scanRoot` and finds its Duplicate Groups, calling `onProgress(line)` with a status line as
-     * each goes, then shows the review screen, unless `cancelled()` by then.
-     */
+    /** `cancelled()` is asked again at the end, as Cancel may come too late to stop the commands. */
     async scanFolder(scanRoot, onProgress, cancelled = () => false) {
       const result = await api.scan(scanRoot, (progress) => onProgress(describeScanProgress(scanRoot, progress)));
       const duplicates = await api.findDuplicates((progress) => onProgress(describeDuplicateProgress(progress)));
@@ -21,13 +12,11 @@ export function stepFlow(api, nav) {
   };
 }
 
-/** The scan's progress, for a status line: `{ found, folders, skipped, current }` while scanning `folder`. */
 export function describeScanProgress(folder, { found, folders, skipped, current }) {
   const counts = [`${plural(found, "file")} found`, `${plural(folders, "folder")} read`, `${count(skipped)} protected skipped`];
   return `Scanning ${folder}…\n${counts.join(" · ")}\n${current}`;
 }
 
-/** Finding duplicates' progress, for a status line: `{ phase, finished, total, current }` as in api.js. */
 export function describeDuplicateProgress({ phase, finished, total, current }) {
   const done =
     phase === "comparing"

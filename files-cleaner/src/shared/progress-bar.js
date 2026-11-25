@@ -1,12 +1,9 @@
-// A progress bar that glides between updates instead of jumping. Progress arrives every so often (each
-// file read, or every 100–250 ms), so the bar takes about as long to reach a new value as that value took
-// to come, which keeps steady progress moving without pauses.
+// Glides for about as long as the update took to come, so steady progress moves without pauses.
 import { el } from "./dom.js";
 
-/** The longest the bar takes to reach a new value, so it never falls far behind. */
+/** In ms, so it never falls far behind. */
 const MAX_GLIDE = 1500; // ms
 
-/** `{ node, set(value, max) }`: a bar, moving back and forth until `set` is given a `max` above 0. */
 export function progressBar(className = "") {
   const fill = el("div", { className: "progress-fill" });
   const node = el("div", { className: `progress indeterminate ${className}`.trim(), role: "progressbar" }, fill);

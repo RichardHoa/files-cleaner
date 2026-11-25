@@ -1,19 +1,7 @@
-//! The Grouping Models: two official GGUF files, pinned by
-//! revision, size and SHA-256, downloaded on the user's say-so into a
-//! folder in the app data folder. The download runs on its own thread, so
-//! the user can scan and clean meanwhile.
-//!
-//! Each model downloads into `<file>.part` through `downloads`, the app's
-//! only network access, resumed with an HTTP Range request after a pause or
-//! an interruption, and is moved to `<file>` only once its SHA-256 matches.
-//! So a model is installed exactly when `<file>` exists, and the state can
-//! always be read from the folder.
-//!
-//! The user may also pick a model to describe files in place of the first
-//! linked from Hugging Face. It downloads the same way into
-//! `custom/`, beside a `source.json` saying where from, and is moved into
-//! place only once it has described a sample file; its SHA-256 is shown,
-//! never checked. At most one is kept, and the default stays on disk.
+//! A model is installed exactly when its file exists: it downloads into `.part`
+//! and is moved only once its SHA-256 matches, so the state can always be read
+//! from the folder. The user's own model has no known hash, so it must describe
+//! a sample file instead.
 
 use std::fs::{self, File};
 use std::io::{self, Read};
@@ -30,17 +18,15 @@ use tauri::{AppHandle, Emitter};
 
 use crate::downloads;
 
-/// The event the download's status is sent on, to every window.
 pub const STATUS_EVENT: &str = "grouping-models";
 
-/// How often, at most, the status is sent while downloading.
+/// So progress doesn't flood the UI.
 const STATUS_EVERY: Duration = Duration::from_millis(250);
 
-/// One model file, pinned at a fixed repository revision, never a branch.
+/// Pinned at a revision, never a branch, so the hash keeps matching.
 struct Model {
-    /// What it does, for error messages: "the file-reading model".
+    /// For error messages: "the file-reading model".
     role: &'static str,
-    /// The model's own name, shown in Settings.
     name: &'static str,
     file_name: &'static str,
     url: &'static str,
@@ -67,12 +53,10 @@ const MODELS: [Model; 2] = [
     },
 ];
 
-/// The picked describing model's folder, inside the models folder.
 const CUSTOM_FOLDER: &str = "custom";
-/// Where the picked model comes from, inside its folder.
 const SOURCE_FILE: &str = "source.json";
 
-/// What a running download has been asked to do, checked between reads.
+/// Checked between reads, so pause and cancel take effect quickly.
 const RUN: u8 = 0;
 const PAUSE: u8 = 1;
 const CANCEL: u8 = 2;
@@ -86,22 +70,16 @@ pub enum State {
     Installed,
 }
 
-/// The Grouping Models as the UI shows them.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Status {
     pub state: State,
-    /// Bytes on disk so far, out of `total`.
     pub downloaded: u64,
     pub total: u64,
-    /// Why the last download stopped, when it failed rather than finished.
     pub error: Option<String>,
-    /// Each model, the file-reading one first.
     pub models: Vec<ModelStatus>,
-    /// The model the user picked to describe files, while it downloads or
-    /// once it's in; `None` when there's none.
+    /// `None` when the user picked none.
     pub custom: Option<CustomStatus>,
-    /// Why the picked model's download stopped, or why it was refused.
     pub custom_error: Option<String>,
 }
 
@@ -110,31 +88,24 @@ pub struct Status {
 pub enum CustomState {
     Downloading,
     Paused,
-    /// Downloaded, and being asked to describe the sample file.
     Checking,
     Installed,
 }
 
-/// The model the user picked, as Settings shows it.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CustomStatus {
     pub state: CustomState,
-    /// Its file's name.
     pub name: String,
-    /// The Hugging Face link it was picked by.
     pub link: String,
     pub downloaded: u64,
     pub total: u64,
-    /// Its SHA-256 in hex, once installed.
     pub sha256: Option<String>,
-    /// Its file, or its partial file while downloading.
+    /// The partial file while downloading.
     pub path: Option<PathBuf>,
-    /// Whether it describes files now, rather than the default.
     pub in_use: bool,
 }
 
-/// Where the picked model comes from, kept in `source.json` beside it.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Source {
@@ -146,9 +117,7 @@ struct Source {
     sha256: Option<String>,
 }
 
-/// One file to download: where from, and where to.
 struct Target<'a> {
-    /// What it does, for error messages.
     role: &'a str,
     url: &'a str,
     size: u64,
@@ -156,18 +125,15 @@ struct Target<'a> {
     partial: PathBuf,
 }
 
-/// One model as Settings shows it.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelStatus {
     pub name: &'static str,
-    /// Bytes on disk, installed or partly downloaded.
     pub size: u64,
-    /// Its file, or its partial file while downloading; `None` when neither is on disk.
+    /// The partial file while downloading; `None` when neither is on disk.
     pub path: Option<PathBuf>,
 }
 
-/// Kept by the app: the models folder and the running download, if any.
 pub struct GroupingModels {
     folder: PathBuf,
     app: AppHandle,
@@ -176,22 +142,16 @@ pub struct GroupingModels {
 
 #[derive(Default)]
 struct Inner {
-    /// The running download's instruction (RUN, PAUSE or CANCEL), until its thread ends.
     running: Option<Arc<AtomicU8>>,
     error: Option<String>,
-    /// The same, for the picked describing model's download.
     custom_running: Option<Arc<AtomicU8>>,
-    /// Whether the picked model is being asked to describe the sample file.
     checking: bool,
     custom_error: Option<String>,
 }
 
-/// Why a download stopped before finishing.
 enum Stopped {
-    /// Pause or cancel was asked for.
     Asked,
     Failed(String),
-    /// The picked model couldn't describe the sample file, for this reason.
     Refused(String),
 }
 
@@ -204,14 +164,12 @@ impl GroupingModels {
         }
     }
 
-    /// True once both models are downloaded and checked.
     pub fn installed(&self) -> bool {
         MODELS.iter().all(|model| self.file(model).is_file())
     }
 
-    /// The two model files, the card writer's then the embedding model's,
-    /// once both are installed. The card writer is the one the user picked,
-    /// `describing_model` being its link, or the default when that's `None`.
+    /// Both must be installed. `describing_model` is the picked one's link, or
+    /// `None` for the default.
     pub fn files(&self, describing_model: Option<&str>) -> Result<(PathBuf, PathBuf), String> {
         if !self.installed() {
             return Err("Download the grouping models first".to_string());
@@ -296,7 +254,8 @@ impl GroupingModels {
         } else {
             fs::metadata(&partial).map_or(0, |m| m.len().min(source.size))
         };
-        // Unreadable settings are the default's.
+        // Unreadable settings can't name the picked model, so the default is in
+        // use.
         let in_use = installed
             && crate::read_config(&self.app)
                 .is_ok_and(|loaded| loaded.config.describing_model.as_ref() == Some(&source.link));
@@ -323,8 +282,8 @@ impl GroupingModels {
         }
     }
 
-    /// Starts the download, or resumes it from where it stopped, after
-    /// checking there's room for what's left plus about 10%.
+    /// Asks for about 10% more room than is left to download, so the disk isn't
+    /// filled up.
     pub fn download(self: &Arc<Self>) -> Result<Status, String> {
         let mut inner = self.inner.lock().unwrap();
         if let Some(asked) = &inner.running {
@@ -357,13 +316,11 @@ impl GroupingModels {
         Ok(status)
     }
 
-    /// Stops the download, keeping what's downloaded so far.
     pub fn pause(&self) -> Status {
         self.ask(PAUSE)
     }
 
-    /// Cancels the download, or removes the installed models: either way,
-    /// every model file goes, the picked describing model's too.
+    /// The picked describing model goes too.
     pub fn remove(&self) -> Result<Status, String> {
         // All under the lock, so a download can't start, or the running one end, in between.
         let mut inner = self.inner.lock().unwrap();
@@ -390,8 +347,7 @@ impl GroupingModels {
         status
     }
 
-    /// The download thread: fetches each model in turn until all are in,
-    /// or it's paused, cancelled, or fails.
+    /// On its own thread, so the user can scan and clean meanwhile.
     fn work(&self, asked: &AtomicU8) {
         let mut last_sent = Instant::now();
         let mut progress = || {
@@ -425,8 +381,6 @@ impl GroupingModels {
         self.send(&status);
     }
 
-    /// Downloads `model` into its partial file, from where that stopped,
-    /// then moves it into place if its SHA-256 matches.
     fn fetch_default(
         &self,
         model: &Model,
@@ -455,10 +409,7 @@ impl GroupingModels {
             .map_err(|e| Stopped::Failed(format!("Downloading the {} failed: {e}", model.role)))
     }
 
-    /// Starts downloading the describing model at the Hugging Face `link`,
-    /// in place of any picked before, or resumes the one stopped when
-    /// `link` is `None`. A link that isn't to one public `.gguf` file is
-    /// refused, as is one the disk has no room for.
+    /// `None` resumes the stopped one. At most one picked model is kept.
     pub fn download_custom(self: &Arc<Self>, link: Option<String>) -> Result<Status, String> {
         let source = match link {
             Some(link) => {
@@ -524,7 +475,6 @@ impl GroupingModels {
         Ok(status)
     }
 
-    /// Pauses the picked model's download, keeping what's downloaded so far.
     pub fn pause_custom(&self) -> Status {
         let inner = self.inner.lock().unwrap();
         if let Some(asked) = &inner.custom_running {
@@ -536,8 +486,6 @@ impl GroupingModels {
         status
     }
 
-    /// Cancels the picked model's download, or removes it: the default
-    /// describes files again.
     pub fn remove_custom(&self) -> Result<Status, String> {
         let mut inner = self.inner.lock().unwrap();
         self.remove_custom_locked(&mut inner)?;
@@ -547,8 +495,6 @@ impl GroupingModels {
         Ok(status)
     }
 
-    /// Describes files with the picked model, once it's in, or with the
-    /// default when `picked` is false. Nothing is downloaded either way.
     pub fn use_custom(&self, picked: bool) -> Result<Status, String> {
         let link = match picked {
             true => Some(
@@ -566,8 +512,7 @@ impl GroupingModels {
         Ok(status)
     }
 
-    /// Cancels the picked model's download, or deletes it and goes back to
-    /// the default; `inner` is held, so no download starts in between.
+    /// The caller holds the lock, so no download starts in between.
     fn remove_custom_locked(&self, inner: &mut Inner) -> Result<(), String> {
         inner.custom_error = None;
         if let Some(asked) = &inner.custom_running {
@@ -578,7 +523,6 @@ impl GroupingModels {
         self.delete_custom().map_err(|e| e.to_string())
     }
 
-    /// Switches the setting back to the default model, if it names another.
     fn use_default_if_custom(&self) -> Result<(), String> {
         // Settings that can't be read can't name the picked model either.
         let picked = crate::read_config(&self.app)
@@ -590,9 +534,6 @@ impl GroupingModels {
         Ok(())
     }
 
-    /// The thread downloading the picked model: fetches it, then has it
-    /// describe the sample file, until it's in, refused, or it's paused,
-    /// cancelled or fails.
     fn work_custom(&self, source: &Source, asked: &AtomicU8) {
         let mut last_sent = Instant::now();
         let mut progress = || {
@@ -643,8 +584,7 @@ impl GroupingModels {
         self.send(&status);
     }
 
-    /// Has the downloaded picked model describe the sample file and, if it
-    /// can, moves it into place with its SHA-256 and switches to it.
+    /// Switched to only once it has proved it can describe a file.
     fn accept_custom(
         &self,
         source: &Source,
@@ -677,15 +617,13 @@ impl GroupingModels {
         Ok(())
     }
 
-    /// Where the picked model comes from, if there is one.
     fn source(&self) -> Option<Source> {
         let bytes = fs::read(self.custom_folder().join(SOURCE_FILE)).ok()?;
         serde_json::from_slice(&bytes).ok()
     }
 
-    /// The picked model's file. Its name starts with a hash of where it
-    /// comes from, so the cards it writes, which are stored by its file
-    /// name, are never those of another model with the same name.
+    /// Cards are stored by the model's file name, so a hash of its link keeps
+    /// same-named models apart.
     fn custom_file(&self, source: &Source) -> PathBuf {
         let from: String = Sha256::digest(source.url.as_bytes())[..4]
             .iter()
@@ -706,7 +644,6 @@ impl GroupingModels {
         }
     }
 
-    /// Bytes of `model` on disk, installed or partial.
     fn on_disk(&self, model: &Model) -> u64 {
         if self.file(model).is_file() {
             return model.size;
@@ -743,8 +680,6 @@ impl GroupingModels {
     }
 }
 
-/// Downloads `target` into its partial file, from where that stopped, and
-/// returns its SHA-256; moving it into place is the caller's.
 fn fetch(
     target: &Target,
     asked: &AtomicU8,
@@ -764,15 +699,12 @@ fn fetch(
         .ok_or(Stopped::Asked)
 }
 
-/// The partial file `file` downloads into.
 fn partial_of(file: &Path) -> PathBuf {
     let mut name = file.as_os_str().to_owned();
     name.push(".part");
     PathBuf::from(name)
 }
 
-/// The file's SHA-256 in lower-case hex, or None if pause or cancel was
-/// asked for while reading it.
 fn sha256(path: &Path, asked: &AtomicU8) -> io::Result<Option<String>> {
     // A model file in the app's own data folder; no path comes from a web request.
     // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
@@ -798,7 +730,7 @@ fn sha256(path: &Path, asked: &AtomicU8) -> io::Result<Option<String>> {
     ))
 }
 
-/// `bytes` as "1.8 GB", in the decimal units macOS and Windows show for disk space.
+/// Decimal units, as macOS and Windows show disk space.
 fn gigabytes(bytes: u64) -> String {
     format!("{:.1} GB", bytes as f64 / 1e9)
 }

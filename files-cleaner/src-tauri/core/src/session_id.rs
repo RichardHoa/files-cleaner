@@ -1,11 +1,8 @@
-//! Session IDs: the UTC time a Session started, such as
-//! `2026-10-14_09-05-03-123Z`, then `…Z-002`, `…Z-003`, … for Sessions
-//! started in the same millisecond. They are valid file names on every OS,
-//! and sorting them as text sorts them by start time.
+//! UTC start times that are valid file names on every OS and sort by start time
+//! as text. The suffix tells apart Sessions started in the same millisecond.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// The IDs to try, in order, for a Session started at `time`.
 pub fn candidates(time: SystemTime) -> impl Iterator<Item = String> {
     let base = base(time);
     (1..).map(move |n: u32| {
@@ -17,8 +14,7 @@ pub fn candidates(time: SystemTime) -> impl Iterator<Item = String> {
     })
 }
 
-/// Whether `id` has the shape of a Session ID, so it can safely name a
-/// Journal file. IDs come from the UI.
+/// IDs come from the UI and reach file names, so they're checked first.
 pub fn is_valid(id: &str) -> bool {
     !id.is_empty()
         && id
@@ -38,8 +34,7 @@ fn base(time: SystemTime) -> String {
     format!("{year:04}-{month:02}-{day:02}_{hour:02}-{minute:02}-{second:02}-{ms:03}Z")
 }
 
-/// The (year, month, day) `days` after 1970-01-01, in the proleptic
-/// Gregorian calendar (Howard Hinnant's `civil_from_days`).
+/// Howard Hinnant's `civil_from_days`.
 fn civil_from_days(days: i64) -> (i64, u32, u32) {
     let z = days + 719_468;
     let era = z.div_euclid(146_097);

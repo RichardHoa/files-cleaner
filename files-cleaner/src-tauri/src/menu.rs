@@ -1,17 +1,13 @@
-//! The native menus: the menu bar, the same on every OS (Tauri shows it in
-//! the window on Windows and Linux), and the right-click menus the UI
-//! describes. Clicks reach the UI as events: `menu` with the clicked item's
-//! id, `context-menu` with the chosen item's place in the right-click menu.
+//! Native menus on every OS. Clicks reach the UI as `menu` and `context-menu`
+//! events.
 
 use serde::Deserialize;
 use tauri::menu::{IsMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, Window};
 
-/// The ids of right-click menu items start with this, then their place.
 const CONTEXT_PREFIX: &str = "context:";
 
-/// The menu bar's items the UI enables, by the id it knows them by. Each
-/// id that names a shortcut gets that shortcut (see `accelerator`).
+/// Ids must match `MENU_BAR_ITEMS` in menu-items.js.
 const ITEMS: [(&str, &str); 10] = [
     ("newScan", "New Scan…"),
     ("selectAll", "Select All"),
@@ -25,8 +21,7 @@ const ITEMS: [(&str, &str); 10] = [
     ("help", "Introduction"),
 ];
 
-/// The key binding of the shortcut `name`, as the UI names it (see
-/// `SHORTCUTS` in menu-items.js), or `None` if it has none.
+/// Names must match `SHORTCUTS` in menu-items.js.
 fn accelerator(name: &str) -> Option<&'static str> {
     let mac = cfg!(target_os = "macos");
     match name {
@@ -49,7 +44,6 @@ fn literal(text: &str) -> String {
     text.replace('&', "&&")
 }
 
-/// The menu bar's items the UI enables and fills, kept to change them.
 pub struct MenuBar {
     items: Vec<MenuItem<tauri::Wry>>,
     recent: Submenu<tauri::Wry>,
@@ -57,9 +51,6 @@ pub struct MenuBar {
     merge_into: Submenu<tauri::Wry>,
 }
 
-/// What applies now, from the UI: the ids of the items enabled, and the
-/// labels of the Recent Scan Roots, the Move To… folders and the Merge
-/// Into… folders, each clicked as `recent:0`, `moveTo:0` and so on.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MenuState {
@@ -69,7 +60,6 @@ pub struct MenuState {
     merge_into: Vec<String>,
 }
 
-/// One item of a right-click menu, as the UI describes it.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContextItem {
@@ -80,14 +70,13 @@ pub struct ContextItem {
     separator: bool,
 }
 
-/// Builds the menu bar, every item greyed out until the UI says what
-/// applies, and sends each click to the UI.
+/// Greyed out until the UI says what applies.
 pub fn install(app: &AppHandle) -> tauri::Result<()> {
     let items = ITEMS
         .iter()
         .map(|(id, label)| {
-            // Return is never bound on Windows, where a disabled item's key
-            // may still be taken from the window: it is only written.
+            // Windows may take a disabled item's key from the window, so Return
+            // is only written there, never bound.
             if *id == "rename" && cfg!(windows) {
                 return MenuItem::with_id(app, *id, format!("{label}\tEnter"), false, None::<&str>);
             }
@@ -104,8 +93,8 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
     let file = Submenu::with_items(app, "File", true, &[item("newScan"), &recent])?;
     #[cfg(not(target_os = "macos"))]
     file.append_items(&[&separator()?, &PredefinedMenuItem::quit(app, None)?])?;
-    // Cut, Copy and Paste keep working in text fields: on macOS their
-    // shortcuts come from the menu bar.
+    // On macOS, Cut, Copy and Paste in text fields only work through the menu
+    // bar.
     let edit = Submenu::with_items(
         app,
         "Edit",
@@ -187,7 +176,6 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Tells the UI which menu bar item, or right-click menu item, was clicked.
 fn send_click(app: &AppHandle, event: MenuEvent) {
     let id = event.id().as_ref();
     let _ = match id.strip_prefix(CONTEXT_PREFIX) {
@@ -196,8 +184,6 @@ fn send_click(app: &AppHandle, event: MenuEvent) {
     };
 }
 
-/// Greys out the menu bar's items that don't apply and lists the ones that
-/// change, from what the UI says applies now.
 #[tauri::command]
 pub fn set_menu_state(
     app: AppHandle,
@@ -212,8 +198,6 @@ pub fn set_menu_state(
     fill(&app, &bar.merge_into, "mergeInto", &state.merge_into)
 }
 
-/// Lists `labels` in `submenu`, as `list:0`, `list:1` and so on, greyed out
-/// when there are none.
 fn fill(
     app: &AppHandle,
     submenu: &Submenu<tauri::Wry>,
@@ -235,8 +219,6 @@ fn fill(
     submenu.set_enabled(!labels.is_empty())
 }
 
-/// Shows `items` as the OS's own right-click menu at the pointer. The item
-/// chosen, if any, reaches the UI as a `context-menu` event.
 #[tauri::command]
 pub fn show_context_menu(window: Window, items: Vec<ContextItem>) -> tauri::Result<()> {
     let menu = Menu::new(&window)?;
@@ -246,8 +228,8 @@ pub fn show_context_menu(window: Window, items: Vec<ContextItem>) -> tauri::Resu
     window.popup_menu(&menu)
 }
 
-/// The right-click menu items for `items`, their ids `context:` and their
-/// place under `parent`, "1.0" for the first item of the second's submenu.
+/// Ids are places in the menu, "1.0" for a submenu's first, so the UI can find
+/// the action again.
 fn context_items(
     window: &Window,
     items: &[ContextItem],

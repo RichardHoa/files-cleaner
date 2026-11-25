@@ -1,4 +1,3 @@
-/* Session rows, on Home and History */
 .session {
   padding: var(--space-2);
   border-radius: var(--radius-md);
@@ -22,7 +21,7 @@
   container-type: inline-size;
 }
 
-/* Too narrow for the fixed tracks (about 770px with padding): let the row wrap instead. */
+/* Too narrow for the fixed tracks (about 770px with padding). */
 @container (width < 780px) {
   .session-row {
     display: flex;

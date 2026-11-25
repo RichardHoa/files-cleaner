@@ -134,7 +134,6 @@ test("files left where they are go by kind, Other last, each kind newest first",
   ]);
 });
 
-/** A Duplicate Group of three copies, the first read into the folder "Labs", with nothing left where it is. */
 function threeCopies() {
   const [duplicate] = initialDuplicates([{ size: 3, copies: [{ path: "/d/a.pdf" }, { path: "/d/x/a.pdf" }, { path: "/d/y/a.pdf" }] }]);
   const choices = initialChoices([{ name: "Labs", files: ["/d/b.pdf", "/d/a.pdf"], existing: null }]);

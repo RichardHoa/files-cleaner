@@ -3,7 +3,6 @@ import { test } from "node:test";
 import { folderTally, planChoices, planDuplicates } from "../src/screens/review/review-choices.js";
 import { ReviewState } from "../src/screens/review/review-state.js";
 
-/** A Review state whose files were read into the folders "IELTS", holding a.pdf and b.pdf, and "Labs", holding c.pdf. */
 function twoFolders() {
   const paths = ["/d/a.pdf", "/d/b.pdf", "/d/c.pdf"];
   const state = new ReviewState({ root: "/d", entries: paths.map((path) => ({ path, size: 1, modified: 0 })) }, []);

@@ -1,6 +1,5 @@
-//! The real System Trash of the OS the tests run on, which every other test
-//! fakes. Ignored by default, so a `cargo test` never fills the developer's
-//! Trash; CI runs them on each OS with `cargo test -- --ignored`.
+//! Ignored by default, so a `cargo test` never fills the developer's Trash; CI
+//! runs them with `-- --ignored`.
 
 mod common;
 
@@ -47,8 +46,8 @@ fn a_run_trashes_a_copy_to_the_system_trash_and_undo_puts_it_back() {
     assert_eq!(fs::read_to_string(&copy).unwrap(), "same contents");
 }
 
-/// On a disk other than the home folder's, the item goes to that disk's own
-/// Trash folder, recorded relative to the top of the disk.
+/// An item on another disk goes to that disk's own Trash, recorded relative to
+/// its top.
 #[test]
 #[cfg(target_os = "linux")]
 #[ignore = "uses the real System Trash; run on CI"]

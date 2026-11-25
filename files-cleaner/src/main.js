@@ -1,6 +1,4 @@
-// Shows one screen at a time. Each screen module exports `render(root, nav, ...args)`
-// and builds its own DOM inside `root`. The Review screen is kept while another is shown from the menu bar,
-// so View › Review goes back to it, until it's left for good or another scan starts.
+// Review is kept while another screen shows, so View › Review can go back to it unchanged.
 import * as history from "./screens/history/history.js";
 import * as home from "./screens/home/home.js";
 import * as review from "./screens/review/review.js";
@@ -15,13 +13,12 @@ import { stepFlow } from "./steps.js";
 
 const root = document.querySelector("#app");
 
-// The Review screen while it can be gone back to: `{ nodes, menu }`, its page and its menu bar items, and
-// whether it's shown now.
+// `{ nodes, menu }` of the Review screen, while it can be gone back to.
 let kept = null;
 let reviewShown = false;
 
 const nav = {
-  /** `start` is `{ pick: true }` to pick a folder to scan at once, or `{ folder }` to scan it. */
+  /** `start` comes from the menu bar: `{ pick: true }` or `{ folder }`. */
   home: (start = null) => show(home, start),
   review: (result, duplicates) => {
     dropKeptReview();
@@ -29,32 +26,27 @@ const nav = {
     reviewShown = true;
     kept = { nodes: null, menu: null };
   },
-  /** Goes back to the Review screen kept, as it was left. */
   backToReview: () => {
     if (!kept || reviewShown) return;
     root.replaceChildren(...kept.nodes);
     reviewShown = true;
     setScreenMenu(kept.menu);
   },
-  /** Forgets the Review screen, left by its Cancel or its Run: nothing goes back to it. */
   leaveReview: () => {
     kept = null;
     reviewShown = false;
   },
   history: (page) => show(history, page),
-  /**
-   * `from` is `{ page }` when opened from that History page, so Back returns there; `result`
-   * opens it with an action's result, `{ summary, action, done }` as for `describeWarning`, as after running a Plan.
-   */
+  /** `from` is the History page to go Back to; `result` an action's `{ summary, action, done }`. */
   session: (sessionId, from = null, result = null) => show(session, sessionId, from, result),
   settings: () => show(settings),
-  /** `from` is "settings" when opened from Settings, so Back returns there. */
+  /** `from` says where Back returns. */
   rules: (from = "home") => show(rules, from),
 };
 // A new scan ends the Review kept, and the reading it may still be doing.
 nav.steps = stepFlow({ findDuplicates, scan: (...args) => (dropKeptReview(), scan(...args)) }, nav);
 
-/** Forgets the Review screen kept while another is shown, stopping its reading. */
+/** Its reading would otherwise go on unseen. */
 function dropKeptReview() {
   if (kept && !reviewShown) cancelAnalysis().catch(() => {});
   nav.leaveReview();
@@ -70,7 +62,7 @@ function show(screen, ...args) {
   showRecent();
 }
 
-// The Recent Scan Roots, for File › Scan Recent, read again whenever the screen changes.
+// Read again whenever the screen changes, as any scan may have changed it.
 let recent = [];
 async function showRecent() {
   try {

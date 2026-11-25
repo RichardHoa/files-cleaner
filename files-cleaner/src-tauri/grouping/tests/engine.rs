@@ -12,7 +12,6 @@ use files_cleaner_grouping::{
     Models, Question, Settings, Vector,
 };
 
-/// Cards and vectors fixed by what each file says.
 struct FakeModels;
 
 impl Models for FakeModels {
@@ -157,8 +156,7 @@ fn a_file_without_an_extension_is_never_a_loose_file() {
     assert!(!grouping.ungrouped.contains(&readme));
 }
 
-/// Each file's topic is what it says before `|`; every vector points its own
-/// way, so only topics can group files.
+/// Every vector points its own way, so only topics can group files.
 struct TopicModels {
     embedded: usize,
 }
@@ -193,7 +191,6 @@ impl Models for TopicModels {
             .collect())
     }
 
-    /// The first folder holding a topic that shares a word with the file's.
     fn place(&mut self, question: &Question) -> Result<Option<usize>, String> {
         let words: Vec<String> = question
             .card
@@ -425,7 +422,6 @@ fn a_file_left_out_goes_where_the_model_places_it_and_stays_there_on_regroup() {
     }
 }
 
-/// Cards as `FakeModels` writes them, setting `stop` once `left` more are written.
 struct StopAfter<'a> {
     stop: &'a AtomicBool,
     left: usize,
@@ -532,7 +528,7 @@ fn clearing_a_damaged_store_starts_it_again() {
     assert!(!store_dir.path().join("cards.sqlite").exists());
 }
 
-/// Every file reads alike but has no topic, as when the LLM finds none.
+/// As when the LLM finds no topic.
 struct TopiclessModels;
 
 impl Models for TopiclessModels {
@@ -737,7 +733,6 @@ fn a_name_rule_finds_its_word_anywhere_in_any_case_and_accent() {
     assert_eq!(files, expected);
 }
 
-/// `FakeModels`, but placing every file left out in the folder named "Trip".
 struct PlacingInTrip;
 
 impl Models for PlacingInTrip {
@@ -927,7 +922,6 @@ fn a_disabled_rules_files_group_automatically() {
     assert_eq!(folders[0].basis, Basis::Topic);
 }
 
-/// Vectors by subject: a text on a thesis, on taxes, or on neither.
 struct SubjectModels;
 
 impl Models for SubjectModels {

@@ -7,42 +7,34 @@ use serde::{Deserialize, Serialize};
 use crate::atomic_file;
 use crate::rules::{rule_problem, Rule};
 
-/// The config written on first launch and on Reset settings: no Never-Touch Paths until the user adds some.
 pub const EXAMPLE_CONFIG: &str = r#"{
   "neverTouch": []
 }
 "#;
 
-/// A validated config file.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
-    /// The user's home folder, which `~/` paths were expanded against.
     pub home: PathBuf,
     pub never_touch: Vec<PathBuf>,
     pub default_copy_rule: DefaultCopyRule,
     pub grouping: GroupingSettings,
-    /// Whether the user wants a notification when the folders are ready:
-    /// `None` until they're asked, which is only once.
+    /// `None` until the user is asked, which is only once.
     pub notifications: Option<bool>,
-    /// The Hugging Face link of the model the user picked to describe
-    /// files, or `None` for the app's own.
+    /// A Hugging Face link, or `None` for the app's own model.
     pub describing_model: Option<String>,
-    /// The user's Rules, in order: the first enabled one that matches a
-    /// Loose File decides its Suggested Folder.
+    /// In order of priority: the first enabled one that matches a file wins.
     pub rules: Vec<Rule>,
 }
 
-/// How the files are grouped into Suggested Folders: the `grouping` section,
-/// each key defaulting to the value here.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GroupingSettings {
-    /// How closely files must match to share a folder, 0–1.
+    /// 0–1; higher is stricter.
     pub folder_threshold: f32,
-    /// How closely a group must match an existing subfolder to go into it, 0–1.
+    /// 0–1; higher is stricter.
     pub existing_folder_threshold: f32,
-    /// The fewest files a Suggested Folder holds, 2–10.
+    /// 2–10.
     pub smallest_folder: usize,
 }
 
@@ -56,8 +48,6 @@ impl Default for GroupingSettings {
     }
 }
 
-/// One setting changed from the Settings screen. A grouping value of `None`
-/// resets it to the default, taking its key out of the file.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "key", content = "value")]
 pub enum SettingChange {
@@ -66,16 +56,12 @@ pub enum SettingChange {
     FolderThreshold(Option<f32>),
     ExistingFolderThreshold(Option<f32>),
     SmallestFolder(Option<usize>),
-    /// The user's answer when asked about notifications.
     Notifications(bool),
-    /// The Hugging Face link of the model that describes files, or `None`
-    /// for the app's own. Set by the app once the model has passed its check.
+    /// Set by the app only once the model has passed its check.
     DescribingModel(Option<String>),
-    /// The whole ordered list of Rules, from the Rules screen.
     Rules(Vec<Rule>),
 }
 
-/// Which copy of a Duplicate Group starts out kept.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum DefaultCopyRule {
@@ -85,7 +71,6 @@ pub enum DefaultCopyRule {
     ShortestPath,
 }
 
-/// Why a config couldn't be loaded, with where in the file when known.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ConfigError {
     pub message: String,
@@ -111,26 +96,27 @@ impl std::error::Error for ConfigError {}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RawConfig {
-    /// The old Trash Destination setting: Trash always goes to the System
-    /// Trash now, so any value is ignored.
+    /// Retired: Trash always goes to the System Trash now. Still accepted so
+    /// older configs load.
     #[serde(default, rename = "trashDestination")]
     _trash_destination: serde::de::IgnoredAny,
-    /// The old Duplicate Handling setting: running or skipping the
-    /// duplicate step is the choice now, so any value is ignored.
+    /// Retired: running or skipping the duplicate step is the choice now. Still
+    /// accepted so older configs load.
     #[serde(default, rename = "duplicates")]
     _duplicates: serde::de::IgnoredAny,
     #[serde(default)]
     never_touch: Vec<String>,
     #[serde(default)]
     default_copy_rule: DefaultCopyRule,
-    /// The old Rules (ADR 0008): any value is ignored.
+    /// The Rules of ADR 0008, retired. Still accepted so older configs load.
     #[serde(default, rename = "rules")]
     _rules: serde::de::IgnoredAny,
     #[serde(default)]
     grouping: RawGrouping,
     notifications: Option<bool>,
     describing_model: Option<String>,
-    /// The Rules of ADR 0013, under a key of their own.
+    /// Apart from the retired `rules` key, whose values mean something else
+    /// (ADR 0013).
     #[serde(default)]
     sorting_rules: Vec<Rule>,
 }
@@ -143,7 +129,6 @@ struct RawGrouping {
     smallest_folder: Option<usize>,
 }
 
-/// Parses and validates the config JSON. `home` expands `~/` paths.
 pub fn load_config(text: &str, home: &Path) -> Result<Config, ConfigError> {
     let raw: RawConfig = serde_json::from_str(text).map_err(json_error)?;
     let mut never_touch = Vec::new();
@@ -180,8 +165,8 @@ pub fn load_config(text: &str, home: &Path) -> Result<Config, ConfigError> {
     })
 }
 
-/// The grouping settings, with the defaults for keys left out. An
-/// out-of-range value is an error at its key, never clamped.
+/// An out-of-range value is an error, never clamped, so the user's setting
+/// isn't silently changed.
 fn validate_grouping(raw: &RawGrouping, text: &str) -> Result<GroupingSettings, ConfigError> {
     let section = text.find("\"grouping\"").unwrap_or(0);
     let fail = |key: &str, range: &str| {
@@ -218,11 +203,8 @@ fn validate_grouping(raw: &RawGrouping, text: &str) -> Result<GroupingSettings, 
     })
 }
 
-/// Makes `change` to the config file at `path` and returns the config it
-/// now holds. Every key the change doesn't touch is kept as written. A
-/// change that would make the config invalid is refused and nothing is
-/// written; otherwise the file is replaced atomically, through a temporary
-/// file and a rename.
+/// Untouched keys stay as written, and a change that would make the config
+/// invalid is refused before anything is written.
 pub fn save_config(
     path: &Path,
     change: &SettingChange,
@@ -241,7 +223,8 @@ pub fn save_config(
         .ok_or_else(|| plain(&"the config must be a JSON object"))?;
     match change {
         SettingChange::NeverTouch(paths) => {
-            // Paths kept from before keep the way they were written, such as `~/Keep`.
+            // Not expanded, so a path the user wrote as `~/Keep` stays that
+            // way.
             let written: Vec<_> = object
                 .get("neverTouch")
                 .and_then(|v| v.as_array())
@@ -304,15 +287,12 @@ pub fn save_config(
     Ok(config)
 }
 
-/// Puts the config file at `path` back to the example config, whatever is
-/// in it now, even if it can't be read, and returns that config.
+/// Never reads the old file, so it works even when that is broken.
 pub fn reset_config(path: &Path, home: &Path) -> Result<Config, ConfigError> {
     write_atomically(path, EXAMPLE_CONFIG)?;
     load_config(EXAMPLE_CONFIG, home)
 }
 
-/// Replaces the file at `path` with `text`, so a crash mid-write leaves the
-/// old file rather than half a new one.
 fn write_atomically(path: &Path, text: &str) -> Result<(), ConfigError> {
     atomic_file::write_atomically(path, text.as_bytes()).map_err(|e| ConfigError {
         message: e.to_string(),
@@ -321,9 +301,8 @@ fn write_atomically(path: &Path, text: &str) -> Result<(), ConfigError> {
     })
 }
 
-/// A threshold as JSON, written as it reads (`0.73`), not as the nearest
-/// double to the `f32` (`0.7300000190734863`). Not-a-number becomes `null`,
-/// which the config then rejects.
+/// As a string first: the nearest double to 0.73f32 would be saved as
+/// 0.7300000190734863.
 fn threshold_json(value: f32) -> serde_json::Value {
     value
         .to_string()
@@ -333,8 +312,6 @@ fn threshold_json(value: f32) -> serde_json::Value {
         .map_or(serde_json::Value::Null, serde_json::Value::Number)
 }
 
-/// Sets `key` of the `grouping` section to `value`, or takes it out when
-/// `value` is `None`; a section left empty goes too.
 fn set_grouping(
     object: &mut serde_json::Map<String, serde_json::Value>,
     key: &str,
@@ -358,9 +335,8 @@ fn set_grouping(
     }
 }
 
-/// The absolute path `written` names, or `None` if it is relative. `~`
-/// is the user's home folder on every OS; on Windows `~\` works too, as do
-/// `C:\…` paths.
+/// `None` if it is relative. `~` is the home folder on every OS, so a config
+/// can move between machines.
 fn expand_home(written: &str, home: &Path) -> Option<PathBuf> {
     let after_tilde = written.strip_prefix('~');
     if after_tilde == Some("") {
@@ -399,8 +375,6 @@ fn json_error(e: serde_json::Error) -> ConfigError {
     }
 }
 
-/// An error placed where the string `value` next appears in the file,
-/// searching from byte `from`.
 fn error_at(text: &str, from: usize, value: &str, message: String) -> ConfigError {
     let position = find(text, from, value).map(|offset| {
         let before = &text[..offset];
@@ -415,7 +389,6 @@ fn error_at(text: &str, from: usize, value: &str, message: String) -> ConfigErro
     }
 }
 
-/// The byte offset of the JSON string `value` in `text`, from byte `from`.
 fn find(text: &str, from: usize, value: &str) -> Option<usize> {
     let quoted = serde_json::to_string(value).ok()?;
     text.get(from..)?.find(&quoted).map(|offset| from + offset)

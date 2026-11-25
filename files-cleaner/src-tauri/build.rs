@@ -1,9 +1,6 @@
-//! Puts the files the app ships with in place before Tauri bundles them:
-//! PDFium for reading PDFs (a pinned prebuilt release), OCR's language
-//! files (pinned too), and on Windows the Vulkan loader, so the app starts
-//! on a machine with no Vulkan driver and groups on the CPU.
-//! These downloads happen at build time only, each checked against its
-//! SHA-256; the app itself downloads nothing but the Grouping Models.
+//! Pinned and checked against SHA-256, at build time only: the app itself
+//! downloads nothing but the Grouping Models. The Vulkan loader lets it start
+//! on Windows with no Vulkan driver.
 
 use std::env;
 use std::fs;
@@ -15,7 +12,6 @@ use sha2::{Digest, Sha256};
 /// Must match the `pdfium_7881` feature of pdfium-render in the grouping crate.
 const PDFIUM_RELEASE: &str = "chromium%2F7881";
 
-/// (archive name, SHA-256) per target OS and architecture.
 fn pdfium_archive(os: &str, arch: &str) -> Option<(&'static str, &'static str)> {
     Some(match (os, arch) {
         ("macos", "aarch64") => (
@@ -46,17 +42,16 @@ fn pdfium_archive(os: &str, arch: &str) -> Option<(&'static str, &'static str)> 
     })
 }
 
-/// One OCR language file from tessdata_fast, Tesseract's fast LSTM models.
 struct Language {
     file_name: &'static str,
     sha256: &'static str,
 }
 
-/// The tessdata_fast commit the language files are pinned at.
+/// A commit, never a branch, so the hashes keep matching.
 const TESSDATA_REVISION: &str = "87416418657359cb625c412a48b6e1d6d41c29bd";
 
-/// OCR reads every one of them at once, English tried first. Each added
-/// language makes OCR slower.
+/// OCR reads all of them at once, so each added language makes it slower.
+/// English is tried first.
 const LANGUAGES: [Language; 2] = [
     Language {
         file_name: "eng.traineddata",
@@ -90,8 +85,6 @@ fn main() {
     tauri_build::build()
 }
 
-/// Downloads PDFium for the target into `folder` once, checked against its
-/// pinned SHA-256: the library (and its licence), nothing else.
 fn fetch_pdfium(folder: &Path, os: &str, arch: &str) -> Result<(), String> {
     let library = match os {
         "macos" => "libpdfium.dylib",
@@ -131,8 +124,6 @@ fn fetch_pdfium(folder: &Path, os: &str, arch: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Downloads OCR's language files into `folder`, each checked against its
-/// pinned SHA-256, unless they're there already.
 fn fetch_tessdata(folder: &Path) -> Result<(), String> {
     fs::create_dir_all(folder).map_err(|e| e.to_string())?;
     for language in &LANGUAGES {
@@ -150,7 +141,6 @@ fn fetch_tessdata(folder: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// The file at `url`, once its SHA-256 is checked to be `sha256`.
 fn download_pinned(url: &str, sha256: &str) -> Result<Vec<u8>, String> {
     let bytes = ureq::get(url)
         .call()
@@ -168,9 +158,7 @@ fn download_pinned(url: &str, sha256: &str) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-/// Copies `vulkan-1.dll` from the build machine into `folder`, to be
-/// installed next to the app's executable. Recent Vulkan SDKs leave it out
-/// of `Bin`: the Vulkan Runtime, which GPU drivers also install, puts it in
+/// Recent Vulkan SDKs leave it out of `Bin`; the Vulkan Runtime puts it in
 /// System32.
 fn copy_vulkan_loader(folder: &Path) -> Result<(), String> {
     let to = folder.join("vulkan-1.dll");

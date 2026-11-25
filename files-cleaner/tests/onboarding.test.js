@@ -14,7 +14,7 @@ test("the introduction shows Rules before offering the Grouping Models last, and
 });
 
 test("each introduction card's caption is a few words, the drawing saying the rest", () => {
-  // The download card says in full what is downloaded and why.
+  // Only the download card may say more.
   for (const card of introductionCards(false, "1.8 GB").filter((card) => card.drawing !== "download")) {
     assert.ok(card.text.split(/\s+/).length <= 7, card.text);
   }

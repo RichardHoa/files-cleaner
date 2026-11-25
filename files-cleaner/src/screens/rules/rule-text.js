@@ -1,12 +1,7 @@
-// A Rule read back in one short line, and the small conversions the Rules screen's editor needs. A Rule is
-// `{ enabled, words?, match, groupBy }` as saved in the config (see `Rule` in core): `match` is
-// `{ kind?, extensions?, name?, exceptNames?, minSize?, maxSize?, date? }`, `name` `{ how, words }`,
-// `date` `{ field, withinDays?, olderThanDays? }`,
-// and `groupBy` `{ type: "folder", name, date }`, `{ type: "date", date, by }`, `{ type: "kind" }` or
-// `{ type: "meaning", folders }`, each folder `{ name, description? }`.
+// A Rule's shape is `Rule` in core, as saved in the config.
 import { formatSize } from "../../shared/format.js";
 
-/** The file kinds as the grouping engine names them (`kinds.rs`). */
+/** Must match the grouping engine's names (`kinds.rs`). */
 export const KINDS = [
   "Documents",
   "Spreadsheets",
@@ -23,20 +18,18 @@ export const KINDS = [
   "Other",
 ];
 
-/** Bytes in the megabyte the editor counts sizes in, as `formatSize` counts them. */
+/** Must match how `formatSize` counts. */
 export const MEGABYTE = 1_000_000;
 
-/** A new Rule, before the user sets anything: every file into one folder. */
 export const newRule = () => ({ enabled: true, match: {}, groupBy: { type: "folder", name: "", date: "changed" } });
 
-/** "png, .JPG  gif" as `["png", "jpg", "gif"]`. */
 export const parseExtensions = (text) =>
   text
     .split(/[\s,]+/)
     .map((e) => e.replace(/^\.+/, "").toLowerCase())
     .filter(Boolean);
 
-/** How a name is held to a Rule's words (`NameHow` in core), with the editor's label for each. */
+/** Values must match `NameHow` in core. */
 export const NAME_HOW = [
   ["contains", "contains"],
   ["startsWith", "starts with"],
@@ -45,14 +38,14 @@ export const NAME_HOW = [
   ["pattern", "matches"],
 ];
 
-/** "baraka, trip to" as `["baraka", "trip to"]`: commas part the words, so a word can hold spaces. */
+/** Commas part the words, so a word can hold spaces. */
 export const parseWords = (text) =>
   text
     .split(",")
     .map((w) => w.trim())
     .filter(Boolean);
 
-/** "Thesis: chapters and drafts\nTaxes" as `[{ name: "Thesis", description: "chapters and drafts" }, { name: "Taxes" }]`: one folder a line, what goes in it after a colon, which no folder name can hold. */
+/** One folder a line; a colon starts its description, as no folder name can hold one. */
 export const parseMeaningFolders = (text) =>
   text
     .split("\n")
@@ -64,14 +57,11 @@ export const parseMeaningFolders = (text) =>
     })
     .filter((folder) => folder.name);
 
-/** `folders` as `parseMeaningFolders` reads them. */
 export const formatMeaningFolders = (folders) =>
   folders.map((f) => (f.description ? `${f.name}: ${f.description}` : f.name)).join("\n");
 
-/** `words` as "“baraka” or “trip”". */
 const anyOf = (words, joiner) => words.map((w) => `“${w}”`).join(` ${joiner} `);
 
-/** What the files `match` picks have, as "Images whose name contains “baraka” over 1.0 MB". */
 export function describeMatch(match) {
   const extensions = (match.extensions ?? []).map((e) => `.${e}`).join(", ");
   let text = match.kind ?? "Files";
@@ -94,7 +84,6 @@ export function describeMatch(match) {
   return text;
 }
 
-/** Where `groupBy` puts the files, as "“Screenshots/{month}”" or "by month changed". */
 export function describeGroupBy(groupBy) {
   if (groupBy.type === "folder") return `“${groupBy.name}”`;
   if (groupBy.type === "kind") return "by kind";
@@ -106,5 +95,4 @@ export function describeGroupBy(groupBy) {
   return groupBy.date === "added" ? `${by} added` : by;
 }
 
-/** `rule` in one short line: "Images whose name matches “Screenshot*” → “Screenshots/{month}”". */
 export const describeRule = (rule) => `${describeMatch(rule.match ?? {})} → ${describeGroupBy(rule.groupBy)}`;

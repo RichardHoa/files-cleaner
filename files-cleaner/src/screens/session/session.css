@@ -1,22 +1,21 @@
-/* Session: laid out like the Plan (header, cards, list beside the selected file) and built from
-   its classes. What is here is only what a Session adds. */
+/* Built from the Plan's classes; only what a Session adds is here. */
 .session-meta {
   margin: var(--space-1) 0 0;
   font-size: var(--font-sm);
 }
 
-/* Unlike the Plan's, the Session's lead is read as a promise, so it isn't muted. */
+/* Read as a promise, so it isn't muted like the Plan's. */
 .plan-head .session-lead {
   color: var(--text);
 }
 
-/* No Include all under the card's line, so the button fills it all. */
+/* No Include all below, so the button fills the card. */
 .session-card .plan-card-pick {
   padding-bottom: var(--space-3);
   border-radius: var(--radius-md);
 }
 
-/* The one place a state's colour shows. */
+/* The one place a state's colour shows, so it stands out. */
 .session-attention {
   color: var(--warning);
 }
@@ -26,7 +25,6 @@
   display: none;
 }
 
-/* Needs attention has no tick boxes. */
 .session-files.no-ticks .plan-file {
   grid-template-columns: minmax(0, 3fr) minmax(0, 2fr) 72px;
 }

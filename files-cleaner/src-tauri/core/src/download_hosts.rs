@@ -1,25 +1,17 @@
-//! Where the app may download from: Hugging Face only, over HTTPS. The
-//! Grouping Models, default or picked, are the only thing the app
-//! downloads, and the app's downloads module checks every request and every
-//! redirect hop here before making it.
+//! Every download request and redirect hop is checked here: the app promises to
+//! reach Hugging Face only.
 
-/// The only host a download may start at.
 pub(crate) const DOWNLOAD_HOST: &str = "huggingface.co";
 
-/// What a redirect hop's host may end with, at a label boundary, besides
-/// being `DOWNLOAD_HOST`: Hugging Face's own CDN hosts, which change.
+/// Hugging Face's CDN hosts change, so they are matched by suffix.
 const REDIRECT_HOST_SUFFIXES: [&str; 2] = [".huggingface.co", ".hf.co"];
 
-/// Which request of a download a link is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Hop {
-    /// The link the download starts at.
     First,
-    /// Where a redirect sent it.
     Redirect,
 }
 
-/// `Ok` when the app may request `url` as `hop`, or why not.
 pub fn check_download(url: &str, hop: Hop) -> Result<(), String> {
     let host = host(url)?;
     let allowed = host == DOWNLOAD_HOST
@@ -34,8 +26,6 @@ pub fn check_download(url: &str, hop: Hop) -> Result<(), String> {
     }
 }
 
-/// Where a redirect from `from` to `location` (its `Location` header) goes,
-/// once checked as a redirect hop, or why it can't be followed.
 pub fn follow_redirect(from: &str, location: &str) -> Result<String, String> {
     let location = location.trim();
     let next = if location.starts_with("//") {
@@ -51,7 +41,6 @@ pub fn follow_redirect(from: &str, location: &str) -> Result<String, String> {
     Ok(next)
 }
 
-/// Whether `link` starts with a URL scheme, such as `https:`.
 fn has_scheme(link: &str) -> bool {
     link.split_once(':').is_some_and(|(scheme, _)| {
         scheme.starts_with(|c: char| c.is_ascii_alphabetic())
@@ -61,9 +50,8 @@ fn has_scheme(link: &str) -> bool {
     })
 }
 
-/// The lower-case host of the HTTPS link `url`, refusing a link with a
-/// user name or password, a port or an IP address, or a host that isn't a
-/// plain name.
+/// Refuses anything that could disguise where a link leads: user names, ports,
+/// IP addresses.
 fn host(url: &str) -> Result<String, String> {
     let rest = url
         .get(.."https://".len())

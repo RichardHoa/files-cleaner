@@ -1,7 +1,7 @@
 :root {
   color-scheme: light dark;
 
-  /* Type: rem, so sizes follow the user's root size (16px by default). */
+  /* rem, so sizes follow the user's root size. */
   --font-2xs: 0.625rem; /* 10px */
   --font-xs: 0.6875rem; /* 11px */
   --font-sm: 0.75rem; /* 12px */
@@ -24,7 +24,7 @@
   --space-6: 24px;
   --space-7: 28px;
 
-  /* The window's padding; the scan screen subtracts it to fill the window. */
+  /* The scan screen subtracts it to fill the window. */
   --app-pad-block: var(--space-6);
   --app-pad-inline: var(--space-7);
 
@@ -33,12 +33,12 @@
   --radius-lg: 12px;
   --radius-pill: 999px;
 
-  /* Neutrals: body text is near-black; --muted is only for secondary details such as paths and dates. */
+  /* --muted is only for secondary details such as paths and dates. */
   --text: #111113;
   --muted: #636366;
   --background: #f5f5f7;
   --surface: #ffffff;
-  /* --border is for dividers; --border-control outlines inputs and buttons, at 3:1 against the page. */
+  /* --border-control must be 3:1 against the page; --border is only for dividers. */
   --border: #d2d2d7;
   --border-control: #86868b;
   --shadow: rgb(0 0 0 / 0.18);
@@ -47,13 +47,12 @@
   --on-accent: #ffffff;
   --error: #c4162a;
   --warning: #9a5600;
-  /* A solid warning badge: macOS's caution yellow, with dark ink on it. */
+  /* macOS's caution yellow, with dark ink for contrast. */
   --warning-fill: #ffcc00;
   --on-warning: #3d2e00;
 
-  /* One colour per Operation kind. Trash is red but always reversible ("moved to Trash"). */
+  /* Trash is red but always reversible. */
 
-  /* One colour per Session status, with the text colour that reads on it. */
   --status-completed: #1a7f3f;
   --on-status-completed: #ffffff;
   --status-undone: #f0a020;
@@ -79,7 +78,6 @@
     --warning: #ffb340;
     --warning-fill: #ffd60a;
     --on-warning: #2a2000;
-
 
     --status-completed: #30a46c;
     --on-status-completed: #111113;

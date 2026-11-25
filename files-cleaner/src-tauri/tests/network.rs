@@ -1,12 +1,9 @@
-//! The app downloads only the Grouping Models, through its downloads
-//! module. So no other source file of the app, grouping or core crates may
-//! use an HTTP client or a socket; the build script, which downloads PDFium
-//! and OCR's language files at build time, isn't source.
+//! Keeps network access in one file. The build script isn't checked: it
+//! downloads at build time only.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Names that mean a file talks to the network: HTTP client crates and sockets.
 const NETWORK: [&str; 14] = [
     "ureq",
     "reqwest",
@@ -24,7 +21,6 @@ const NETWORK: [&str; 14] = [
     "socket2",
 ];
 
-/// The one file allowed to: the app crate's downloads module.
 const DOWNLOADS: &str = "src/downloads.rs";
 
 fn rust_files(folder: &Path, found: &mut Vec<PathBuf>) {
@@ -38,7 +34,6 @@ fn rust_files(folder: &Path, found: &mut Vec<PathBuf>) {
     }
 }
 
-/// Whether `text` has `name` as a whole word, not inside a longer one.
 fn has_word(text: &str, name: &str) -> bool {
     let word = |c: char| c.is_alphanumeric() || c == '_';
     text.match_indices(name).any(|(at, _)| {

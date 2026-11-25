@@ -10,62 +10,50 @@ use serde::Serialize;
 use crate::config::Config;
 use crate::protection::{canonical, is_hidden, is_package, Protection};
 
-/// One scanned file.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanEntry {
     pub name: String,
-    /// The extension as written on disk, without the dot; empty if none.
+    /// Without the dot, as written on disk.
     pub extension: String,
-    /// Bytes; for a Package, the total of everything inside it.
+    /// Bytes; for a Package, everything inside it.
     pub size: u64,
     /// Milliseconds since the Unix epoch.
     pub modified: i64,
-    /// Milliseconds since the Unix epoch, if the file system records it.
+    /// `None` where the file system doesn't record it.
     pub created: Option<i64>,
     pub path: PathBuf,
-    /// The names from the Scan Root down to this item, its own name last.
     pub relative_path: Vec<String>,
     pub is_package: bool,
 }
 
-/// Everything a scan found under a Scan Root.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanResult {
     pub entries: Vec<ScanEntry>,
-    /// The Scan Root, with symlinks resolved.
     pub root: PathBuf,
-    /// How many Protected Paths were met and left alone.
+    /// Protected Paths met and left alone.
     pub skipped: usize,
-    /// How many of `entries` are files with no extension: they are checked
-    /// for duplicates but never sorted into Suggested Folders.
+    /// Checked for duplicates but never sorted into Suggested Folders.
     pub no_extension: usize,
-    /// Files and folders that couldn't be read, so weren't scanned.
     pub unreadable: Vec<PathBuf>,
 }
 
-/// How far a scan has got, reported while it runs.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanProgress {
-    /// Files and Packages listed so far.
     pub found: usize,
-    /// Folders walked into so far, the Scan Root included.
     pub folders: usize,
-    /// Protected Paths left alone so far.
     pub skipped: usize,
     /// The folder being read.
     pub current: PathBuf,
 }
 
-/// The longest a scan waits between progress reports.
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Debug)]
 pub enum ScanError {
     Io(io::Error),
-    /// The user cancelled the scan; nothing is listed.
     Cancelled,
 }
 
@@ -86,23 +74,17 @@ impl From<io::Error> for ScanError {
     }
 }
 
-/// Why the user should think twice before scanning `scan_root`, if they
-/// should: it is, or is inside, a Protected Path or a Package. Any folder can
-/// still be scanned.
+/// A warning only: any folder can still be scanned.
 pub fn scan_root_warning(scan_root: &Path, config: &Config) -> Option<String> {
     Protection::new(config).refusal(scan_root)
 }
 
-/// Walks `scan_root` recursively and lists every file and Package under it,
-/// skipping hidden entries, symlinks and Protected Paths inside it. Protected
-/// Paths covering `scan_root` itself are waived: see `scan_root_warning`.
+/// Protected Paths covering `scan_root` itself are waived: the user accepted
+/// `scan_root_warning`.
 pub fn scan(scan_root: &Path, config: &Config) -> Result<ScanResult, ScanError> {
     scan_with_progress(scan_root, config, &AtomicBool::new(false), |_| {})
 }
 
-/// Like `scan`, calling `on_progress` every `PROGRESS_INTERVAL` or so while it
-/// runs, and once more at the end with the final counts. `cancel` is checked
-/// between items; once it is set, the scan ends with `ScanError::Cancelled`.
 pub fn scan_with_progress(
     scan_root: &Path,
     config: &Config,
@@ -130,8 +112,8 @@ pub fn scan_with_progress(
     };
     let mut folders = vec![root.clone()];
     while let Some(folder) = folders.pop() {
-        // The Scan Root itself must be readable; anything below it that
-        // isn't is reported and passed over.
+        // An unreadable Scan Root is an error; anything below it is only passed
+        // over.
         let children = match fs::read_dir(&folder) {
             Ok(children) => children,
             Err(e) if folder == root => return Err(e.into()),
@@ -151,9 +133,7 @@ pub fn scan_with_progress(
             }
             let Ok(child) = child else { continue };
             let path = child.path();
-            // Never follows symlinks: the type is the link's own. macOS
-            // aliases and Windows shortcuts are plain files, so they are
-            // listed but never resolved.
+            // The link's own type, so symlinks are never followed.
             let Ok(kind) = child.file_type() else {
                 result.unreadable.push(path);
                 continue;
@@ -175,7 +155,6 @@ pub fn scan_with_progress(
                 folders.push(path);
                 continue;
             }
-            // What's left is a file, or a folder that is a Package.
             match child
                 .metadata()
                 .and_then(|metadata| entry(&path, &root, &metadata, kind.is_dir()))
@@ -190,7 +169,6 @@ pub fn scan_with_progress(
     Ok(result)
 }
 
-/// Lists a file, or a Package with the total size of what's inside it.
 fn entry(
     path: &Path,
     root: &Path,
@@ -227,9 +205,8 @@ fn entry(
     })
 }
 
-/// Total bytes of every file inside `folder`, hidden ones included, without
-/// following symlinks. Anything inside that can't be read is left out, so
-/// the Package is still listed.
+/// Hidden files count and unreadable ones don't, so the Package is always
+/// listed.
 pub(crate) fn total_size(folder: &Path) -> u64 {
     let mut total = 0;
     let mut folders = vec![folder.to_path_buf()];
@@ -251,7 +228,7 @@ pub(crate) fn total_size(folder: &Path) -> u64 {
     total
 }
 
-/// True unless nothing is at `path`; a broken symlink is there.
+/// `Path::exists` would say no for a broken symlink.
 pub(crate) fn exists(path: &Path) -> bool {
     !matches!(fs::symlink_metadata(path), Err(e) if e.kind() == io::ErrorKind::NotFound)
 }

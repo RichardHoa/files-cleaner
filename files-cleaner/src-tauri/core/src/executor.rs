@@ -1,6 +1,5 @@
-//! Changes the disk, journaling every step before it happens: runs the
-//! approved Operations of a Plan as a new Session, and undoes, redoes or
-//! retries the Operations of a past one.
+//! Every step is journaled before it happens, so a crash can never hide a
+//! change.
 
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
@@ -21,21 +20,16 @@ use crate::session_journal::{
     restore_by_hand_note, JournaledOperation, OperationState, SessionJournal,
 };
 
-/// What happened to each Operation in one Run, Undo, Redo or retry.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Summary {
     /// `None` after a Run that did nothing, which keeps no Session.
     pub session_id: Option<String>,
-    /// Moved: trashed by a Run or a Redo, restored by an Undo.
     pub done: Vec<Outcome>,
-    /// Not moved, but could be later: the item changed, or something is in
-    /// the way.
+    /// Can be tried again later, unlike `failed` and `unrecoverable`.
     pub skipped: Vec<Outcome>,
-    /// Run only: the move failed.
     pub failed: Vec<Outcome>,
-    /// The trashed copy is gone, or where it landed isn't known, so it never
-    /// can be undone.
+    /// The trashed copy is gone, or where it landed was never recorded.
     pub unrecoverable: Vec<Outcome>,
 }
 
@@ -60,22 +54,18 @@ impl Summary {
     }
 }
 
-/// One Operation's outcome, in a Run, an Undo or a Redo.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Outcome {
     pub operation_id: String,
     pub kind: OperationKind,
     pub source: PathBuf,
-    /// `None` for a Trash that hasn't landed.
+    /// `None` for a Trash that hasn't landed: only the OS decides where.
     pub destination: Option<PathBuf>,
-    /// Why it wasn't done.
     pub note: Option<String>,
-    /// What kind of Note it is, when the UI words it apart from the rest.
     pub note_kind: Option<NoteKind>,
 }
 
-/// How `op` ended, at `landed` if the System Trash just took it.
 fn outcome_of(op: &JournaledOperation, landed: Option<PathBuf>, note: Option<String>) -> Outcome {
     Outcome {
         operation_id: op.id.clone(),
@@ -87,22 +77,15 @@ fn outcome_of(op: &JournaledOperation, landed: Option<PathBuf>, note: Option<Str
     }
 }
 
-/// The kinds of Note the UI tells apart, in its warning after a Run, Undo,
-/// Redo or retry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum NoteKind {
-    /// The System Trash wouldn't take the item, so it stayed where it was.
     TrashRefused,
-    /// Undo found the item emptied from the System Trash: it is gone.
     GoneFromTrash,
-    /// Another item with the same name is where it would go.
     NameTaken,
-    /// The item changed since the Plan was made, or since Undo put it back.
     Changed,
 }
 
-/// Why an Operation's pass didn't move the item.
 struct NotDone {
     outcome: OutcomeKind,
     note: String,
@@ -130,7 +113,6 @@ impl NotDone {
         NotDone::new(OutcomeKind::Unrecoverable, note)
     }
 
-    /// The same, with its Note of kind `kind`.
     fn because(self, kind: NoteKind) -> Self {
         NotDone {
             kind: Some(kind),
@@ -138,7 +120,6 @@ impl NotDone {
         }
     }
 
-    /// The same, with its Note of kind `kind` if `applies`.
     fn because_if(self, applies: bool, kind: NoteKind) -> Self {
         if applies {
             self.because(kind)
@@ -148,15 +129,9 @@ impl NotDone {
     }
 }
 
-/// Runs the Operations of `plan` whose IDs are in `approved`, in Plan
-/// order, as a new Session journaled in `journal_dir`. Trashed items go to
-/// `trash`, and where each landed is journaled with its outcome; one that
-/// can't go stays in place, skipped with a Note. A Move whose destination
-/// was taken since planning gets a new Clash Suffix, worked out just before
-/// it is journaled. An Operation the Plan marks as an error is never run,
-/// even if approved: it is journaled as skipped, with the error as its
-/// Note, so it is listed. If no Operation is done, no Session is kept: its
-/// Journal is removed, and the Summary has no Session ID.
+/// An approved Operation the Plan marks as an error is journaled as skipped, so
+/// the user still sees it listed. A Run that did nothing keeps no Session, as
+/// there is nothing to undo.
 pub fn run(
     plan: &Plan,
     approved: &[String],
@@ -166,20 +141,14 @@ pub fn run(
     run_with_progress(plan, approved, journal_dir, trash, |_| {})
 }
 
-/// How far a Run has got, reported while it runs.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunProgress {
-    /// Operations finished so far, whatever their outcome.
     pub finished: usize,
-    /// Operations the Run will carry out in all.
     pub total: usize,
-    /// The item the Run is on.
     pub current: PathBuf,
 }
 
-/// Like `run`, calling `on_progress` before each Operation (at most every
-/// `PROGRESS_INTERVAL` or so), and once more at the end.
 pub fn run_with_progress(
     plan: &Plan,
     approved: &[String],
@@ -201,8 +170,8 @@ pub fn run_with_progress(
         .filter_map(|op| Some((op.id.as_str(), op.error.as_deref()?)))
         .collect();
 
-    // Lazy, so each destination is checked once the Operations before it
-    // have run.
+    // Lazy, so each destination is checked once the Operations before it have
+    // run.
     let operations = plan.operations.iter().filter(runs).map(|op| {
         to_run(
             &op.id,
@@ -236,9 +205,8 @@ pub fn run_with_progress(
     Ok(summary)
 }
 
-/// An Operation about to be run, or retried, going from `source` to
-/// `destination`. A Move whose destination is taken gets a new Clash
-/// Suffix, so this is worked out just before it is journaled.
+/// Worked out just before journaling, since the destination may have been taken
+/// since planning.
 fn to_run(
     id: &str,
     kind: OperationKind,
@@ -264,9 +232,6 @@ fn to_run(
     }
 }
 
-/// Carries out `op` for a Run or a retry: its item must be as planned, a
-/// Move's folder must exist and its destination be free, and a Trash goes
-/// to `trash`.
 fn run_one(op: &JournaledOperation, trash: &dyn OsTrash) -> Result<Option<PathBuf>, NotDone> {
     match op.kind {
         OperationKind::CreateFolder => create_folder(recorded(op)?).map(|()| None),
@@ -285,10 +250,8 @@ fn run_one(op: &JournaledOperation, trash: &dyn OsTrash) -> Result<Option<PathBu
     }
 }
 
-/// The longest a Run waits between progress reports.
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 
-/// Reports a Run's progress, at most every `PROGRESS_INTERVAL`.
 struct Progress<F: FnMut(RunProgress)> {
     finished: usize,
     total: usize,
@@ -306,7 +269,6 @@ impl<F: FnMut(RunProgress)> Progress<F> {
         }
     }
 
-    /// Called as the Run moves on to the next Operation, on `current`.
     fn starting(&mut self, current: &Path) {
         if self
             .last_report
@@ -331,10 +293,8 @@ impl<F: FnMut(RunProgress)> Progress<F> {
     }
 }
 
-/// Reverses every done Operation of Session `session_id`, newest first,
-/// using only its Journal in `journal_dir`. Never overwrites: an Operation
-/// whose original location is taken is skipped, and can be retried by
-/// undoing again.
+/// Newest first, as later Operations may depend on earlier ones. Never
+/// overwrites; skipped ones can be retried by undoing again.
 pub fn undo(
     session_id: &str,
     journal_dir: &Path,
@@ -343,8 +303,6 @@ pub fn undo(
     undo_selected(session_id, None, journal_dir, trash)
 }
 
-/// Like `undo`, for only the Operations in `operation_ids`. Operations that
-/// aren't done (say, already undone) are left alone.
 pub fn undo_operations(
     session_id: &str,
     operation_ids: &[String],
@@ -366,7 +324,6 @@ fn undo_selected(
 
     let newer = NewerSessions::read(journal.journals(), &session.header.id)?;
     let mut summary = Summary::new(session.header.id.clone());
-    // Operations this pass has settled: undone, or found unrecoverable.
     let mut settled: HashSet<String> = HashSet::new();
     apply_each(
         &mut journal,
@@ -384,7 +341,6 @@ fn undo_selected(
     Ok(summary)
 }
 
-/// Undoes one done Operation of `session`.
 fn undo_one(
     session: &SessionJournal,
     newer: &NewerSessions,
@@ -418,9 +374,9 @@ fn undo_one(
         OperationKind::Trash => "trashed copy",
         _ => "moved item",
     };
-    // The OS reuses a name once the Trash is emptied, so what's there now may
-    // be another item. One that can't be read yet (no Full Disk Access) is
-    // left for `put_back` to report.
+    // The OS reuses a name once the Trash is emptied, so this may be another
+    // item. One that can't be read yet (no Full Disk Access) is left for
+    // `put_back` to report.
     let replaced = op.in_system_trash
         && !op.planned.is_folder
         && fs::symlink_metadata(destination).is_ok()
@@ -433,7 +389,8 @@ fn undo_one(
             NotDone::unrecoverable(format!("The {what} at {} is gone", destination.display()))
         });
     }
-    // Nothing is ever replaced, so an item where it goes back is what stopped it.
+    // Nothing is ever replaced, so an item where it goes back is what stopped
+    // it.
     let left = |note: String| {
         let skipped = NotDone::skipped(format!(
             "{note}; the {what} was left at {}",
@@ -459,20 +416,14 @@ fn undo_one(
     Ok(())
 }
 
-/// What Sessions started after one Session did, as far as they still
-/// stand (not undone): where they took items from, and where they put
-/// them. Undoing the older Session must not undo around them.
+/// Undoing an older Session must not undo around what newer ones did since.
 struct NewerSessions {
-    /// Lowercased paths a newer Session moved an item away from: that
-    /// Session's ID and where the item went.
     moved_away: HashMap<String, (String, PathBuf)>,
-    /// Lowercased paths a newer Session put an item at, and its ID.
     put_at: HashMap<String, String>,
 }
 
 impl NewerSessions {
-    /// Reads the Journals of the Sessions started after `session_id`. One
-    /// that can't be understood is passed over.
+    /// An unreadable Journal is passed over, so it can't block every Undo.
     fn read(journals: &Journals, session_id: &str) -> Result<NewerSessions, SessionError> {
         let mut newer = NewerSessions {
             moved_away: HashMap::new(),
@@ -506,8 +457,6 @@ impl NewerSessions {
         Ok(newer)
     }
 
-    /// Fails with a note if a newer Session has since moved `op`'s item on,
-    /// or put another item where `op` would put it back.
     fn conflict(&self, op: &JournaledOperation) -> Result<(), String> {
         let moved_on = op
             .destination
@@ -529,18 +478,12 @@ impl NewerSessions {
     }
 }
 
-/// `path` as a key that matches it in any letter case, erring towards
-/// seeing a conflict.
+/// Letter case is ignored, erring towards seeing a conflict.
 fn key(path: &Path) -> String {
     path.to_string_lossy().to_lowercase()
 }
 
-/// Carries out again the undone Operations of Session `session_id` that
-/// are in `operation_ids`, in the order they first ran, sending each trashed
-/// item to `trash` again, and putting each moved item back where the Session
-/// put it. An item that changed since Undo put it back is skipped, as is one
-/// whose destination is taken or that `trash` refuses; Operations that aren't
-/// undone are left alone.
+/// In the order they first ran, as later Operations may depend on earlier ones.
 pub fn redo_operations(
     session_id: &str,
     operation_ids: &[String],
@@ -580,13 +523,8 @@ pub fn redo_operations(
     Ok(summary)
 }
 
-/// Runs again the skipped or failed Operations of Session `session_id` that
-/// are in `operation_ids`, in the order they first ran, with the same checks
-/// as the Run: the item must still be as planned, a Move's folder must
-/// exist, a Move never overwrites (its destination gets a new Clash Suffix
-/// if taken), and a Trash goes to `trash`. Each is journaled as another Run
-/// pass of the same Session, so one Undo still reverses it all; Operations
-/// in any other state are left alone.
+/// Journaled as another Run pass of the same Session, so one Undo still
+/// reverses it all.
 pub fn retry_operations(
     session_id: &str,
     operation_ids: &[String],
@@ -620,8 +558,6 @@ pub fn retry_operations(
     Ok(summary)
 }
 
-/// Session `session_id`'s Journal, read and open to add to, with every
-/// pass a crash cut short settled first.
 fn reopen(
     journal_dir: &Path,
     session_id: &str,
@@ -634,12 +570,8 @@ fn reopen(
     Ok((session, journal))
 }
 
-/// A crash between a change and its outcome record leaves an intent with
-/// no outcome. If the disk is as that pass would leave it, the change
-/// happened: journal it as done (dropping the OS's record after an Undo, as
-/// it would have), so the Operation is in the state the disk is in. Otherwise
-/// it never happened, and the Operation is as it was. A Trash whose landing
-/// wasn't recorded is neither: see `may_be_in_trash`.
+/// A crash leaves an intent with no outcome, so the disk decides whether the
+/// change happened. An unlanded Trash can't be told: see `may_be_in_trash`.
 fn settle_interrupted(
     session: &mut SessionJournal,
     journal: &mut Journal,
@@ -684,17 +616,15 @@ fn settle_interrupted(
     Ok(())
 }
 
-/// Where `op`'s Journal says it goes. Only a Trash that hasn't landed goes
-/// without, so one that needs it and has none is a damaged Journal.
+/// Only an unlanded Trash goes without, so any other missing destination is a
+/// damaged Journal.
 fn recorded(op: &JournaledOperation) -> Result<&Path, NotDone> {
     op.destination
         .as_deref()
         .ok_or_else(|| NotDone::skipped("The Journal doesn't say where it went"))
 }
 
-/// Sends `op`'s item to `trash` and returns where it landed. A refusal leaves
-/// it in place, so it is skipped; if it left all the same, the app can't say
-/// where to, and doesn't guess.
+/// If the item left despite a refusal, the app doesn't guess where to.
 fn send_to_trash(trash: &dyn OsTrash, op: &JournaledOperation) -> Result<PathBuf, NotDone> {
     trash.trash(&op.source).map_err(|note| {
         if exists(&op.source) {
@@ -705,8 +635,6 @@ fn send_to_trash(trash: &dyn OsTrash, op: &JournaledOperation) -> Result<PathBuf
     })
 }
 
-/// For each of `operations`: journals `phase`'s intent, tries `attempt`,
-/// journals how it ended, and adds that to `summary`.
 fn apply_each<T: Borrow<JournaledOperation>>(
     journal: &mut Journal,
     summary: &mut Summary,
@@ -739,9 +667,6 @@ fn apply_each<T: Borrow<JournaledOperation>>(
     Ok(())
 }
 
-/// Fails with a note if `path` is gone or isn't the item `expected`
-/// describes: a different kind, size or modified date. `since` ends the
-/// note ("since the Plan was made").
 fn unchanged(path: &Path, expected: &SourceState, since: &str) -> Result<(), String> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
@@ -766,16 +691,13 @@ fn unchanged(path: &Path, expected: &SourceState, since: &str) -> Result<(), Str
     }
 }
 
-/// Skips `op` if its item isn't as planned (see `ready_to_go`): as changed if
-/// it is still there.
 fn still_as_planned(op: &JournaledOperation, since: &str) -> Result<(), NotDone> {
     ready_to_go(op, since)
         .map_err(|note| NotDone::skipped(note).because_if(exists(&op.source), NoteKind::Changed))
 }
 
-/// Fails with a note if `op`'s item isn't as planned: for an emptied folder,
-/// if it holds anything but OS Metadata Files and empty folders; for
-/// anything else, if it changed. `since` ends the note.
+/// An emptied folder's own date changes as its items leave, so it is checked by
+/// what it still holds.
 fn ready_to_go(op: &JournaledOperation, since: &str) -> Result<(), String> {
     if !op.planned.is_folder {
         return unchanged(&op.source, &op.planned, since);
@@ -796,8 +718,6 @@ fn ready_to_go(op: &JournaledOperation, since: &str) -> Result<(), String> {
     }
 }
 
-/// The first item in `folder` that stops it counting as empty: anything
-/// but an OS Metadata File or a folder that is empty too.
 fn first_kept(folder: &Path) -> io::Result<Option<PathBuf>> {
     // A folder in the Scan Root the user chose; no path comes from a web request.
     // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
@@ -818,8 +738,7 @@ fn first_kept(folder: &Path) -> io::Result<Option<PathBuf>> {
     Ok(None)
 }
 
-/// `destination`, or if its name is taken (in any letter case), the first
-/// free name with a Clash Suffix in the same folder.
+/// Letter case is ignored, as for every Clash Suffix.
 fn free_destination(destination: &Path) -> PathBuf {
     let (Some(folder), Some(name)) = (destination.parent(), destination.file_name()) else {
         return destination.to_path_buf();
@@ -830,8 +749,7 @@ fn free_destination(destination: &Path) -> PathBuf {
     ))
 }
 
-/// Fails with a note if a Move's destination folder is missing: Create
-/// Folder makes it, and only if that Operation was approved.
+/// Never made here: the user may not have approved its Create Folder.
 fn folder_exists(op: &JournaledOperation) -> Result<(), String> {
     match op.destination.as_deref().and_then(Path::parent) {
         Some(folder) if !folder.is_dir() => {
@@ -841,7 +759,6 @@ fn folder_exists(op: &JournaledOperation) -> Result<(), String> {
     }
 }
 
-/// Creates the folder `path`, whose parent must exist.
 fn create_folder(path: &Path) -> Result<(), NotDone> {
     if exists(path) {
         return Err(NotDone::skipped(format!(
@@ -853,8 +770,7 @@ fn create_folder(path: &Path) -> Result<(), NotDone> {
         .map_err(|e| NotDone::failed(format!("Couldn't create {}: {e}", path.display())))
 }
 
-/// Removes the folder `path` that a Session created, only if it is empty,
-/// so nothing added to it since can be lost. One already gone is fine.
+/// Only if empty, so nothing added to it since can be lost.
 fn remove_created_folder(path: &Path) -> Result<(), String> {
     if !exists(path) {
         return Ok(());
@@ -868,8 +784,7 @@ fn remove_created_folder(path: &Path) -> Result<(), String> {
     })
 }
 
-/// Moves `from` to `to` with a same-disk rename, creating `to`'s folders.
-/// Never replaces anything already at `to`, and never copies.
+/// A rename only: a copy across disks could be cut short halfway.
 pub(crate) fn move_without_overwriting(from: &Path, to: &Path) -> Result<(), String> {
     if fs::symlink_metadata(to).is_ok() {
         return Err(format!("{} already exists", to.display()));
@@ -888,9 +803,7 @@ pub(crate) fn move_without_overwriting(from: &Path, to: &Path) -> Result<(), Str
     })
 }
 
-/// Moves everything in the folder `from` into the folder `to`, then
-/// removes `from` once it is empty. Never replaces anything in `to`: an
-/// item whose name is taken there stays in `from`, which is then kept.
+/// Items whose names are taken stay in `from`, as nothing is ever replaced.
 fn merge_folder(from: &Path, to: &Path) -> Result<(), String> {
     let children = fs::read_dir(from).map_err(|e| format!("Couldn't read it: {e}"))?;
     let mut kept = None;

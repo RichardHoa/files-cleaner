@@ -1,12 +1,6 @@
-//! All of the app's network access. The app downloads only the Grouping
-//! Models, default or picked, and only after the user
-//! agrees; `models` asks for them through here, and nothing else in the app
-//! uses the HTTP client (`tests/network.rs` fails if it does).
-//!
-//! Every request goes to Hugging Face over HTTPS: the first must be to
-//! `huggingface.co`, and each redirect, followed here by hand, may go only
-//! to it or to Hugging Face's own CDN hosts (`*.huggingface.co`,
-//! `*.hf.co`). The check is `check_download` in the core's `download_hosts`.
+//! All of the app's network access, so it can be audited in one place
+//! (`tests/network.rs` enforces it). Redirects are followed by hand, so each
+//! hop is checked against the allowed hosts.
 
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
@@ -17,34 +11,22 @@ use files_cleaner_core::{self as core, Hop};
 use ureq::http::Response;
 use ureq::Body;
 
-/// A connection that takes this long to open, or then sends nothing for
-/// this long, fails, so the user can resume.
+/// A stalled download fails instead of hanging, so the user can resume it.
 const STALL_TIMEOUT: Duration = Duration::from_secs(30);
-/// How many redirects one request may follow.
 const MAX_REDIRECTS: u32 = 5;
 
-/// How a download that didn't fail ended.
 pub enum Fetched {
-    /// The file is all there, the right size.
     Complete,
-    /// `stop` said to stop; what's downloaded so far is kept.
+    /// What's downloaded so far is kept, to resume from.
     Stopped,
 }
 
-/// One request to send.
 enum Request {
-    /// Just the headers, to learn the file's size.
     Head,
-    /// The file from byte `from` on.
     Get { from: u64 },
 }
 
-/// Downloads the file at `url`, `size` bytes, into `partial`, from where
-/// that stopped: with a Range request, or from the start when the server
-/// ignores it. A file that comes out the wrong size is deleted, so the next
-/// try starts again. Checking its contents is the caller's. `stop` is asked
-/// between reads, and `progress` called after each. The error says what
-/// went wrong, for "Downloading … failed: {it}".
+/// Resumes where `partial` stopped. Checking the contents is the caller's job.
 pub fn fetch(
     url: &str,
     size: u64,
@@ -102,8 +84,7 @@ pub fn fetch(
     Ok(Fetched::Complete)
 }
 
-/// The size of the file at the Hugging Face download link `url`, or why it
-/// can't be downloaded without a login.
+/// Also finds out, before a download starts, whether it needs a login.
 pub fn remote_size(url: &str) -> Result<u64, String> {
     let response =
         request(Request::Head, url).map_err(|e| format!("Couldn't reach Hugging Face: {e}"))?;
@@ -118,8 +99,7 @@ pub fn remote_size(url: &str) -> Result<u64, String> {
     }
 }
 
-/// Sends `what` for `url`, following redirects by hand: `url` and each hop
-/// are checked against the allowed hosts before anything is sent to them.
+/// `url` and each hop are checked before anything is sent to them.
 fn request(what: Request, url: &str) -> Result<Response<Body>, String> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_connect(Some(STALL_TIMEOUT))
@@ -151,7 +131,6 @@ fn request(what: Request, url: &str) -> Result<Response<Body>, String> {
     Err("the server redirected too many times".to_string())
 }
 
-/// The value of the header `name` in `response`, if it's there and text.
 fn header<'a>(response: &'a Response<Body>, name: &str) -> Option<&'a str> {
     response.headers().get(name).and_then(|v| v.to_str().ok())
 }

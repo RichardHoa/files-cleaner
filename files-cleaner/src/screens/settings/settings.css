@@ -1,4 +1,3 @@
-/* Settings: plain sections with dividers, like System Settings, using the existing tokens only. */
 .settings-section {
   max-width: 720px;
   padding-bottom: var(--space-2);

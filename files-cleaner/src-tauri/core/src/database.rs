@@ -1,5 +1,4 @@
-//! Opening the app's SQLite databases (ADR-0012): the Journal and the card
-//! store, set up the same way.
+//! ADR-0012: the Journal and the card store are set up the same way.
 
 use std::fs;
 use std::io;
@@ -9,19 +8,16 @@ use std::time::{Duration, Instant};
 
 use rusqlite::{Connection, ErrorCode, TransactionBehavior};
 
-/// How much of a database's last writes a power cut may lose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Durability {
-    /// None: every commit is on the disk itself before it returns, past the
-    /// drive's own cache too.
+    /// Nothing may be lost: the Journal must survive a power cut.
     Full,
-    /// The last few commits, but it is never left corrupt. For a cache.
+    /// The last few commits may be lost: enough for a cache.
     Normal,
 }
 
-/// The database at `path`, created if it isn't there, and brought up to
-/// date by `migrations`: the layout each `user_version` adds to the one
-/// before, oldest first.
+/// `migrations` run oldest first, each adding to the layout before it, so
+/// released ones must never change.
 pub fn open_database(
     path: &Path,
     durability: Durability,
@@ -29,10 +25,9 @@ pub fn open_database(
 ) -> rusqlite::Result<Connection> {
     let mut db = Connection::open(path)?;
     db.busy_timeout(BUSY_TIMEOUT)?;
-    // Some locks SQLite takes while setting a database up give up at once
-    // instead of waiting out the busy timeout, as when a new one turns to
-    // WAL while others open it too (seen on Windows). Each step is safe to
-    // run again, so it is retried until the same timeout.
+    // Some locks SQLite takes here give up at once instead of waiting out the
+    // busy timeout (seen on Windows, turning a new database to WAL). Each step
+    // is safe to run again.
     let deadline = Instant::now() + BUSY_TIMEOUT;
     loop {
         match set_up(&mut db, durability, migrations) {
@@ -47,7 +42,6 @@ pub fn open_database(
     }
 }
 
-/// How long opening a database waits for others holding it.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn set_up(
@@ -70,8 +64,7 @@ fn set_up(
     migrate(db, migrations)
 }
 
-/// Whether `e` says the database isn't one SQLite can read, or can't be
-/// opened at all: one only deleting it fixes.
+/// Damaged, as opposed to busy: only deleting it helps.
 pub fn is_damaged(e: &rusqlite::Error) -> bool {
     matches!(
         e.sqlite_error_code(),
@@ -79,7 +72,7 @@ pub fn is_damaged(e: &rusqlite::Error) -> bool {
     )
 }
 
-/// Deletes the database at `path`, with the files SQLite keeps beside it.
+/// SQLite's side files go too, or a new database would pick them up.
 pub fn delete_database(path: &Path) -> io::Result<()> {
     for suffix in ["", "-wal", "-shm"] {
         let mut file = path.as_os_str().to_owned();
@@ -98,8 +91,7 @@ fn migrate(db: &mut Connection, migrations: &[&str]) -> rusqlite::Result<()> {
     if version(db)? >= latest {
         return Ok(());
     }
-    // Checked again holding the write lock, in case another connection
-    // migrated it meanwhile.
+    // Another connection may have migrated it before we got the write lock.
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let from = version(&tx)?;
     for migration in migrations.iter().skip(from.max(0) as usize) {

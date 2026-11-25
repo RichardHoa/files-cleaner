@@ -1,6 +1,4 @@
-// The Grouping Models' offer, or their download's progress with Pause, Resume and Cancel. Kept up to
-// date from the status event, so it shows a download started anywhere, even before this screen. Settings
-// watches the status the same way, with these controls until the models are installed.
+// Follows the status event, so it shows a download started anywhere, even before this screen.
 import {
   describeError,
   downloadGroupingModels,
@@ -17,21 +15,18 @@ import { warningBlock } from "../outcomes.js";
 import { progressBar } from "../progress-bar.js";
 import { showStatus } from "../status.js";
 
-/** "Mac", "PC" or "computer": what the user calls this machine, for "nothing leaves your Mac". */
 export function thisComputer() {
   if (pathSeparator === "\\") return "PC";
   return /Mac/.test(navigator.userAgent) ? "Mac" : "computer";
 }
 
-/** What the Grouping Models are, `total` bytes in all, and that nothing leaves the computer: for the panel and Settings. */
 export function groupingModelsPitch(total) {
   const computer = thisComputer();
   return `Read inside files for better folders · ${formatSize(total)} · stays on this ${computer}`;
 }
 
-// The panels on screen, each `{ node, show(status) }`, fed by one listener for the whole app. Screens
-// are swapped without notice, so a panel that has left the page is dropped at the next status or the
-// next new panel, whichever comes first.
+// Screens are swapped without notice, so panels that left the page are dropped at the next status,
+// and one listener serves them all.
 const panels = new Set();
 let listening = false;
 
@@ -48,10 +43,6 @@ function listen() {
   });
 }
 
-/**
- * Calls `show(status)` with the Grouping Models' status, now and on every change, while `node` is on the
- * page or until `show` returns false; says in the status line `error` if the status can't be had.
- */
 export function watchGroupingModels(node, error, show) {
   const panel = {
     node,
@@ -68,7 +59,6 @@ export function watchGroupingModels(node, error, show) {
   );
 }
 
-/** The panel; calls `onInstalled()` once the models are installed, and stops updating then. */
 export function groupingModelsPanel(onInstalled) {
   const node = el("section", { className: "models-panel" });
   const error = el("p", { className: "status error" });
@@ -85,12 +75,7 @@ export function groupingModelsPanel(onInstalled) {
   return node;
 }
 
-/**
- * The text, progress and buttons for the models in `status` until they're installed: the offer, or the
- * download with Pause or Resume and Cancel, its progress shown in `bar` (from progress-bar.js), kept by
- * the caller across statuses so it glides from one to the next. A download that failed says why in the
- * orange warning, in place of its text; a failing button says why in `error`.
- */
+/** The caller keeps `bar` across statuses, so it glides from one to the next. */
 export function groupingModelsControls({ state, downloaded, total, error: failed }, error, bar) {
   const button = (label, command, primary = false) => modelsButton(label, command, error, primary);
   const say = (text) => (failed ? warningBlock(failed) : el("p", {}, text));
@@ -119,13 +104,13 @@ export function groupingModelsControls({ state, downloaded, total, error: failed
       ),
     ];
   }
-  // The full story, which the introduction tells, is the pitch's tooltip.
+  // The introduction tells the full story, so here it is only a tooltip.
   const pitch = say(groupingModelsPitch(total));
   if (!failed) pitch.title = groupingModelsDetails(formatSize(total), thisComputer()).join("\n\n");
   return [pitch, el("div", { className: "actions" }, button("Download", downloadGroupingModels, true))];
 }
 
-/** A button running the models `command`, disabled meanwhile; the next status redraws it, and a failure says why in `error`. */
+/** Disabled until the next status redraws it, so it can't be clicked twice. */
 export function modelsButton(label, command, error, primary = false) {
   const node = el("button", { type: "button", className: primary ? "primary" : "" }, label);
   node.addEventListener("click", async () => {

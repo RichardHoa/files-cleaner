@@ -1,8 +1,7 @@
-// The grouping thresholds as the levels Settings shows instead of numbers. The config keeps storing
-// thresholds: a level sends its threshold, and a stored value between levels is shown at the nearest one.
-// The middle levels are today's default, 0.86.
+// Levels instead of numbers, as a threshold means nothing to the user. The config keeps thresholds,
+// so a value between levels shows at the nearest.
 
-/** How many Suggested Folders: `folderThreshold`, from looser (fewer, broader folders) to stricter. */
+/** Looser means fewer, broader folders. */
 export const FOLDER_LEVELS = [
   { label: "A few broad folders", threshold: 0.8 },
   { label: "Fewer, broader folders", threshold: 0.83 },
@@ -11,14 +10,14 @@ export const FOLDER_LEVELS = [
   { label: "Many specific folders", threshold: 0.92 },
 ];
 
-/** How often a Suggested Folder goes into an existing folder: `existingFolderThreshold`, looser first. */
+/** Looser first: files go into existing folders more often. */
 export const EXISTING_FOLDER_LEVELS = [
   { label: "Often", threshold: 0.82 },
   { label: "Sometimes", threshold: 0.86 },
   { label: "Rarely", threshold: 0.9 },
 ];
 
-/** The index in `levels` of the level nearest the threshold `value`; the looser one on a tie. */
+/** The looser level on a tie. */
 export function nearestLevel(levels, value) {
   let nearest = 0;
   for (const [index, level] of levels.entries()) {
@@ -27,5 +26,5 @@ export function nearestLevel(levels, value) {
   return nearest;
 }
 
-/** Whether `value` is a level's threshold, allowing for the config storing it as a 32-bit float. */
+/** Approximate, as the config stores 32-bit floats. */
 export const onLevel = (levels, value) => Math.abs(levels[nearestLevel(levels, value)].threshold - value) < 1e-4;

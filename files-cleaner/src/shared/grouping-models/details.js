@@ -1,10 +1,5 @@
-// What the Grouping Models are, what they're for and why they're downloaded: in full on the introduction's
-// download card, and as the tooltip of the shorter offers elsewhere.
+// Shared by the introduction's download card and the tooltips of shorter offers.
 
-/**
- * The paragraphs saying which models are downloaded, `size` (already formatted) in all, what each is for,
- * that they run on this `computer`, and what happens without them.
- */
 export function groupingModelsDetails(size, computer) {
   return [
     "To sort files by topic, the app reads inside them (text, PDFs, scanned pages) and works out what each one is about.",

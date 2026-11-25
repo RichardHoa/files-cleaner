@@ -1,5 +1,4 @@
-//! Thin Tauri commands over the core library (ADR-0003): they find the
-//! config file and home folder, call the core, and serialise the result.
+//! Thin on purpose: the logic lives in the core library (ADR-0003).
 
 use std::collections::HashSet;
 use std::convert::Infallible;
@@ -27,31 +26,22 @@ use tauri_plugin_opener::OpenerExt;
 use models::GroupingModels;
 
 const CONFIG_FILE_NAME: &str = "config.json";
-/// The Journal folder, inside the app data folder.
 const SESSIONS_FOLDER_NAME: &str = "sessions";
-/// The Recent Scan Roots, inside the app data folder.
 const RECENT_FILE_NAME: &str = "recent-scan-roots.json";
-/// The Grouping Models' folder, inside the app data folder.
 const MODELS_FOLDER_NAME: &str = "grouping-models";
-/// What the user has seen of the introduction, inside the app data folder.
 const ONBOARDING_FILE_NAME: &str = "onboarding.json";
-/// The cards the Grouping Models wrote, inside the app data folder.
 const CARDS_FOLDER_NAME: &str = "grouping-cards";
-/// How long reading a file takes on this computer, inside the app data folder.
 const READING_PACE_FILE_NAME: &str = "reading-pace.json";
-/// The bundled PDFium library, inside the app's resources.
 #[cfg(target_os = "macos")]
 const PDFIUM_LIBRARY: &str = "pdfium/libpdfium.dylib";
 #[cfg(target_os = "windows")]
 const PDFIUM_LIBRARY: &str = "pdfium/pdfium.dll";
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 const PDFIUM_LIBRARY: &str = "pdfium/libpdfium.so";
-/// OCR's language files, bundled by the build script, inside the app's resources.
 const TESSDATA_FOLDER: &str = "tessdata";
 
-/// The latest scan and, once found and built, its Duplicate Groups and its
-/// Plan, kept here so the UI doesn't send them back. One lock holds them
-/// all, so neither outlives its scan.
+/// Kept here so the UI doesn't send them back. One lock holds them all, so
+/// neither outlives its scan.
 #[derive(Default)]
 struct Latest(Mutex<Option<Scanned>>);
 
@@ -61,8 +51,7 @@ struct Scanned {
     plan: Option<Plan>,
 }
 
-/// The latest scan, by the ID the UI gave it, with the cancel flag it and
-/// the search for duplicates after it share.
+/// Cancelling covers both the scan and the search for duplicates after it.
 #[derive(Default)]
 struct Scanning(Mutex<ScanFlag>);
 
@@ -70,25 +59,21 @@ struct Scanning(Mutex<ScanFlag>);
 struct ScanFlag {
     id: u64,
     cancel: Arc<AtomicBool>,
-    /// The scan last cancelled: a Cancel can reach the app before its scan
-    /// has started, and that scan then starts cancelled.
+    /// A Cancel can reach the app before its scan has started; that scan then
+    /// starts cancelled.
     cancelled: u64,
 }
 
-/// The cancel and stop flags of the analysis running now, if any.
 #[derive(Default)]
 struct Analysing {
     cancel: Mutex<Arc<AtomicBool>>,
     stop: Mutex<Arc<AtomicBool>>,
 }
 
-/// An error the UI can show: what went wrong and, for a config error,
-/// where in the file.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CommandError {
     message: String,
-    /// Set when the problem is in the config file.
     config_path: Option<PathBuf>,
     line: Option<usize>,
     column: Option<usize>,
@@ -105,7 +90,6 @@ impl CommandError {
     }
 }
 
-/// Runs `work` off the UI thread.
 async fn blocking<T, E>(
     work: impl FnOnce() -> Result<T, E> + Send + 'static,
 ) -> Result<T, CommandError>
@@ -126,7 +110,6 @@ struct LoadedConfig {
     config: Config,
 }
 
-/// `name` inside the app data folder.
 fn app_data_path(app: &AppHandle, name: &str) -> Result<PathBuf, CommandError> {
     Ok(app
         .path()
@@ -139,8 +122,7 @@ fn config_path(app: &AppHandle) -> Result<PathBuf, CommandError> {
     app_data_path(app, CONFIG_FILE_NAME)
 }
 
-/// The config file's text, writing the example config first if there is
-/// no file yet.
+/// Writes the example config on first launch.
 fn read_or_create(path: &Path) -> Result<String, CommandError> {
     if !path.exists() {
         if let Some(folder) = path.parent() {
@@ -151,7 +133,7 @@ fn read_or_create(path: &Path) -> Result<String, CommandError> {
     fs::read_to_string(path).map_err(CommandError::new)
 }
 
-/// Reads the config file afresh, so every command sees the latest saved settings.
+/// Read afresh, so every command sees the latest saved settings.
 fn read_config(app: &AppHandle) -> Result<LoadedConfig, CommandError> {
     let path = config_path(app)?;
     let text = read_or_create(&path)?;
@@ -172,11 +154,6 @@ fn load_config(app: AppHandle) -> Result<LoadedConfig, CommandError> {
     read_config(&app)
 }
 
-/// Makes one change from the Settings screen to the config file and
-/// returns the config as saved. An invalid value is refused, with nothing
-/// saved.
-/// Puts every setting back to its default, even when the config can't be
-/// read, and returns the config as saved.
 #[tauri::command]
 fn reset_settings(app: AppHandle) -> Result<LoadedConfig, CommandError> {
     let path = config_path(&app)?;
@@ -199,10 +176,9 @@ fn change_setting(app: AppHandle, change: SettingChange) -> Result<LoadedConfig,
     save_setting(&app, &change)
 }
 
-/// Makes `change` to the config file and returns the config as saved.
 fn save_setting(app: &AppHandle, change: &SettingChange) -> Result<LoadedConfig, CommandError> {
     let path = config_path(app)?;
-    // Written first if missing, so there is a file to change.
+    // There must be a file to change.
     read_or_create(&path)?;
     let home = app.path().home_dir().map_err(CommandError::new)?;
     let config =
@@ -210,19 +186,15 @@ fn save_setting(app: &AppHandle, change: &SettingChange) -> Result<LoadedConfig,
     Ok(LoadedConfig { path, config })
 }
 
-/// Why the user should think twice before scanning `scan_root`, if they
-/// should. Any folder can still be scanned.
+/// A warning only: any folder can still be scanned.
 #[tauri::command]
 fn scan_root_warning(app: AppHandle, scan_root: PathBuf) -> Result<Option<String>, CommandError> {
     let loaded = read_config(&app)?;
     Ok(core::scan_root_warning(&scan_root, &loaded.config))
 }
 
-/// Scans off the UI thread, sending progress to `on_progress` as it goes.
-/// The result is kept for `find_duplicates`, `analyse_loose_files` and
-/// `build_review_plan`. The UI calls this only once any
-/// protected-path warning is accepted, so `scan_root` becomes a Recent
-/// Scan Root here.
+/// Called only once any protected-path warning is accepted, so this is where
+/// the folder becomes a Recent Scan Root.
 #[tauri::command]
 async fn scan(
     app: AppHandle,
@@ -261,10 +233,7 @@ async fn scan(
     Ok(result)
 }
 
-/// Finds the Duplicate Groups of the latest scan, off the UI thread (it
-/// reads files), sending progress to `on_progress` as it goes. They are
-/// kept, so reading leaves out the copies to trash. `cancel_scan` stops it,
-/// like the scan before it.
+/// Kept, so reading leaves out the copies to trash.
 #[tauri::command]
 async fn find_duplicates(
     app: AppHandle,
@@ -298,8 +267,6 @@ async fn find_duplicates(
     Ok(groups)
 }
 
-/// Stops the scan `scan_id`, or the search for duplicates after it, between
-/// files, even if it hasn't started yet; nothing it found is kept.
 #[tauri::command]
 fn cancel_scan(scanning: State<'_, Scanning>, scan_id: u64) {
     let mut flag = scanning.0.lock().unwrap();
@@ -309,15 +276,11 @@ fn cancel_scan(scanning: State<'_, Scanning>, scan_id: u64) {
     }
 }
 
-/// Where the Journals live: a folder in the app data folder.
 fn journal_dir(app: &AppHandle) -> Result<PathBuf, CommandError> {
     app_data_path(app, SESSIONS_FOLDER_NAME)
 }
 
-/// Runs the approved Operations of the latest Plan as a new Session, off
-/// the UI thread, sending progress to `on_progress` as it goes. The Plan
-/// is kept, so a run refused as Busy can be retried; running it again
-/// after it ran does nothing, so it keeps no Session.
+/// The Plan is kept, so a run refused as Busy can be retried.
 #[tauri::command]
 async fn run_plan(
     app: AppHandle,
@@ -342,8 +305,6 @@ async fn run_plan(
     .await
 }
 
-/// Undoes the chosen Operations of a past Session, or all of them if none
-/// are chosen.
 #[tauri::command]
 async fn undo(
     app: AppHandle,
@@ -358,7 +319,6 @@ async fn undo(
     .await
 }
 
-/// Carries out again the chosen undone Operations of a past Session.
 #[tauri::command]
 async fn redo_operations(
     app: AppHandle,
@@ -370,8 +330,6 @@ async fn redo_operations(
         .await
 }
 
-/// Runs again the chosen skipped or failed Operations of a past Session, in
-/// that Session.
 #[tauri::command]
 async fn retry_operations(
     app: AppHandle,
@@ -385,43 +343,35 @@ async fn retry_operations(
     .await
 }
 
-/// A past Session and each of its Operations, for the Session screen.
 #[tauri::command]
 fn session_details(app: AppHandle, session_id: String) -> Result<SessionDetails, CommandError> {
     core::session_details(&session_id, &journal_dir(&app)?).map_err(CommandError::new)
 }
 
-/// A page of past Sessions, newest first, for Home and History.
 #[tauri::command]
 fn list_sessions(app: AppHandle, offset: usize, limit: usize) -> Result<SessionPage, CommandError> {
     core::list_sessions(&journal_dir(&app)?, offset, limit).map_err(CommandError::new)
 }
 
-/// Deletes every past Session's Journal, clearing History and changing no
-/// file of the user's. Refused as Busy during a Run, Undo or Redo.
 #[tauri::command]
 fn delete_all_sessions(app: AppHandle) -> Result<usize, CommandError> {
     core::delete_all_sessions(&journal_dir(&app)?).map_err(CommandError::new)
 }
 
-/// Where the Recent Scan Roots live: a file in the app data folder.
 fn recent_store(app: &AppHandle) -> Result<PathBuf, CommandError> {
     app_data_path(app, RECENT_FILE_NAME)
 }
 
-/// The Recent Scan Roots, newest first, for the Home tiles.
 #[tauri::command]
 fn recent_scan_roots(app: AppHandle) -> Result<Vec<RecentScanRoot>, CommandError> {
     Ok(core::recent_scan_roots(&recent_store(&app)?))
 }
 
-/// Takes a folder off the Recent Scan Roots, from the × on its tile.
 #[tauri::command]
 fn remove_recent_scan_root(app: AppHandle, scan_root: PathBuf) -> Result<(), CommandError> {
     core::remove_recent_scan_root(&recent_store(&app)?, &scan_root).map_err(CommandError::new)
 }
 
-/// The latest scan, or an error asking for one.
 fn latest_scan(latest: &Latest) -> Result<Arc<ScanResult>, CommandError> {
     let scan = latest
         .0
@@ -432,8 +382,6 @@ fn latest_scan(latest: &Latest) -> Result<Arc<ScanResult>, CommandError> {
     scan.ok_or_else(|| CommandError::new("Scan a folder first"))
 }
 
-/// The latest scan without the copies its Duplicate Groups trash by
-/// default: every one but the first.
 fn without_copies(latest: &Latest) -> Result<ScanResult, CommandError> {
     let (scan, duplicates) = {
         let guard = latest.0.lock().unwrap();
@@ -459,20 +407,15 @@ fn without_copies(latest: &Latest) -> Result<ScanResult, CommandError> {
     })
 }
 
-/// The file or folder at `path` in the app's resources, if it's there:
-/// PDFium (without it, PDFs are read by name) or OCR's language files
-/// (without them, scanned PDFs are).
+/// Optional: without PDFium or OCR's files, PDFs are read by name.
 fn bundled(app: &AppHandle, path: &str) -> Option<PathBuf> {
     let path = app.path().resource_dir().ok()?.join(path);
     path.exists().then_some(path)
 }
 
-/// Started with this flag, the app checks what it was installed with, says
-/// how that went on stderr and exits: 0 if all is well. CI runs it on each
-/// installer it builds.
+/// CI runs it on each installer it builds, to catch missing bundled files.
 const SELF_CHECK_FLAG: &str = "--self-check";
 
-/// A one-page PDF with a line of text, for PDFium to read in the self-check.
 const SELF_CHECK_PDF: &[u8] = b"%PDF-1.4
 1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
 2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj
@@ -485,9 +428,8 @@ trailer<</Root 1 0 R>>
 %%EOF
 ";
 
-/// Whether the installed app has its bundled resources and can use them:
-/// PDFium reads a PDF, through the same child process an analysis uses, and
-/// OCR's language files are there.
+/// Goes through the same child process an analysis uses, so it tests the real
+/// path.
 fn self_check(app: &AppHandle) -> Result<(), String> {
     let pdfium = bundled(app, PDFIUM_LIBRARY)
         .ok_or_else(|| format!("{PDFIUM_LIBRARY} isn't in the app's resources"))?;
@@ -519,26 +461,20 @@ fn self_check(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// What an analysis found, for the review screen.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AnalysisResult {
     grouping: Grouping,
-    /// Where the Grouping Models ran; `None` when every card was stored.
+    /// `None` when every card was stored, so no model ran.
     device: Option<String>,
 }
 
-/// For each of `rules`, the first enabled Rule before it that some file
-/// could match too, if any: that file goes where the earlier one says.
 #[tauri::command]
 fn rule_overlaps(rules: Vec<core::Rule>) -> Vec<Option<usize>> {
     grouping::rule_overlaps(&rules)
 }
 
-/// The Suggested Folders the config's Rules make of the loose files of the
-/// latest scan, by code alone and so at once: shown while the rest are read.
-/// Every copy of a Duplicate Group but its first is left out, as for
-/// `analyse_loose_files`.
+/// By code alone and so at once: shown while the rest are read.
 #[tauri::command]
 async fn rule_folders(
     app: AppHandle,
@@ -547,20 +483,14 @@ async fn rule_folders(
 ) -> Result<Grouping, CommandError> {
     let rules = read_config(&app)?.config.rules;
     let scan = without_copies(&latest)?;
-    // A Rule by meaning's files wait for the models, if they're in.
+    // Their files wait for the models, if they're installed.
     let by_meaning = models.installed();
     // Finding the existing folders the Rules' folders match reads the disk.
     blocking(move || Ok::<_, Infallible>(grouping::group_by_rules(&scan, &rules, by_meaning))).await
 }
 
-/// Reads the loose files of the latest scan with the Grouping Models, off
-/// the UI thread, sending progress to `on_progress`, and suggests folders
-/// for them by the config's Rules, then its grouping settings. Without the
-/// models, only the Rules suggest folders and nothing is read. Every copy of a Duplicate
-/// Group but its first is left out, as it is trashed by default (ADR
-/// 0007). The models are loaded for this analysis only. `cancel_analysis`
-/// stops it; `stop_reading` ends its reading early and groups what was read.
-/// Unless `read`, nothing is read: it groups as if stopped before the first file.
+/// Without `read`, it groups as if stopped before the first file. Copies
+/// trashed by default are left out (ADR 0007).
 #[tauri::command]
 async fn analyse_loose_files(
     app: AppHandle,
@@ -570,7 +500,7 @@ async fn analyse_loose_files(
     read: bool,
     on_progress: Channel<grouping::Progress>,
 ) -> Result<AnalysisResult, CommandError> {
-    // Set first, so a Cancel or Stop that comes in while starting stops this analysis.
+    // Set first, so a Cancel or Stop that comes in while starting isn't lost.
     let cancel = Arc::new(AtomicBool::new(false));
     *analysing.cancel.lock().unwrap() = Arc::clone(&cancel);
     let stop = Arc::new(AtomicBool::new(!read));
@@ -615,9 +545,7 @@ async fn analyse_loose_files(
     })
 }
 
-/// How many loose files of the latest scan the Grouping Models would read,
-/// leaving out those read before; 0 without the models. It hashes every
-/// file, off the UI thread; `cancel_analysis` stops it.
+/// Hashes every file, so it can take a while; `cancel_analysis` stops it.
 #[tauri::command]
 async fn files_to_read(
     app: AppHandle,
@@ -652,7 +580,6 @@ async fn files_to_read(
     .await
 }
 
-/// Stops the running analysis between files; the cards made so far are kept.
 #[tauri::command]
 fn cancel_analysis(analysing: State<'_, Analysing>) {
     analysing
@@ -662,8 +589,7 @@ fn cancel_analysis(analysing: State<'_, Analysing>) {
         .store(true, Ordering::Relaxed);
 }
 
-/// Ends the running analysis's reading between files: the files read so far
-/// are grouped and the rest are left where they are.
+/// Unlike cancelling, the files read so far are still grouped.
 #[tauri::command]
 fn stop_reading(analysing: State<'_, Analysing>) {
     analysing
@@ -673,8 +599,7 @@ fn stop_reading(analysing: State<'_, Analysing>) {
         .store(true, Ordering::Relaxed);
 }
 
-/// Forgets the cards the Grouping Models wrote, and the traces of earlier
-/// analyses, so the next analysis reads every file again.
+/// Traces of earlier analyses go too.
 #[tauri::command]
 fn clear_grouping_cards(app: AppHandle) -> Result<(), CommandError> {
     grouping::clear_trace();
@@ -683,11 +608,8 @@ fn clear_grouping_cards(app: AppHandle) -> Result<(), CommandError> {
         .map_err(CommandError::new)
 }
 
-/// Plans the user's choices on the review screen over the latest scan, as
-/// one Plan: each Duplicate Group's and each Suggested Folder's. If `keep`,
-/// the Plan is kept for `run_plan`, which runs it as one Session; a Plan
-/// built only to look at isn't, so it never takes the place of the one
-/// about to run.
+/// A Plan built only to look at isn't kept, so it never takes the place of the
+/// one about to run.
 #[tauri::command]
 async fn build_review_plan(
     latest: State<'_, Latest>,
@@ -717,8 +639,7 @@ async fn build_review_plan(
     Ok(plan)
 }
 
-/// Opens `path` in its default app. Only a file of the latest scan can be
-/// opened, so the UI can't open just any path.
+/// Only a file of the latest scan, so the UI can't open just any path.
 #[tauri::command]
 fn open_file(app: AppHandle, latest: State<'_, Latest>, path: PathBuf) -> Result<(), CommandError> {
     if !latest_scan(&latest)?
@@ -733,9 +654,7 @@ fn open_file(app: AppHandle, latest: State<'_, Latest>, path: PathBuf) -> Result
         .map_err(CommandError::new)
 }
 
-/// Opens, in its default app, where the item of the Operation `operation_id`
-/// of a past Session is now. Like `open_file`, it only opens a path the app
-/// knows of: none while the item is in the System Trash or is gone for good.
+/// Only a path the app knows of, so the UI can't open just any path.
 #[tauri::command]
 fn open_session_file(
     app: AppHandle,
@@ -757,7 +676,7 @@ fn open_session_file(
         .map_err(CommandError::new)
 }
 
-/// Whether any of the files at `paths` is on a different disk from `folder`.
+/// Such files can't be moved there.
 #[tauri::command]
 fn on_another_disk(paths: Vec<PathBuf>, folder: PathBuf) -> bool {
     paths
@@ -765,15 +684,11 @@ fn on_another_disk(paths: Vec<PathBuf>, folder: PathBuf) -> bool {
         .any(|path| core::different_disks(path, &folder))
 }
 
-/// The Grouping Models' status: `{ state, downloaded, total, error }`.
-/// Changes are also sent as the `grouping-models` event.
 #[tauri::command]
 fn grouping_models_status(models: State<'_, Arc<GroupingModels>>) -> models::Status {
     models.status()
 }
 
-/// Starts or resumes downloading the Grouping Models in the background,
-/// unless the disk is too full for them.
 #[tauri::command]
 fn download_grouping_models(
     models: State<'_, Arc<GroupingModels>>,
@@ -781,13 +696,11 @@ fn download_grouping_models(
     models.download().map_err(CommandError::new)
 }
 
-/// Pauses the download, keeping what's downloaded so far.
 #[tauri::command]
 fn pause_grouping_models(models: State<'_, Arc<GroupingModels>>) -> models::Status {
     models.pause()
 }
 
-/// Cancels the download, or removes the installed Grouping Models.
 #[tauri::command]
 fn remove_grouping_models(
     models: State<'_, Arc<GroupingModels>>,
@@ -795,10 +708,7 @@ fn remove_grouping_models(
     models.remove().map_err(CommandError::new)
 }
 
-/// Starts downloading the describing model at the Hugging Face `link`, in
-/// place of any picked before, or resumes the one stopped when `link` is
-/// null. Once downloaded it describes a sample file, and is used
-/// only if it can.
+/// Used only once it has described a sample file.
 #[tauri::command]
 async fn download_describing_model(
     models: State<'_, Arc<GroupingModels>>,
@@ -809,13 +719,11 @@ async fn download_describing_model(
     blocking(move || models.download_custom(link)).await
 }
 
-/// Pauses the picked describing model's download.
 #[tauri::command]
 fn pause_describing_model(models: State<'_, Arc<GroupingModels>>) -> models::Status {
     models.pause_custom()
 }
 
-/// Cancels the picked describing model's download, or deletes it.
 #[tauri::command]
 fn remove_describing_model(
     models: State<'_, Arc<GroupingModels>>,
@@ -823,7 +731,6 @@ fn remove_describing_model(
     models.remove_custom().map_err(CommandError::new)
 }
 
-/// Describes files with the picked model if `picked`, or else the default.
 #[tauri::command]
 fn use_describing_model(
     models: State<'_, Arc<GroupingModels>>,
@@ -832,9 +739,7 @@ fn use_describing_model(
     models.use_custom(picked).map_err(CommandError::new)
 }
 
-/// What the user has seen, as stored: the introduction, and whether they
-/// have selected several items once, after which the hint saying how is
-/// no longer shown.
+/// `multi_select_seen` hides the hint on selecting several items.
 #[derive(Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct Onboarding {
@@ -842,7 +747,6 @@ struct Onboarding {
     multi_select_seen: bool,
 }
 
-/// What the user has seen of the introduction.
 #[tauri::command]
 fn onboarding(app: AppHandle) -> Result<Onboarding, CommandError> {
     let path = app_data_path(&app, ONBOARDING_FILE_NAME)?;
@@ -853,13 +757,11 @@ fn onboarding(app: AppHandle) -> Result<Onboarding, CommandError> {
         .unwrap_or_default())
 }
 
-/// Remembers what the user has seen of the introduction.
 #[tauri::command]
 fn save_onboarding(app: AppHandle, onboarding: Onboarding) -> Result<(), CommandError> {
     write_app_json(&app, ONBOARDING_FILE_NAME, &onboarding)
 }
 
-/// Writes `value` as JSON to the file `name` in the app data folder.
 fn write_app_json(app: &AppHandle, name: &str, value: &impl Serialize) -> Result<(), CommandError> {
     let path = app_data_path(app, name)?;
     if let Some(folder) = path.parent() {
@@ -869,17 +771,13 @@ fn write_app_json(app: &AppHandle, name: &str, value: &impl Serialize) -> Result
     write_atomically(&path, text.as_bytes()).map_err(CommandError::new)
 }
 
-/// How long reading a file takes on this computer, as stored.
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ReadingPace {
-    /// Averaged over finished analyses, each counting for half (see
-    /// `updatedAverage` in the UI).
+    /// Seconds; recent analyses weigh more (see `updatedAverage` in the UI).
     seconds_per_file: f64,
 }
 
-/// The seconds per file a finished analysis took on this computer, or
-/// `None` before the first one.
 #[tauri::command]
 fn reading_pace(app: AppHandle) -> Result<Option<f64>, CommandError> {
     let path = app_data_path(&app, READING_PACE_FILE_NAME)?;
@@ -890,7 +788,6 @@ fn reading_pace(app: AppHandle) -> Result<Option<f64>, CommandError> {
     Ok(saved.map(|pace| pace.seconds_per_file))
 }
 
-/// Remembers `seconds_per_file` as this computer's reading pace.
 #[tauri::command]
 fn save_reading_pace(app: AppHandle, seconds_per_file: f64) -> Result<(), CommandError> {
     write_app_json(
@@ -902,8 +799,8 @@ fn save_reading_pace(app: AppHandle, seconds_per_file: f64) -> Result<(), Comman
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // While developing, each prompt and reply and a similarity report go to
-    // `files-cleaner/prompts/` (ignored by git), for tuning the grouping.
+    // For tuning the grouping: prompts hold file contents, so only while
+    // developing (`prompts/` is ignored by git).
     #[cfg(debug_assertions)]
     grouping::trace_to(concat!(env!("CARGO_MANIFEST_DIR"), "/../prompts"));
     tauri::Builder::default()

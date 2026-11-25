@@ -1,28 +1,22 @@
-//! The Hugging Face link to the model the user picked to describe files:
-//! only a link to one `.gguf` file, never a repo, since a repo
-//! holds many quantizations.
+//! One `.gguf` file, never a repo: a repo holds many quantizations.
 
 use serde::Serialize;
 
 use crate::download_hosts::DOWNLOAD_HOST;
 
-/// A link to one GGUF file on Hugging Face, as the app downloads it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelLink {
-    /// The file's download link: its `/resolve/` link.
     pub url: String,
-    /// The file's name, which it is saved as.
     pub file_name: String,
 }
 
 const NOT_ONE_FILE: &str = "Paste the link to one .gguf file.";
 
-/// The download link for `link`, a Hugging Face `/blob/` or `/resolve/`
-/// link to one `.gguf` file, or why it can't be used.
 pub fn describing_model_link(link: &str) -> Result<ModelLink, String> {
     let link = link.trim();
-    // A pasted link may name Hugging Face's other hosts; the download link always names `DOWNLOAD_HOST`.
+    // A pasted link may name Hugging Face's other hosts, where downloads can't
+    // start.
     let rest = link
         .strip_prefix("https://")
         .and_then(|rest| {

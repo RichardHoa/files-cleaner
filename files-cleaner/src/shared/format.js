@@ -1,6 +1,6 @@
 const UNITS = ["bytes", "KB", "MB", "GB", "TB"];
 
-/** 1536 → "1.5 KB", like macOS and most Linux file managers (powers of 1000). */
+/** Powers of 1000, like macOS and most Linux file managers. */
 export function formatSize(bytes) {
   let value = bytes;
   let unit = 0;
@@ -14,29 +14,21 @@ export function formatSize(bytes) {
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
-/** Milliseconds since the epoch → a local date and time; "—" if unknown. */
 export function formatDate(millis) {
   return millis == null ? "—" : dateFormat.format(new Date(millis));
 }
 
 const numberFormat = new Intl.NumberFormat();
 
-/** 108000 → "108,000". */
 export function count(n) {
   return numberFormat.format(n);
 }
 
-/** `plural(3, "file")` → "3 files"; `plural(1, "file")` → "1 file". */
 export function plural(n, word) {
   return `${count(n)} ${n === 1 ? word : `${word}s`}`;
 }
 
-/**
- * "a/b/c/d.txt" → "…/c/d.txt": the longest end of `path` that `fits`, led by "…". Whole
- * folders (ended by the one-character `separator`) are dropped from the start first; only a
- * file name too long on its own is cut mid-word.
- * If `fits` accepts a text, it must also accept every shorter end of it.
- */
+/** Binary search, so if `fits` accepts a text it must accept every shorter end of it. */
 export function fitTail(path, separator, fits) {
   if (fits(path)) return path;
   const tail = (start) => `…${path.slice(start)}`;
@@ -49,7 +41,7 @@ export function fitTail(path, separator, fits) {
   return tail(firstFitting(starts, (start) => fits(tail(start))) ?? path.length - 1);
 }
 
-/** The first of `sorted` that passes `ok`, given every later one passes once one does. */
+/** `sorted` must fail up to some point and pass from there on. */
 function firstFitting(sorted, ok) {
   let low = 0;
   let high = sorted.length;
@@ -69,7 +61,6 @@ const RELATIVE_UNITS = [
   ["minute", 60_000],
 ];
 
-/** How long before `now` the time `millis` was: "just now", "5 minutes ago", "2 days ago", … */
 export function relativeTime(millis, now = Date.now()) {
   const elapsed = now - millis;
   for (const [unit, length] of RELATIVE_UNITS) {
@@ -79,7 +70,7 @@ export function relativeTime(millis, now = Date.now()) {
   return "just now";
 }
 
-/** "/Users/me/Downloads" → `{ name: "Downloads", parent: "/Users/me" }`; a disk root is its own name. */
+/** A disk root has no parent, so it is its own name. */
 export function splitPath(path, separator) {
   const trimmed = path.length > 1 && path.endsWith(separator) ? path.slice(0, -1) : path;
   const at = trimmed.lastIndexOf(separator);
@@ -87,5 +78,4 @@ export function splitPath(path, separator) {
   return { name: trimmed.slice(at + 1), parent: at === 0 ? separator : trimmed.slice(0, at) };
 }
 
-/** What the OS with path separator `separator` calls its System Trash. */
 export const trashPlace = (separator) => (separator === "\\" ? "Recycle Bin" : "Trash");

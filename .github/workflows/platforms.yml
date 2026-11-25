@@ -1,7 +1,4 @@
-# Builds, tests and packages the app on each OS it ships for, with the
-# grouping engine's llama.cpp on Metal (macOS) or Vulkan (Windows, Linux).
-# Runs only for a pushed version tag (v0.1.0), which also publishes the
-# installers as a GitHub Release once every OS has built.
+# Only for a pushed version tag, which also publishes the installers.
 name: Platforms
 
 on:
@@ -33,7 +30,7 @@ jobs:
             libayatana-appindicator3-dev librsvg2-dev libglib2.0-dev \
             libvulkan-dev spirv-headers glslc
 
-      # Sets VULKAN_SDK. The runtime brings vulkan-1.dll, which build.rs bundles.
+      # The runtime brings vulkan-1.dll, which build.rs bundles.
       - name: Install the Vulkan SDK and runtime
         if: runner.os == 'Windows'
         uses: jakoch/install-vulkan-sdk-action@7fe84289ddbf750f7eff9f8e4588e600e1dd06c8 # v1.8.1
@@ -63,10 +60,9 @@ jobs:
         shell: bash
         run: echo "CMAKE_GENERATOR=Ninja" >> "$GITHUB_ENV"
 
-      # cl.exe can't open files past MAX_PATH (260), and llama.cpp's shader
-      # tool nests its build ~270 characters deep under src-tauri/target,
-      # failing with C1041. Cargo builds through a short junction instead;
-      # the files stay in src-tauri/target for the cache and the upload.
+      # cl.exe can't open files past MAX_PATH, and llama.cpp's shader tool nests ~270 characters
+      # deep (C1041). Cargo builds through a short junction; the files stay in src-tauri/target for
+      # the cache and upload.
       - name: Shorten the target path
         if: runner.os == 'Windows'
         shell: pwsh
@@ -114,8 +110,7 @@ jobs:
         working-directory: files-cleaner
         run: npm run tauri build
 
-      # Installs each installer and starts the installed app with
-      # --self-check: it finds its bundled PDFium and OCR files and reads a PDF.
+      # Catches installers missing their bundled PDFium or OCR files.
       - name: Check the installed app (.deb, AppImage)
         if: runner.os == 'Linux'
         timeout-minutes: 10
@@ -156,8 +151,7 @@ jobs:
           $nsis = Get-ChildItem nsis\*.exe | Select-Object -First 1
           Start-Process $nsis.FullName -ArgumentList '/S' -Wait
           Test-Installed "$env:LOCALAPPDATA\files-cleaner"
-          # The MSI reuses the folder NSIS saved under HKCU\Software\<publisher>\files-cleaner,
-          # so without this it installs over the NSIS copy, not into Program Files.
+          # The MSI reuses the folder NSIS saved here, so it would install over the NSIS copy.
           Remove-Item -Path "HKCU:\Software\*\files-cleaner" -Recurse
           $msi =Get-ChildItem msi\*.msi | Select-Object -First 1
           $msiLog = "$env:RUNNER_TEMP\msi.log"
@@ -187,8 +181,7 @@ jobs:
           path: release-artifacts
           merge-multiple: true
 
-      # The installers only: the .app inside the macOS bundle is a folder,
-      # which the .dmg already carries.
+      # The .app is a folder, which the .dmg already carries.
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           generate_release_notes: true

@@ -11,7 +11,6 @@ use common::{
 
 use files_cleaner_core::{duplicate_groups, scan, OperationKind, Plan, Reason};
 
-/// Sets `path`'s modified date to `secs` after the epoch.
 fn set_modified(path: &Path, secs: u64) {
     let time = UNIX_EPOCH + Duration::from_secs(secs);
     fs::File::options()
@@ -27,8 +26,6 @@ fn plan_for(root: &Path) -> Plan {
     build_plan(&scan(root, &config).unwrap(), &config)
 }
 
-/// The relative paths the Plan trashes, sorted, `/`-separated, leaving out
-/// the folders it empties.
 fn trashed(plan: &Plan) -> Vec<String> {
     let mut paths: Vec<String> = plan
         .operations
@@ -162,9 +159,7 @@ fn the_keeper_is_the_newest_by_modified_date() {
     assert_eq!(trashed(&plan_for(dir.path())), ["older.txt"]);
 }
 
-/// The Plan for `root` after `dates` sets each named entry's
-/// `(modified, created)`. Created dates can't be set on disk, so the test
-/// sets them on the scanned entries instead.
+/// Created dates can't be set on disk, so they are set on the scanned entries.
 fn plan_with_dates(root: &Path, dates: &[(&str, i64, Option<i64>)]) -> Plan {
     let config = empty_config(root);
     let mut result = scan(root, &config).unwrap();
@@ -315,8 +310,8 @@ fn one_copy_missing_its_created_date_skips_that_tie_break_for_the_whole_group() 
     write(dir.path(), "b/mid.txt", "copy");
     write(dir.path(), "c.txt", "copy");
 
-    // Comparing created dates only where both are known would make
-    // long < c < mid < long, and the Keeper would depend on scan order.
+    // Comparing created dates only where both are known would make the Keeper
+    // depend on scan order.
     let plan = plan_with_dates(
         dir.path(),
         &[

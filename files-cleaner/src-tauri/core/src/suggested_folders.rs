@@ -1,6 +1,3 @@
-//! Turns the user's choices on the review screen, for each Duplicate
-//! Group and each Suggested Folder, into one Plan.
-
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs;
@@ -14,34 +11,32 @@ use crate::os_trash::OsTrash;
 use crate::planner::{finish, move_to, names_below, trash, Plan, Reason};
 use crate::scanner::{ScanEntry, ScanResult};
 
-/// What the user chose for one Suggested Folder.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SuggestedFolderChoice {
-    /// As the user left it; made safe on every OS before planning.
+    /// Not yet safe on every OS.
     pub name: String,
     pub choice: FolderChoice,
-    /// Its files, by scanned path, each with what happens to it.
     pub files: Vec<(PathBuf, FileChoice)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum FolderChoice {
-    /// A new folder in the Scan Root.
     CreateHere,
-    /// Into `folder`, which already exists, with no Create Folder.
-    AddTo { folder: PathBuf },
-    /// A new folder inside `folder`, which the user picked.
-    CreateIn { folder: PathBuf },
-    /// Every file is trashed.
+    /// No Create Folder: it already exists.
+    AddTo {
+        folder: PathBuf,
+    },
+    CreateIn {
+        folder: PathBuf,
+    },
     TrashAll,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FileChoice {
-    /// Goes wherever its Suggested Folder's choice sends it.
     InFolder,
     Trash,
     /// Stays where it is.
@@ -50,7 +45,7 @@ pub enum FileChoice {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SuggestedFolderError {
-    /// Nothing is left of `name` once made safe; it is never read as "trash".
+    /// An error, as an empty name must never be read as "trash".
     EmptyName { name: String },
 }
 
@@ -69,8 +64,7 @@ impl fmt::Display for SuggestedFolderError {
 
 impl std::error::Error for SuggestedFolderError {}
 
-/// What the user chose for one Duplicate Group: its Filed Copy, if any copy
-/// is kept, and the copies to trash. A copy in neither stays where it is.
+/// A copy in neither list stays where it is.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DuplicateChoice {
@@ -78,8 +72,6 @@ pub struct DuplicateChoice {
     pub trash: Vec<PathBuf>,
 }
 
-/// Proposes each Suggested Folder's choice, as `build_review_plan` does
-/// with no duplicates.
 pub fn build_suggested_folders_plan(
     scan: &ScanResult,
     os_trash: &dyn OsTrash,
@@ -88,18 +80,8 @@ pub fn build_suggested_folders_plan(
     build_review_plan(scan, os_trash, &[], folders)
 }
 
-/// Proposes the whole review as one Plan. Each Duplicate Group's copies to
-/// trash are trashed, naming its Kept Copy, if any. Each Suggested Folder's
-/// choice is a new folder (with a Clash Suffix if its name is taken; a `/`
-/// in its name puts it inside a folder of that name, which is made if it
-/// isn't there) and a
-/// Move per file into it, a Move per file into an existing folder, or a Trash
-/// per file. A file the user trashes on its own is trashed whatever the
-/// folder's choice; a file taken out, or already in that folder, stays put.
-/// A copy already trashed as a duplicate is left out of its folder, as are
-/// files the scan didn't find.
-/// Emptied folders, worked out from all of it, and Operations that can't
-/// happen are handled as in `build_plan`.
+/// One Plan for everything, as Emptied Folders depend on all of it. A copy
+/// already trashed as a duplicate is left out of its folder.
 pub fn build_review_plan(
     scan: &ScanResult,
     os_trash: &dyn OsTrash,
@@ -122,7 +104,6 @@ pub fn build_review_plan(
             }
         }
     }
-    // The names taken in each destination folder, lowercased.
     let mut taken: HashMap<PathBuf, HashSet<String>> = HashMap::new();
     let mut claim = |folder: &Path, name: &str, free: fn(&str, &HashSet<String>) -> String| {
         let names = taken
@@ -133,8 +114,8 @@ pub fn build_review_plan(
         name
     };
     let mut created = Vec::new();
-    // The folder each `parent/name` before a `/` in a name stands for: one
-    // already there, or made once for every Suggested Folder inside it.
+    // A `/` in names nests folders; each outer one is made once for all inside
+    // it.
     let mut outer: HashMap<(PathBuf, String), PathBuf> = HashMap::new();
     for folder in folders {
         let empty = || SuggestedFolderError::EmptyName {
@@ -212,7 +193,6 @@ pub fn build_review_plan(
     Ok(finish(root, os_trash, operations, created))
 }
 
-/// The folder in `parent` named `name`, ignoring case, if there is one.
 fn existing_folder(parent: &Path, name: &str) -> Option<PathBuf> {
     let wanted = name.to_lowercase();
     fs::read_dir(parent)
@@ -225,8 +205,7 @@ fn existing_folder(parent: &Path, name: &str) -> Option<PathBuf> {
         .map(|child| child.path())
 }
 
-/// The Reason for a Suggested Folder whose files go to `destination`: named
-/// as that folder is on disk, or `name` if it has no name of its own.
+/// As on disk, so the Reason names the folder the user will find.
 fn suggested(destination: &Path, name: &str) -> Reason {
     let folder = destination
         .file_name()

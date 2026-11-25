@@ -1,58 +1,48 @@
-//! Placing a file left out of every Suggested Folder: the LLM is shown the
-//! file's card and the folders nearest it, each with the topics it holds,
-//! and picks one or none. Embeddings can't tell that "English Collocation"
-//! is English study like "IELTS Writing"; the LLM can.
+//! Embeddings can't tell that "English Collocation" is English study like
+//! "IELTS Writing"; the LLM can.
 
 use serde::{Deserialize, Serialize};
 
 use crate::card::{Card, Chat};
 
-/// What the LLM is asked about one file.
 #[derive(Debug, Clone)]
 pub struct Question {
-    /// The file's own name.
     pub file_name: String,
     pub card: Card,
-    /// The folders it may go into, most like it first.
     pub folders: Vec<Choice>,
 }
 
-/// A folder a file may go into.
 #[derive(Debug, Clone)]
 pub struct Choice {
     pub name: String,
-    /// The topics of the files in it, each once.
     pub topics: Vec<String>,
-    /// Names of files in it, so a file can be matched by its name too.
+    /// So a file can be matched by its name too.
     pub files: Vec<String>,
-    /// An existing subfolder of the Scan Root, rather than a Suggested Folder.
+    /// Rather than a Suggested Folder.
     pub existing: bool,
 }
 
-/// The answer the store keeps: the folder's label, or none.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Answer {
     pub folder: Option<String>,
 }
 
-/// The most folders a file is offered, so the prompt stays short.
+/// Keeps the prompt short.
 pub const CHOICES: usize = 8;
-/// The most topics shown for each folder.
+/// Keeps the prompt short.
 const TOPICS: usize = 6;
-/// The most file names shown for each folder.
+/// Keeps the prompt short.
 const FILES: usize = 4;
-/// Tokens a reply takes: one folder name.
 pub const MAX_NEW_TOKENS: usize = 24;
 
 const SYSTEM: &str = "You sort files into folders. Reply with one folder name and nothing else.";
 
-/// What the LLM is asked, in Qwen's chat template, written out: what
-/// identifies it. The model is given `chat(question)` in its own template.
+/// Identifies the question in the store, whichever model's template it is asked
+/// with.
 pub fn prompt(question: &Question) -> String {
     chat(question).chatml()
 }
 
-/// The placing prompt as chat messages.
 pub fn chat(question: &Question) -> Chat {
     let card = &question.card;
     // "none" goes last: small models lean towards the first choice.
@@ -101,9 +91,8 @@ pub fn chat(question: &Question) -> Chat {
     }
 }
 
-/// The folder the reply names, by its place in `question.folders`; `None`
-/// for "none" or a reply naming no folder. A name without its slash counts
-/// when only one folder has it.
+/// Small models drop the slash, so a name without it counts when only one
+/// folder has it.
 pub fn parse(reply: &str, question: &Question) -> Option<usize> {
     let bare = |s: &str| {
         s.trim()
@@ -124,8 +113,8 @@ pub fn parse(reply: &str, question: &Question) -> Option<usize> {
     })
 }
 
-/// How a folder is written in the prompt: an existing one with a slash, so
-/// it never reads as a Suggested Folder of the same name.
+/// The slash keeps an existing folder apart from a Suggested Folder of the same
+/// name.
 pub fn label(choice: &Choice) -> String {
     if choice.existing {
         format!("{}/", choice.name)

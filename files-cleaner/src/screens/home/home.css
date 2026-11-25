@@ -1,4 +1,3 @@
-/* Home */
 .home-header {
   display: flex;
   align-items: center;
@@ -84,7 +83,7 @@
   white-space: nowrap;
 }
 
-/* Muted rather than faded: opacity would drop "Folder not found" and the remove button below contrast. */
+/* Muted rather than faded: opacity would drop the text below contrast. */
 .tile.missing {
   cursor: default;
   color: var(--muted);

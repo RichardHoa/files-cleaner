@@ -1,6 +1,4 @@
-/* Rules: a numbered list in one bordered box with a toolbar above it, and an editor laid out like a macOS
-   settings form: grouped boxes of rows, each a right-aligned label beside its controls. A Rule that overlaps
-   an earlier one wears the solid yellow badge. */
+/* Laid out like a macOS settings form. */
 .rules-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -58,7 +56,7 @@
   outline-offset: -2px;
 }
 
-/* Its place in the order: the first Rule a file fits wins. */
+/* The order is the priority, so it is numbered. */
 .rules-order {
   flex: none;
   width: 1.5em;
@@ -100,7 +98,7 @@
   display: none;
 }
 
-/* A file that fits this Rule and an earlier one goes by the earlier one: said in solid yellow. */
+/* Worth noticing: such a file goes by the earlier Rule, not this one. */
 .rules-overlaps {
   display: inline-flex;
   align-items: center;
@@ -197,7 +195,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The Rule as the controls make it, read back as its row in the list will. */
 .rules-readback {
   margin: var(--space-5) 0 var(--space-2);
   padding: var(--space-3) var(--space-4);
@@ -226,7 +223,6 @@
   }
 }
 
-/* No Rules yet: the introduction's Rules drawing over one line and a New Rule button. */
 .rules-empty {
   display: flex;
   flex-direction: column;

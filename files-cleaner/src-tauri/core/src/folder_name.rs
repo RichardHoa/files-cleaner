@@ -1,7 +1,5 @@
-//! Folder names that are valid on every OS, since disks move between
-//! machines.
+//! Valid on every OS, since disks move between machines.
 
-/// Characters no folder name may hold on some OS.
 const FORBIDDEN: &[char] = &['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
 
 /// Names Windows keeps for devices, with or without an extension.
@@ -10,12 +8,8 @@ const WINDOWS_RESERVED: &[&str] = &[
     "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 ];
 
-/// The longest a folder name is made, in characters.
 const MAX_CHARS: usize = 100;
 
-/// `name` made valid as a folder name on every OS: forbidden and control
-/// characters removed, whitespace and trailing dots trimmed, a Windows
-/// device name altered so it isn't one, and at most `MAX_CHARS` characters.
 /// `None` if nothing is left.
 pub fn safe_folder_name(name: &str) -> Option<String> {
     let kept: String = name
@@ -34,7 +28,6 @@ pub fn safe_folder_name(name: &str) -> Option<String> {
     (!safe.is_empty()).then_some(safe)
 }
 
-/// Without leading or trailing whitespace, or trailing dots.
 fn trimmed(name: &str) -> String {
     name.trim()
         .trim_end_matches(|c: char| c == '.' || c.is_whitespace())

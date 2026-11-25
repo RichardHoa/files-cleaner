@@ -1,6 +1,5 @@
-//! Finds Duplicate Groups: files with byte-identical contents, whatever
-//! their names. Compares sizes first, then a partial hash of each file's
-//! start and end, then a full BLAKE3 hash, so most files are never read.
+//! Sizes, then partial hashes, then full hashes, so most files are never read
+//! in full.
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -20,63 +19,46 @@ use crate::scanner::{ScanEntry, ScanResult};
 const PARTIAL_BYTES: u64 = 64 * 1024;
 /// Bytes read at a time for a full hash, so progress moves within a large file.
 const FULL_HASH_CHUNK: usize = 1024 * 1024;
-/// The longest finding duplicates waits between progress reports.
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 
-/// What finding duplicates is doing.
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum DuplicatePhase {
-    /// Comparing the start and end of files of the same size; counted in files.
     Comparing,
-    /// Reading in full the files whose start and end match; counted in bytes.
     Checking,
 }
 
-/// How far finding duplicates has got, reported while it runs.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DuplicateProgress {
     pub phase: DuplicatePhase,
-    /// Files compared, or bytes checked, so far in this phase.
     pub finished: u64,
-    /// Files to compare, or bytes to check, in this phase.
     pub total: u64,
-    /// The file being read.
     pub current: PathBuf,
 }
 
-/// Two or more files with the same contents: the copy that starts out kept,
-/// and the others.
 pub struct Found<'a> {
     pub kept: &'a ScanEntry,
     pub copies: Vec<&'a ScanEntry>,
 }
 
-/// A Duplicate Group as the review screen shows it: every copy, the one that
-/// starts out kept first.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DuplicateGroup {
-    /// Bytes of one copy.
     pub size: u64,
     pub copies: Vec<DuplicateCopy>,
 }
 
-/// One copy in a Duplicate Group.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DuplicateCopy {
     pub path: PathBuf,
-    /// The names from the Scan Root down to the copy, its own name last.
     pub relative_path: Vec<String>,
     /// Milliseconds since the Unix epoch.
     pub modified: i64,
     pub created: Option<i64>,
 }
 
-/// Every Duplicate Group in `scan`, as `find` finds them; None once `cancel`
-/// is set.
 pub fn duplicate_groups(
     scan: &ScanResult,
     rule: DefaultCopyRule,
@@ -104,13 +86,8 @@ pub fn duplicate_groups(
     )
 }
 
-/// Every Duplicate Group among `entries`, its copies ordered by `rule`,
-/// leaving out 0-byte files and Packages. Files that can't be read are left
-/// out too. Calls `on_progress` at most every `PROGRESS_INTERVAL` in each
-/// `DuplicatePhase`: first while comparing the start and end of every file
-/// that shares its size, then while reading in full those that still match.
-/// `cancel` is checked before each file is read; once it is set, the rest
-/// are passed over and None is returned.
+/// Leaves out 0-byte files, which are identical without being copies, and
+/// Packages.
 pub fn find<'a>(
     entries: &'a [ScanEntry],
     rule: DefaultCopyRule,
@@ -161,8 +138,8 @@ pub fn find<'a>(
             }
             full_hash(&e.path, |read| progress.advance(&e.path, read)).ok()
         }) {
-            // Created dates are compared only if every copy has one, so the
-            // order stays consistent whichever copies are compared.
+            // Comparing dates only some copies have would make the order
+            // inconsistent.
             let by_created = same.iter().all(|e| e.created.is_some());
             same.sort_by(|a, b| copy_order(a, b, rule, by_created));
             let kept = same.remove(0);
@@ -176,7 +153,6 @@ pub fn find<'a>(
     Some(groups)
 }
 
-/// Reports progress through one phase at a time, at most every `PROGRESS_INTERVAL`.
 struct Progress<F: FnMut(DuplicateProgress)> {
     phase: DuplicatePhase,
     finished: u64,
@@ -196,7 +172,6 @@ impl<F: FnMut(DuplicateProgress)> Progress<F> {
         }
     }
 
-    /// Starts `phase`, with `total` files or bytes to go through.
     fn start(&mut self, phase: DuplicatePhase, total: u64) {
         self.phase = phase;
         self.finished = 0;
@@ -204,7 +179,6 @@ impl<F: FnMut(DuplicateProgress)> Progress<F> {
         self.last_report = None;
     }
 
-    /// Called as `amount` more files or bytes of `current` are read.
     fn advance(&mut self, current: &Path, amount: u64) {
         if self
             .last_report
@@ -222,8 +196,6 @@ impl<F: FnMut(DuplicateProgress)> Progress<F> {
     }
 }
 
-/// Splits `entries` by `key`, keeping only groups of two or more. Entries
-/// whose key is `None` are dropped.
 fn split<K: Hash + Eq>(
     entries: Vec<&ScanEntry>,
     mut key: impl FnMut(&ScanEntry) -> Option<K>,
@@ -243,9 +215,7 @@ fn split<K: Hash + Eq>(
         .collect()
 }
 
-/// `entries` with each file listed under only one name: hard links to the
-/// same data are one file, and trashing one name frees nothing. The name
-/// kept is the first alphabetically.
+/// Hard links are one file: trashing one name frees nothing.
 fn one_name_per_file(mut entries: Vec<&ScanEntry>) -> Vec<&ScanEntry> {
     entries.sort_by(|a, b| a.path.cmp(&b.path));
     let mut seen = HashSet::new();
@@ -253,8 +223,8 @@ fn one_name_per_file(mut entries: Vec<&ScanEntry>) -> Vec<&ScanEntry> {
     entries
 }
 
-/// Which file `path` names, if it has other names (hard links). Windows
-/// can't tell in stable Rust, so there each name counts as its own file.
+/// Windows can't tell in stable Rust, so there each name counts as its own
+/// file.
 #[cfg(unix)]
 fn file_id(path: &Path) -> Option<(u64, u64)> {
     use std::os::unix::fs::MetadataExt;
@@ -267,10 +237,7 @@ fn file_id(_path: &Path) -> Option<(u64, u64)> {
     None
 }
 
-/// Which of two copies `rule` prefers (sorts first). Dates compare by modified
-/// date, then by created date if `by_created`. Newest and oldest fall back on
-/// the shortest path; the shortest path falls back on the newest. Last comes
-/// the first alphabetically.
+/// Always ends in a tie-break, so the kept copy never depends on scan order.
 fn copy_order(a: &ScanEntry, b: &ScanEntry, rule: DefaultCopyRule, by_created: bool) -> Ordering {
     let created = if by_created {
         b.created.cmp(&a.created)
@@ -287,7 +254,6 @@ fn copy_order(a: &ScanEntry, b: &ScanEntry, rule: DefaultCopyRule, by_created: b
     .then(a.path.cmp(&b.path))
 }
 
-/// A hash of the file's first and last `PARTIAL_BYTES`.
 fn partial_hash(path: &Path, size: u64) -> io::Result<[u8; 32]> {
     // A file in the Scan Root the user chose; no path comes from a web request.
     // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
@@ -307,7 +273,6 @@ fn partial_hash(path: &Path, size: u64) -> io::Result<[u8; 32]> {
     Ok(*hasher.finalize().as_bytes())
 }
 
-/// A hash of the whole file, calling `on_read` with the bytes of each chunk read.
 fn full_hash(path: &Path, mut on_read: impl FnMut(u64)) -> io::Result<[u8; 32]> {
     // A file in the Scan Root the user chose; no path comes from a web request.
     // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
