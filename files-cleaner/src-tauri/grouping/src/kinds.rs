@@ -83,7 +83,7 @@ mod tests {
             assert!(KINDS.contains(&named), "{named} isn't in KINDS");
         }
 
-        let screen = include_str!("../../../src/screens/rules/rule-text.js");
+        let screen = include_str!("../../../src/screens/rules/rules.js");
         let list = screen.split("export const KINDS = [").nth(1).unwrap();
         assert_eq!(quoted(&list[..list.find("];").unwrap()]), KINDS);
     }
