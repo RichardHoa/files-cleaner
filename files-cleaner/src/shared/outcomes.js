@@ -1,5 +1,5 @@
-import { pathSeparator } from "./api.js";
-import { el, showStatus } from "./dom.js";
+import { cancelRun, pathSeparator } from "./api.js";
+import { el, showStatus, showWarning } from "./dom.js";
 import { addSample, count, plural, splitPath, timeLeft, trashPlace } from "./format.js";
 
 /** Failed and unrecoverable show only if any. */
@@ -83,6 +83,61 @@ export function warningBlock(text, onShow = null) {
 export function describeRunProgress({ finished, total, phase }, { verb, of }, left = "") {
   const done = phase === "puttingBack" ? `Putting back ${count(finished)} of ${count(total)}` : `${verb} ${count(finished)} of ${of(total)}`;
   return `${done}${left ? ` · ${left}` : ""}`;
+}
+
+/** For a Cancel that came before its Run started: `cancelRun` can't reach it, so nothing was done. */
+export const NOT_STARTED = Object.freeze({ cancelled: true, sessionId: null, done: [], skipped: [], failed: [], unrecoverable: [] });
+
+/**
+ * The Cancel of a Run started on the Review screen, drawn on `button` while the Run lasts.
+ * No confirm and no shortcut: it only undoes, so a slip costs nothing.
+ */
+export function runCancel(title) {
+  let run = null;
+  const draw = () => {
+    run.button.replaceChildren(el("span", {}, run.asked ? "Cancelling…" : "Cancel"));
+    run.button.disabled = run.asked;
+    run.button.title = run.asked ? "" : title;
+  };
+  return {
+    draw,
+    shownOn: (button) => run?.button === button,
+    /** A Run not yet started must check this itself, as `cancelRun` can't reach it. */
+    get asked() {
+      return run?.asked ?? false;
+    },
+    start(button) {
+      run = { button, asked: false };
+      draw();
+    },
+    async cancel() {
+      const cancelled = run;
+      cancelled.asked = true;
+      draw();
+      try {
+        await cancelRun();
+      } catch {
+        if (run !== cancelled) return;
+        cancelled.asked = false;
+        draw();
+      }
+    },
+    /** True if Cancel was clicked: when the Run's `Summary` isn't `cancelled`, it came too late. */
+    finish() {
+      const asked = run.asked;
+      run = null;
+      return asked;
+    },
+  };
+}
+
+/** A folder the Session made stays only because something in it did, so it isn't counted. */
+export const notPutBack = (summary) => [...summary.skipped, ...summary.failed, ...summary.unrecoverable].filter((outcome) => outcome.kind !== "createFolder");
+
+/** `every` names them all, as in "every copy". */
+export function showCancelled(node, notBack, { every, of }) {
+  if (notBack.length === 0) showStatus(node, `Cancelled · ${every} is back`);
+  else showWarning(node, `Cancelled, but ${of(notBack.length)} couldn't be put back. See History.`);
 }
 
 /**

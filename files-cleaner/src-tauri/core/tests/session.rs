@@ -267,6 +267,104 @@ fn a_run_cancelled_part_way_puts_everything_back_and_keeps_no_session() {
 }
 
 #[test]
+fn a_cancelled_plan_moves_files_back_and_removes_the_folder_it_made() {
+    let dir = scan_root();
+    // The Plan runs in path order, so the trashes come after the moves.
+    for name in ["lecture.pdf", "slides.pptx", "x-junk.txt", "y-junk.txt"] {
+        write(dir.path(), name, name);
+    }
+    let journal = journal_dir();
+    let before = snapshot(dir.path());
+    let scan = scan(dir.path(), &empty_config(dir.path())).unwrap();
+    let folder = |name: &str, choice, files: [&str; 2]| SuggestedFolderChoice {
+        name: name.to_string(),
+        choice,
+        files: files
+            .map(|file| (scan.root.join(file), FileChoice::InFolder))
+            .to_vec(),
+    };
+    let plan = build_suggested_folders_plan(
+        &scan,
+        &[
+            folder(
+                "CS101",
+                FolderChoice::CreateHere,
+                ["lecture.pdf", "slides.pptx"],
+            ),
+            folder("Old", FolderChoice::TrashAll, ["x-junk.txt", "y-junk.txt"]),
+        ],
+    )
+    .unwrap();
+    let cancel = AtomicBool::new(false);
+    let trash = CancelsAt {
+        trash: FakeTrash::new(journal.path()),
+        at: 1,
+        trashed: Cell::new(0),
+        cancel: &cancel,
+    };
+
+    let summary = core::run_with_progress(
+        &plan,
+        &all_ids(&plan),
+        journal.path(),
+        &trash,
+        &cancel,
+        |_| {},
+    )
+    .unwrap();
+
+    assert!(summary.cancelled);
+    assert_eq!(
+        summary.done.len(),
+        4,
+        "the folder, both moves and one trash"
+    );
+    assert_eq!(snapshot(dir.path()), before);
+    assert!(all_sessions(journal.path()).is_empty());
+}
+
+#[test]
+fn a_cancelled_folder_trash_now_puts_back_every_file_already_trashed() {
+    let dir = scan_root();
+    for name in ["a.txt", "b.txt", "c.txt"] {
+        write(dir.path(), name, name);
+    }
+    let journal = journal_dir();
+    let before = snapshot(dir.path());
+    let scan = scan(dir.path(), &empty_config(dir.path())).unwrap();
+    let folder = SuggestedFolderChoice {
+        name: "Old".to_string(),
+        choice: FolderChoice::TrashAll,
+        files: ["a.txt", "b.txt", "c.txt"]
+            .map(|file| (scan.root.join(file), FileChoice::Trash))
+            .to_vec(),
+    };
+    let plan = build_suggested_folders_plan(&scan, &[folder]).unwrap();
+    let cancel = AtomicBool::new(false);
+    let trash = CancelsAt {
+        trash: FakeTrash::new(journal.path()),
+        at: 2,
+        trashed: Cell::new(0),
+        cancel: &cancel,
+    };
+
+    let summary = core::run_with_progress(
+        &plan,
+        &all_ids(&plan),
+        journal.path(),
+        &trash,
+        &cancel,
+        |_| {},
+    )
+    .unwrap();
+
+    assert!(summary.cancelled);
+    assert_eq!(summary.done.len(), 2);
+    assert_eq!(snapshot(dir.path()), before);
+    assert!(all_sessions(journal.path()).is_empty());
+}
+
+#[test]
 fn a_cancel_after_the_run_finished_finds_the_flag_set_and_puts_nothing_back() {
     let dir = messy_folder();
     let journal = journal_dir();

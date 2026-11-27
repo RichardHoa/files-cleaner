@@ -132,19 +132,25 @@ export class ReviewState {
     const folders = chosen
       .filter((choice) => choice.files.size > 0)
       .map((choice) => ({ name: choice.name.trim() || "No name", choice: { type: "trashAll" }, files: [...choice.files.keys()].map((path) => [path, "trash"]) }));
-    const trashed = (paths) => {
-      const gone = new Set(paths);
-      for (const choice of chosen) {
-        for (const path of gone) choice.files.delete(path);
-        if (choice.files.size === 0 && this.choices.includes(choice)) this.leaveUnsorted(choice);
-      }
-      for (const duplicate of this.duplicates) {
-        if (gone.has(filedCopy(duplicate))) filedCopyTrashed(duplicate, this.choices, this.left);
-      }
-      // A group left with one copy is a file like any other.
-      this.duplicates = this.duplicates.filter((duplicate) => duplicate.copies.size > 1);
-    };
-    return { folders, trashed };
+    return { folders, trashed: (paths) => this.gone(paths) };
+  }
+
+  /** A Session moved or trashed these and they stayed so: they're no longer where the Review has them. */
+  gone(paths) {
+    const gone = new Set(paths);
+    for (const path of gone) this.left.delete(path);
+    for (const choice of [...this.choices]) {
+      const had = [...gone].filter((path) => choice.files.delete(path)).length > 0;
+      if (had && choice.files.size === 0) this.leaveUnsorted(choice);
+    }
+    // The other copies first, so the one kept in a Filed Copy's place is one still there.
+    const filedGone = this.duplicates.filter((duplicate) => gone.has(filedCopy(duplicate)));
+    const filed = new Set(filedGone.map(filedCopy));
+    this.copiesTrashed([...gone].filter((path) => !filed.has(path)));
+    for (const duplicate of filedGone) {
+      if (this.duplicates.includes(duplicate)) filedCopyTrashed(duplicate, this.choices, this.left);
+    }
+    this.duplicates = this.duplicates.filter((duplicate) => duplicate.copies.size > 1);
   }
 
   setFile(choice, path, file) {

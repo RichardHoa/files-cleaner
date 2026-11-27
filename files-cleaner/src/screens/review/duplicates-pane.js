@@ -1,10 +1,10 @@
 // Trashing copies is a Session of its own, so the user can free space without waiting for the
 // Suggested Folders.
-import { buildReviewPlan, cancelRun, pathSeparator, runPlan } from "../../shared/api.js";
+import { buildReviewPlan, pathSeparator, runPlan } from "../../shared/api.js";
 import { busy, drawMore, el, icon, showStatus, showWarning } from "../../shared/dom.js";
 import { formatDate, formatSize, trashPlace } from "../../shared/format.js";
 import { withShortcut } from "../../shared/menus.js";
-import { describeNothingDone, describeWarning, showRunProgress } from "../../shared/outcomes.js";
+import { NOT_STARTED, describeNothingDone, describeWarning, notPutBack, runCancel, showCancelled, showRunProgress } from "../../shared/outcomes.js";
 import { copyFolder, filedCopy, planDuplicates, trashedCopies, trashedCopiesIn } from "./review-choices.js";
 import { copiesText, fileName } from "./selection.js";
 
@@ -13,9 +13,8 @@ export function duplicatesPane(ctx) {
   const trashNow = el("button", { type: "button", className: "small" });
   // Outside the redrawn part, so the result survives redraws.
   const status = el("p", { className: "status duplicates-trash-status" });
-  /** Set while copies are being trashed, when the button is Cancel. */
-  let trashing = null;
-  trashNow.addEventListener("click", () => (trashing ? cancelTrashing() : trashCopiesNow()));
+  const cancel = runCancel("Puts back every copy trashed so far");
+  trashNow.addEventListener("click", () => (cancel.shownOn(trashNow) ? cancel.cancel() : trashCopiesNow()));
 
   function panel() {
     if (state.duplicates.length === 0) return [el("h2", {}, "Duplicates"), status, el("p", { className: "note" }, "No duplicates")];
@@ -50,7 +49,7 @@ export function duplicatesPane(ctx) {
 
   function trashNowRow(trashed, trashedSize) {
     const trash = trashPlace(pathSeparator);
-    if (trashing) drawCancel();
+    if (cancel.shownOn(trashNow)) cancel.draw();
     else {
       trashNow.replaceChildren(icon("trash"), el("span", {}, trashed ? `Trash ${copiesText(trashed)} now` : "No copies to trash"));
       trashNow.disabled = trashed === 0 || view.running;
@@ -64,49 +63,24 @@ export function duplicatesPane(ctx) {
     );
   }
 
-  function drawCancel() {
-    trashNow.replaceChildren(el("span", {}, trashing.cancelling ? "Cancelling…" : "Cancel"));
-    trashNow.disabled = trashing.cancelling;
-    trashNow.title = trashing.cancelling ? "" : "Puts back every copy trashed so far";
-  }
-
-  // No confirm and no shortcut: it only undoes, so a slip costs nothing.
-  async function cancelTrashing() {
-    const cancelled = trashing;
-    cancelled.cancelling = true;
-    drawCancel();
-    try {
-      await cancelRun();
-    } catch {
-      if (trashing !== cancelled) return;
-      cancelled.cancelling = false;
-      drawCancel();
-    }
-  }
-
   /** Copies that couldn't go stay marked Trash, for the rest of the Plan. */
   async function trashCopiesNow() {
     if (view.running) return;
     view.running = true;
-    trashing = { cancelling: false };
-    drawCancel();
+    cancel.start(trashNow);
     ctx.redraw.header();
     const summary = await busy(status, [], "Trashing copies…", async () => {
       const plan = await buildReviewPlan(planDuplicates(state.duplicates), []);
-      // `cancelRun` can't reach a Run that hasn't started.
-      if (trashing.cancelling) return { cancelled: true, done: [], skipped: [], failed: [], unrecoverable: [] };
+      if (cancel.asked) return NOT_STARTED;
       const approved = plan.operations.filter((op) => op.reason.type === "duplicate" && (op.ticked || Boolean(op.error))).map((op) => op.id);
       return runPlan(approved, showRunProgress(status, { verb: "Trashing", of: copiesText }));
     });
     view.running = false;
-    // Set if the Run finished before the Cancel reached it.
-    const tooLate = trashing.cancelling;
-    trashing = null;
+    const tooLate = cancel.finish();
     if (summary?.cancelled) {
-      const notBack = [...summary.skipped, ...summary.failed, ...summary.unrecoverable];
+      const notBack = notPutBack(summary);
+      showCancelled(status, notBack, { every: "every copy", of: copiesText });
       state.copiesTrashed(notBack.map((outcome) => outcome.source));
-      if (notBack.length === 0) showStatus(status, "Cancelled · every copy is back");
-      else showWarning(status, `Cancelled, but ${copiesText(notBack.length)} couldn't be put back. See History.`);
     } else if (summary) {
       state.copiesTrashed(summary.done.map((outcome) => outcome.source));
       const warning = describeWarning(summary, { action: "run", done: "trashed", separator: pathSeparator });

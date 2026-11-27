@@ -148,3 +148,11 @@ test("a folder trashed now with a Duplicate Group's Filed Copy in it leaves that
   assert.deepEqual([...state.left], ["/d/x/a.pdf"]);
   assert.deepEqual(state.choices, []);
 });
+
+test("files a cancelled Plan couldn't put back leave the Plan, so a later Run doesn't plan them again", () => {
+  const state = twoFolders();
+
+  state.gone(["/d/a.pdf", "/d/c.pdf"]);
+
+  assert.deepEqual(planChoices(state.choices, state.left), [{ name: "IELTS", choice: { type: "createHere" }, files: [["/d/b.pdf", "inFolder"]] }]);
+});

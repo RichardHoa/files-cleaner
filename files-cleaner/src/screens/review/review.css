@@ -494,9 +494,26 @@
   display: none;
 }
 
+.review-run-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-block-start: var(--space-1);
+}
+
+.review-run-progress:not(:has(> .review-run-status:not(:empty), > button:not([hidden]))) {
+  display: none;
+}
+
 .review-run-status {
-  margin: var(--space-1) 0 0;
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  margin: 0;
   text-align: end;
+}
+
+.review-run-progress > button {
+  flex: none;
 }
 
 .review-run-status .progress-line-path {

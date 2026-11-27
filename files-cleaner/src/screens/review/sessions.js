@@ -4,7 +4,7 @@ import { buildReviewPlan, pathSeparator, previewReviewPlan, runPlan } from "../.
 import { busy, el, showStatus, showWarning } from "../../shared/dom.js";
 import { count, formatSize, plural } from "../../shared/format.js";
 import { refreshMenu } from "../../shared/menus.js";
-import { describeNothingDone, describeWarning, showRunProgress } from "../../shared/outcomes.js";
+import { NOT_STARTED, describeNothingDone, describeWarning, notPutBack, runCancel, showCancelled, showRunProgress } from "../../shared/outcomes.js";
 import { describeChange, nameMissing, planChoices, planDuplicates, totals } from "./review-choices.js";
 
 /** In ms. Batches quick changes, as each answer reads the disk. */
@@ -18,6 +18,9 @@ export function sessions(ctx, result) {
   const run = el("button", { type: "button", className: "primary" });
   const cancel = el("button", { type: "button" }, "Cancel");
   const status = el("p", { className: "status review-run-status" });
+  // A folder's Trash Now starts from a menu, so its Cancel has no button to take the place of.
+  const trashNowCancel = el("button", { type: "button", className: "small", hidden: true });
+  const sessionCancel = runCancel("Puts back everything done so far");
   const emptiedBox = el("input", { type: "checkbox" });
   const emptiedText = el("span");
   const emptied = el("label", { className: "review-emptied" }, emptiedBox, emptiedText);
@@ -38,7 +41,7 @@ export function sessions(ctx, result) {
         ...(skipped ? [" · ", skippedPopover(skipped)] : []),
       ),
     ),
-    el("div", { className: "review-run" }, el("div", { className: "actions" }, emptied, cancel, run), status),
+    el("div", { className: "review-run" }, el("div", { className: "actions" }, emptied, cancel, run), el("div", { className: "review-run-progress" }, status, trashNowCancel)),
   );
 
   function skippedPopover({ label, detail: text }) {
@@ -76,6 +79,9 @@ export function sessions(ctx, result) {
     emptiedText.textContent = `Also trash ${plural(possible.length, "emptied folder")}`;
     const ticked = possible.filter((op) => state.emptiedTicked.has(op.id)).length;
     emptiedBox.checked = ticked > 0;
+    run.classList.toggle("primary", !sessionCancel.shownOn(run));
+    run.title = "";
+    if (sessionCancel.shownOn(run)) return sessionCancel.draw();
     if (state.phase === "reading" || state.more === "reading") {
       run.textContent = "Waiting for folders…";
       run.disabled = true;
@@ -86,23 +92,35 @@ export function sessions(ctx, result) {
     run.disabled = view.running || change.moved + change.trashed + ticked === 0 || state.choices.some(nameMissing);
   }
 
-  run.addEventListener("click", async () => {
+  run.addEventListener("click", () => (sessionCancel.shownOn(run) ? sessionCancel.cancel() : runApproved()));
+  trashNowCancel.addEventListener("click", () => sessionCancel.cancel());
+
+  async function runApproved() {
     clearTimeout(emptiedTimer);
     view.running = true;
-    refreshMenu();
-    const session = await busy(status, [run, cancel], "Planning…", async () => {
+    sessionCancel.start(run);
+    drawHeader();
+    const session = await busy(status, [cancel], "Planning…", async () => {
       const plan = await buildReviewPlan(planDuplicates(state.duplicates), planChoices(state.choices, state.left));
+      if (sessionCancel.asked) return NOT_STARTED;
       const approved = plan.operations
         .filter((op) => (op.reason.type === "emptiedFolder" ? state.emptiedTicked.has(op.id) && !op.error : runsOrIsListed(op)))
         .map((op) => op.id);
       return runPlan(approved, showRunProgress(status, { verb: "Moving", of: (n) => plural(n, "item") }));
     });
     view.running = false;
-    if (session?.sessionId) return nav.session(session.sessionId, null, { summary: session, action: "run", done: "moved" });
+    const tooLate = sessionCancel.finish();
+    if (session?.cancelled) {
+      const notBack = notPutBack(session);
+      state.gone(notBack.map((outcome) => outcome.source));
+      showCancelled(status, notBack, { every: "everything", of: (n) => plural(n, "item") });
+      refreshEmptied();
+      ctx.redraw.pane();
+    } else if (session?.sessionId) return nav.session(session.sessionId, null, { summary: session, action: "run", done: "moved", tooLate });
     // A Run that did nothing keeps no Session: the review stays, saying why.
-    if (session) showWarning(status, describeNothingDone(session, "moved", pathSeparator));
+    else if (session) showWarning(status, describeNothingDone(session, "moved", pathSeparator));
     drawHeader();
-  });
+  }
 
   /** A Session of its own; files that couldn't go stay in their folder. */
   async function trashFoldersNow(chosen) {
@@ -112,20 +130,30 @@ export function sessions(ctx, result) {
     clearTimeout(emptiedTimer);
     const at = Math.min(...chosen.map((choice) => state.choices.indexOf(choice)));
     view.running = true;
+    trashNowCancel.hidden = false;
+    sessionCancel.start(trashNowCancel);
     ctx.redraw.pane();
     const summary = await busy(status, [run, cancel], "Trashing files…", async () => {
       const plan = await buildReviewPlan([], folders);
+      if (sessionCancel.asked) return NOT_STARTED;
       const approved = plan.operations.filter((op) => op.reason.type === "suggestedFolder" && (op.ticked || Boolean(op.error))).map((op) => op.id);
       return runPlan(approved, showRunProgress(status, { verb: "Trashing", of: (n) => plural(n, "file") }));
     });
     view.running = false;
-    if (summary) {
+    const tooLate = sessionCancel.finish();
+    trashNowCancel.hidden = true;
+    drawHeader();
+    if (summary?.cancelled) {
+      const notBack = notPutBack(summary);
+      trashed(notBack.map((outcome) => outcome.source));
+      showCancelled(status, notBack, { every: "every file", of: (n) => plural(n, "file") });
+    } else if (summary) {
       trashed(summary.done.map((outcome) => outcome.source));
       const warning = describeWarning(summary, { action: "run", done: "trashed", separator: pathSeparator });
       // A Trash Now that did nothing keeps no Session.
       if (!summary.sessionId) showWarning(status, describeNothingDone(summary, "trashed", pathSeparator));
       else if (warning) showWarning(status, warning);
-      else showStatus(status, `${plural(summary.done.length, "file")} trashed · undo from History`);
+      else showStatus(status, `${tooLate ? "Too late to cancel · " : ""}${plural(summary.done.length, "file")} trashed · undo from History`);
     }
     if (view.renaming && !state.choices.includes(view.renaming.choice)) view.renaming = null;
     const listed = view.current === "picked" ? [...view.picked] : [view.current];

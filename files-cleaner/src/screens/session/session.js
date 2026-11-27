@@ -94,7 +94,7 @@ export function render(root, nav, sessionId, from, result) {
       return;
     }
     draw(details);
-    showStatus(status, last ? describeSummary(last.summary, last.done) : "");
+    showStatus(status, last ? `${last.tooLate ? "Too late to cancel · " : ""}${describeSummary(last.summary, last.done)}` : "");
   }
 
   async function act(label, call, action) {
