@@ -34,8 +34,8 @@ pub use duplicates::{
 };
 pub use executor::{
     redo_operations, redo_with_progress, retry_operations, retry_with_progress, run,
-    run_with_progress, undo, undo_operations, undo_with_progress, NoteKind, Outcome, RunProgress,
-    Summary,
+    run_with_progress, undo, undo_operations, undo_with_progress, NoteKind, Outcome, RunPhase,
+    RunProgress, Summary,
 };
 pub use folder_name::safe_folder_name;
 pub use journal::{lock_sessions, SessionError, SessionLock};

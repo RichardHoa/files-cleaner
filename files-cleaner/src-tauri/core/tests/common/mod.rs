@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 
 use files_cleaner_core::{
     self as core, load_config, scan, Config, DuplicateChoice, DuplicateProgress, FileChoice,
@@ -160,6 +161,7 @@ pub fn run_with_progress(
         approved,
         journal,
         &FakeTrash::new(journal),
+        &AtomicBool::new(false),
         on_progress,
     )
 }

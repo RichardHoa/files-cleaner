@@ -1,19 +1,21 @@
 mod common;
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
 use common::{
     build_plan, build_suggested_folders_plan, drop_outcomes, empty_config, journal_database,
     journal_dir, real_path, redo_operations, retry_operations, run, run_with_progress, scan_root,
-    undo, undo_operations, undo_with_progress, write,
+    undo, undo_operations, undo_with_progress, write, FakeTrash,
 };
 use files_cleaner_core::{
-    delete_all_sessions, list_sessions, lock_sessions, scan, session_details, FileChoice,
-    FolderChoice, OperationKind, OperationState, Plan, SessionDetails, SessionError, SessionInfo,
-    SessionStatus, SuggestedFolderChoice,
+    self as core, delete_all_sessions, list_sessions, lock_sessions, scan, session_details,
+    FileChoice, FolderChoice, OperationKind, OperationState, OsTrash, Plan, RunPhase,
+    SessionDetails, SessionError, SessionInfo, SessionStatus, SuggestedFolderChoice,
 };
 use tempfile::TempDir;
 
@@ -190,6 +192,104 @@ fn an_undo_reports_its_progress_ending_with_every_operation_finished() {
     assert!(reports.windows(2).all(|w| w[0].finished <= w[1].finished));
     let last = reports.last().unwrap();
     assert_eq!((last.finished, last.total), (50, 50));
+}
+
+/// The user clicks Cancel while the `at`-th copy is going to the Trash.
+struct CancelsAt<'a> {
+    trash: FakeTrash,
+    at: usize,
+    trashed: Cell<usize>,
+    cancel: &'a AtomicBool,
+}
+
+impl OsTrash for CancelsAt<'_> {
+    fn blocked(&self, folder: &Path) -> Option<String> {
+        self.trash.blocked(folder)
+    }
+
+    fn trash(&self, path: &Path) -> Result<PathBuf, String> {
+        self.trashed.set(self.trashed.get() + 1);
+        if self.trashed.get() == self.at {
+            self.cancel.store(true, Ordering::Relaxed);
+        }
+        self.trash.trash(path)
+    }
+
+    fn put_back(&self, landed: &Path, to: &Path) -> Result<(), String> {
+        self.trash.put_back(landed, to)
+    }
+}
+
+#[test]
+fn a_run_cancelled_part_way_puts_everything_back_and_keeps_no_session() {
+    let dir = scan_root();
+    set_modified(&write(dir.path(), "keep.txt", "same"), 9_000);
+    for i in 0..10 {
+        set_modified(&write(dir.path(), &format!("copy {i}.txt"), "same"), 1_000);
+    }
+    let journal = journal_dir();
+    let before = snapshot(dir.path());
+    let plan = plan_for(dir.path());
+    let cancel = AtomicBool::new(false);
+    let trash = CancelsAt {
+        trash: FakeTrash::new(journal.path()),
+        at: 4,
+        trashed: Cell::new(0),
+        cancel: &cancel,
+    };
+
+    let mut reports = Vec::new();
+    let summary = core::run_with_progress(
+        &plan,
+        &all_ids(&plan),
+        journal.path(),
+        &trash,
+        &cancel,
+        |p| reports.push(p),
+    )
+    .unwrap();
+
+    assert!(summary.cancelled);
+    assert_eq!(
+        trash.trashed.get(),
+        4,
+        "the copy under way finishes, no more start"
+    );
+    assert_eq!(summary.done.len(), 4, "every copy trashed goes back");
+    assert_eq!(summary.session_id, None);
+    assert!(all_sessions(journal.path()).is_empty());
+    assert_eq!(snapshot(dir.path()), before);
+    let last = reports.last().unwrap();
+    assert_eq!(
+        (last.phase, last.finished, last.total),
+        (RunPhase::PuttingBack, 4, 4)
+    );
+}
+
+#[test]
+fn a_cancel_after_the_run_finished_finds_the_flag_set_and_puts_nothing_back() {
+    let dir = messy_folder();
+    let journal = journal_dir();
+    let plan = plan_for(dir.path());
+    let cancel = AtomicBool::new(false);
+
+    let summary = core::run_with_progress(
+        &plan,
+        &all_ids(&plan),
+        journal.path(),
+        &FakeTrash::new(journal.path()),
+        &cancel,
+        |_| {},
+    )
+    .unwrap();
+
+    assert!(!summary.cancelled);
+    assert_eq!(summary.done.len(), 2);
+    assert!(
+        cancel.swap(true, Ordering::Relaxed),
+        "a later Cancel is told it came too late"
+    );
+    assert_eq!(all_sessions(journal.path()).len(), 1);
 }
 
 #[test]

@@ -1,6 +1,6 @@
 // Trashing copies is a Session of its own, so the user can free space without waiting for the
 // Suggested Folders.
-import { buildReviewPlan, pathSeparator, runPlan } from "../../shared/api.js";
+import { buildReviewPlan, cancelRun, pathSeparator, runPlan } from "../../shared/api.js";
 import { busy, drawMore, el, icon, showStatus, showWarning } from "../../shared/dom.js";
 import { formatDate, formatSize, trashPlace } from "../../shared/format.js";
 import { withShortcut } from "../../shared/menus.js";
@@ -10,10 +10,12 @@ import { copiesText, fileName } from "./selection.js";
 
 export function duplicatesPane(ctx) {
   const { state, view, pane } = ctx;
-  const trashNow = el("button", { type: "button", className: "small" }, icon("trash"), el("span"));
+  const trashNow = el("button", { type: "button", className: "small" });
   // Outside the redrawn part, so the result survives redraws.
   const status = el("p", { className: "status duplicates-trash-status" });
-  trashNow.addEventListener("click", trashCopiesNow);
+  /** Set while copies are being trashed, when the button is Cancel. */
+  let trashing = null;
+  trashNow.addEventListener("click", () => (trashing ? cancelTrashing() : trashCopiesNow()));
 
   function panel() {
     if (state.duplicates.length === 0) return [el("h2", {}, "Duplicates"), status, el("p", { className: "note" }, "No duplicates")];
@@ -48,9 +50,12 @@ export function duplicatesPane(ctx) {
 
   function trashNowRow(trashed, trashedSize) {
     const trash = trashPlace(pathSeparator);
-    trashNow.lastChild.textContent = trashed ? `Trash ${copiesText(trashed)} now` : "No copies to trash";
-    trashNow.disabled = trashed === 0 || view.running;
-    trashNow.title = withShortcut(`Moves every unticked copy to the ${trash} now. Suggested Folders aren't touched. Undo it from History.`, "trashNow");
+    if (trashing) drawCancel();
+    else {
+      trashNow.replaceChildren(icon("trash"), el("span", {}, trashed ? `Trash ${copiesText(trashed)} now` : "No copies to trash"));
+      trashNow.disabled = trashed === 0 || view.running;
+      trashNow.title = withShortcut(`Moves every unticked copy to the ${trash} now. Suggested Folders aren't touched. Undo it from History.`, "trashNow");
+    }
     return el(
       "div",
       { className: "duplicates-trash-now" },
@@ -59,24 +64,56 @@ export function duplicatesPane(ctx) {
     );
   }
 
+  function drawCancel() {
+    trashNow.replaceChildren(el("span", {}, trashing.cancelling ? "Cancelling…" : "Cancel"));
+    trashNow.disabled = trashing.cancelling;
+    trashNow.title = trashing.cancelling ? "" : "Puts back every copy trashed so far";
+  }
+
+  // No confirm and no shortcut: it only undoes, so a slip costs nothing.
+  async function cancelTrashing() {
+    const cancelled = trashing;
+    cancelled.cancelling = true;
+    drawCancel();
+    try {
+      await cancelRun();
+    } catch {
+      if (trashing !== cancelled) return;
+      cancelled.cancelling = false;
+      drawCancel();
+    }
+  }
+
   /** Copies that couldn't go stay marked Trash, for the rest of the Plan. */
   async function trashCopiesNow() {
     if (view.running) return;
     view.running = true;
+    trashing = { cancelling: false };
+    drawCancel();
     ctx.redraw.header();
-    const summary = await busy(status, [trashNow], "Trashing copies…", async () => {
+    const summary = await busy(status, [], "Trashing copies…", async () => {
       const plan = await buildReviewPlan(planDuplicates(state.duplicates), []);
+      // `cancelRun` can't reach a Run that hasn't started.
+      if (trashing.cancelling) return { cancelled: true, done: [], skipped: [], failed: [], unrecoverable: [] };
       const approved = plan.operations.filter((op) => op.reason.type === "duplicate" && (op.ticked || Boolean(op.error))).map((op) => op.id);
       return runPlan(approved, showRunProgress(status, { verb: "Trashing", of: copiesText }));
     });
     view.running = false;
-    if (summary) {
+    // Set if the Run finished before the Cancel reached it.
+    const tooLate = trashing.cancelling;
+    trashing = null;
+    if (summary?.cancelled) {
+      const notBack = [...summary.skipped, ...summary.failed, ...summary.unrecoverable];
+      state.copiesTrashed(notBack.map((outcome) => outcome.source));
+      if (notBack.length === 0) showStatus(status, "Cancelled · every copy is back");
+      else showWarning(status, `Cancelled, but ${copiesText(notBack.length)} couldn't be put back. See History.`);
+    } else if (summary) {
       state.copiesTrashed(summary.done.map((outcome) => outcome.source));
       const warning = describeWarning(summary, { action: "run", done: "trashed", separator: pathSeparator });
       // A Run that did nothing keeps no Session.
       if (!summary.sessionId) showWarning(status, describeNothingDone(summary, "trashed", pathSeparator));
       else if (warning) showWarning(status, warning);
-      else showStatus(status, `${copiesText(summary.done.length)} trashed · undo from History`);
+      else showStatus(status, `${tooLate ? "Too late to cancel · " : ""}${copiesText(summary.done.length)} trashed · undo from History`);
     }
     ctx.redraw.pane();
   }

@@ -42,11 +42,19 @@ export function findDuplicates(onProgress) {
 
 // These resolve to a `Summary`, whose `sessionId` is null after a Run that did nothing.
 
+// Like `scanId`.
+let runId = Date.now();
+
+/** A cancelled Run resolves to the put-back's `Summary`, with `cancelled` set. */
 export function runPlan(approved, onProgress) {
+  runId += 1;
   const channel = new Channel();
   channel.onmessage = onProgress;
-  return invoke("run_plan", { approved, onProgress: channel });
+  return invoke("run_plan", { approved, runId, onProgress: channel });
 }
+
+/** False once the Run has finished: too late to put anything back. */
+export const cancelRun = () => invoke("cancel_run", { runId });
 
 /** All of them if `operationIds` is null. Progress comes as a Run's does. */
 export function undo(sessionId, operationIds, onProgress) {

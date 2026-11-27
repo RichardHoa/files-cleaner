@@ -8,6 +8,11 @@ test("Run progress says how many are done of how many, then the time left once t
   assert.equal(describeRunProgress({ finished: 312, total: 2040 }, words, "about 3 min left"), "Trashing 312 of 2,040 copies · about 3 min left");
 });
 
+test("The put-back after a Cancel counts what has gone back, with its own time left", () => {
+  const words = { verb: "Trashing", of: (n) => `${n} copies` };
+  assert.equal(describeRunProgress({ finished: 40, total: 312, phase: "puttingBack" }, words, "about 1 min left"), "Putting back 40 of 312 · about 1 min left");
+});
+
 test("The warning says a file the Trash wouldn't take stayed where it was, and says nothing when all went well", () => {
   const outcome = (noteKind) => ({ source: "/Users/me/Downloads/a.pdf", note: "No Trash on this drive", noteKind });
   const summary = { done: [outcome(null)], skipped: [outcome("trashRefused")], failed: [], unrecoverable: [] };

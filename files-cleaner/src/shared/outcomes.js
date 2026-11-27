@@ -80,8 +80,9 @@ export function warningBlock(text, onShow = null) {
 }
 
 /** `of` names the total, as in "2,040 copies". */
-export function describeRunProgress({ finished, total }, { verb, of }, left = "") {
-  return `${verb} ${count(finished)} of ${of(total)}${left ? ` · ${left}` : ""}`;
+export function describeRunProgress({ finished, total, phase }, { verb, of }, left = "") {
+  const done = phase === "puttingBack" ? `Putting back ${count(finished)} of ${count(total)}` : `${verb} ${count(finished)} of ${of(total)}`;
+  return `${done}${left ? ` · ${left}` : ""}`;
 }
 
 /**
@@ -89,9 +90,16 @@ export function describeRunProgress({ finished, total }, { verb, of }, left = ""
  * The path is cut in its middle: the file name always shows.
  */
 export function showRunProgress(node, words) {
-  const startedAt = Date.now();
+  let startedAt = Date.now();
   let samples = [];
+  let phase = "running";
   return (progress) => {
+    // The put-back has its own pace.
+    if (progress.phase !== phase) {
+      phase = progress.phase;
+      startedAt = Date.now();
+      samples = [];
+    }
     samples = addSample(samples, { at: Date.now(), finished: progress.finished });
     const { name, parent } = splitPath(progress.current, pathSeparator);
     const folder = parent && !parent.endsWith(pathSeparator) ? `${parent}${pathSeparator}` : parent;

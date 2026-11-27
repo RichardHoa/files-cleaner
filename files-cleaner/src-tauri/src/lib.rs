@@ -64,6 +64,10 @@ struct ScanFlag {
     cancelled: u64,
 }
 
+/// Like `Scanning`: a Cancel can reach the app before its Run has started.
+#[derive(Default)]
+struct Running(Mutex<ScanFlag>);
+
 #[derive(Default)]
 struct Analysing {
     cancel: Mutex<Arc<AtomicBool>>,
@@ -285,9 +289,17 @@ fn journal_dir(app: &AppHandle) -> Result<PathBuf, CommandError> {
 async fn run_plan(
     app: AppHandle,
     latest: State<'_, Latest>,
+    running: State<'_, Running>,
     approved: Vec<String>,
+    run_id: u64,
     on_progress: Channel<RunProgress>,
 ) -> Result<Summary, CommandError> {
+    let cancel = {
+        let mut flag = running.0.lock().unwrap();
+        flag.id = run_id;
+        flag.cancel = Arc::new(AtomicBool::new(flag.cancelled == run_id));
+        Arc::clone(&flag.cancel)
+    };
     let journal_dir = journal_dir(&app)?;
     let plan = latest
         .0
@@ -298,11 +310,30 @@ async fn run_plan(
     let plan = plan.ok_or_else(|| CommandError::new("Build a Plan first"))?;
     blocking(move || {
         // A closed window can't receive progress; the Run carries on.
-        core::run_with_progress(&plan, &approved, &journal_dir, &SystemTrash, |progress| {
-            let _ = on_progress.send(progress);
-        })
+        core::run_with_progress(
+            &plan,
+            &approved,
+            &journal_dir,
+            &SystemTrash,
+            &cancel,
+            |progress| {
+                let _ = on_progress.send(progress);
+            },
+        )
     })
     .await
+}
+
+/// The Operation under way finishes, then everything the Run did is put back.
+/// False once the Run has finished, as nothing will be put back.
+#[tauri::command]
+fn cancel_run(running: State<'_, Running>, run_id: u64) -> bool {
+    let mut flag = running.0.lock().unwrap();
+    if flag.id != run_id {
+        flag.cancelled = run_id;
+        return true;
+    }
+    !flag.cancel.swap(true, Ordering::Relaxed)
 }
 
 /// Progress is reported the way a Run reports it. There is no Cancel.
@@ -839,6 +870,7 @@ pub fn run() {
         .manage(Latest::default())
         .manage(Analysing::default())
         .manage(Scanning::default())
+        .manage(Running::default())
         .setup(|app| {
             if std::env::args().any(|arg| arg == SELF_CHECK_FLAG) {
                 let code = match self_check(app.handle()) {
@@ -866,6 +898,7 @@ pub fn run() {
             scan,
             find_duplicates,
             cancel_scan,
+            cancel_run,
             run_plan,
             undo,
             redo_operations,

@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -31,6 +32,8 @@ pub struct Summary {
     pub failed: Vec<Outcome>,
     /// The trashed copy is gone, or where it landed was never recorded.
     pub unrecoverable: Vec<Outcome>,
+    /// The lists are then the put-back's: `done` went back and the rest didn't.
+    pub cancelled: bool,
 }
 
 impl Summary {
@@ -41,6 +44,7 @@ impl Summary {
             skipped: Vec::new(),
             failed: Vec::new(),
             unrecoverable: Vec::new(),
+            cancelled: false,
         }
     }
 
@@ -138,7 +142,14 @@ pub fn run(
     journal_dir: &Path,
     trash: &dyn OsTrash,
 ) -> Result<Summary, SessionError> {
-    run_with_progress(plan, approved, journal_dir, trash, |_| {})
+    run_with_progress(
+        plan,
+        approved,
+        journal_dir,
+        trash,
+        &AtomicBool::new(false),
+        |_| {},
+    )
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -147,13 +158,26 @@ pub struct RunProgress {
     pub finished: usize,
     pub total: usize,
     pub current: PathBuf,
+    pub phase: RunPhase,
 }
 
+/// Undo, Redo and Retry are `Running` too: only a cancelled Run puts back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RunPhase {
+    Running,
+    PuttingBack,
+}
+
+/// Once `cancel` is set, the Operation under way finishes and everything done
+/// so far is put back. The Run sets it on finishing, so a Cancel that finds it
+/// set came too late and can say so rather than be lost.
 pub fn run_with_progress(
     plan: &Plan,
     approved: &[String],
     journal_dir: &Path,
     trash: &dyn OsTrash,
+    cancel: &AtomicBool,
     on_progress: impl FnMut(RunProgress),
 ) -> Result<Summary, SessionError> {
     let _lock = lock_sessions(journal_dir)?;
@@ -172,18 +196,24 @@ pub fn run_with_progress(
 
     // Lazy, so each destination is checked once the Operations before it have
     // run.
-    let operations = plan.operations.iter().filter(runs).map(|op| {
-        to_run(
-            &op.id,
-            op.kind,
-            &op.source,
-            op.destination_path.as_deref(),
-            op.planned,
-        )
-    });
+    let operations = plan
+        .operations
+        .iter()
+        .filter(runs)
+        // Between Operations only, never inside one.
+        .take_while(|_| !cancel.load(Ordering::Relaxed))
+        .map(|op| {
+            to_run(
+                &op.id,
+                op.kind,
+                &op.source,
+                op.destination_path.as_deref(),
+                op.planned,
+            )
+        });
 
     let mut summary = Summary::new(header.id.clone());
-    let mut progress = Progress::new(total, on_progress);
+    let mut progress = Progress::new(total, RunPhase::Running, on_progress);
     apply_each(
         &mut journal,
         &mut summary,
@@ -202,12 +232,51 @@ pub fn run_with_progress(
             run_one(op, trash)
         },
     )?;
+    if cancel.swap(true, Ordering::Relaxed) {
+        journal.append(&Record::Finished)?;
+        // The put-back reopens this Journal.
+        drop(journal);
+        return put_back_cancelled(
+            &header.id,
+            journal_dir,
+            trash,
+            summary.unrecoverable,
+            progress.report,
+        );
+    }
     journal.append(&Record::Finished)?;
     if summary.done.is_empty() {
         journal.discard()?;
         summary.session_id = None;
     }
     progress.finish(&plan.root);
+    Ok(summary)
+}
+
+/// Cancelling has no partial form, so everything goes back through Undo; the
+/// Session is kept only to show, with their Notes, the files that didn't. `lost`
+/// left during the Run and can't be put back, so they keep it too.
+fn put_back_cancelled(
+    session_id: &str,
+    journal_dir: &Path,
+    trash: &dyn OsTrash,
+    lost: Vec<Outcome>,
+    on_progress: impl FnMut(RunProgress),
+) -> Result<Summary, SessionError> {
+    let (mut summary, journal) = undo_locked(
+        session_id,
+        None,
+        journal_dir,
+        trash,
+        RunPhase::PuttingBack,
+        on_progress,
+    )?;
+    summary.unrecoverable.extend(lost);
+    if summary.skipped.is_empty() && summary.failed.is_empty() && summary.unrecoverable.is_empty() {
+        journal.discard()?;
+        summary.session_id = None;
+    }
+    summary.cancelled = true;
     Ok(summary)
 }
 
@@ -261,15 +330,17 @@ const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 struct Progress<F: FnMut(RunProgress)> {
     finished: usize,
     total: usize,
+    phase: RunPhase,
     last_report: Option<Instant>,
     report: F,
 }
 
 impl<F: FnMut(RunProgress)> Progress<F> {
-    fn new(total: usize, report: F) -> Self {
+    fn new(total: usize, phase: RunPhase, report: F) -> Self {
         Progress {
             finished: 0,
             total,
+            phase,
             last_report: None,
             report,
         }
@@ -284,6 +355,7 @@ impl<F: FnMut(RunProgress)> Progress<F> {
                 finished: self.finished,
                 total: self.total,
                 current: current.to_path_buf(),
+                phase: self.phase,
             });
             self.last_report = Some(Instant::now());
         }
@@ -295,6 +367,7 @@ impl<F: FnMut(RunProgress)> Progress<F> {
             finished: self.total,
             total: self.total,
             current: root.to_path_buf(),
+            phase: self.phase,
         });
     }
 }
@@ -327,6 +400,26 @@ pub fn undo_with_progress(
     on_progress: impl FnMut(RunProgress),
 ) -> Result<Summary, SessionError> {
     let _lock = lock_sessions(journal_dir)?;
+    let (summary, _) = undo_locked(
+        session_id,
+        operation_ids,
+        journal_dir,
+        trash,
+        RunPhase::Running,
+        on_progress,
+    )?;
+    Ok(summary)
+}
+
+/// The caller holds the Sessions lock.
+fn undo_locked(
+    session_id: &str,
+    operation_ids: Option<&[String]>,
+    journal_dir: &Path,
+    trash: &dyn OsTrash,
+    phase: RunPhase,
+    on_progress: impl FnMut(RunProgress),
+) -> Result<(Summary, Journal), SessionError> {
     let (session, mut journal) = reopen(journal_dir, session_id, trash)?;
     let only: Option<HashSet<&str>> =
         operation_ids.map(|ids| ids.iter().map(String::as_str).collect());
@@ -337,7 +430,7 @@ pub fn undo_with_progress(
         .rev()
         .collect();
     let mut summary = Summary::new(session.header.id.clone());
-    let mut progress = Progress::new(operations.len(), on_progress);
+    let mut progress = Progress::new(operations.len(), phase, on_progress);
     let mut settled: HashSet<String> = HashSet::new();
     apply_each(
         &mut journal,
@@ -354,7 +447,7 @@ pub fn undo_with_progress(
         },
     )?;
     progress.finish(&session.header.scan_root);
-    Ok(summary)
+    Ok((summary, journal))
 }
 
 fn undo_one(
@@ -524,7 +617,7 @@ pub fn redo_with_progress(
         .in_state(OperationState::Undone, Some(&only))
         .collect();
     let mut summary = Summary::new(session.header.id.clone());
-    let mut progress = Progress::new(operations.len(), on_progress);
+    let mut progress = Progress::new(operations.len(), RunPhase::Running, on_progress);
     apply_each(
         &mut journal,
         &mut summary,
@@ -592,7 +685,7 @@ pub fn retry_with_progress(
         )
     });
     let mut summary = Summary::new(session.header.id.clone());
-    let mut progress = Progress::new(total, on_progress);
+    let mut progress = Progress::new(total, RunPhase::Running, on_progress);
     apply_each(
         &mut journal,
         &mut summary,
