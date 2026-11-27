@@ -4,7 +4,7 @@ import { buildReviewPlan, pathSeparator, previewReviewPlan, runPlan } from "../.
 import { busy, el, showStatus, showWarning } from "../../shared/dom.js";
 import { count, formatSize, plural } from "../../shared/format.js";
 import { refreshMenu } from "../../shared/menus.js";
-import { describeNothingDone, describeRunProgress, describeWarning } from "../../shared/outcomes.js";
+import { describeNothingDone, describeWarning, showRunProgress } from "../../shared/outcomes.js";
 import { describeChange, nameMissing, planChoices, planDuplicates, totals } from "./review-choices.js";
 
 /** In ms. Batches quick changes, as each answer reads the disk. */
@@ -95,7 +95,7 @@ export function sessions(ctx, result) {
       const approved = plan.operations
         .filter((op) => (op.reason.type === "emptiedFolder" ? state.emptiedTicked.has(op.id) && !op.error : runsOrIsListed(op)))
         .map((op) => op.id);
-      return runPlan(approved, (progress) => showStatus(status, describeRunProgress(progress)));
+      return runPlan(approved, showRunProgress(status, { verb: "Moving", of: (n) => plural(n, "item") }));
     });
     view.running = false;
     if (session?.sessionId) return nav.session(session.sessionId, null, { summary: session, action: "run", done: "moved" });
@@ -116,7 +116,7 @@ export function sessions(ctx, result) {
     const summary = await busy(status, [run, cancel], "Trashing files…", async () => {
       const plan = await buildReviewPlan([], folders);
       const approved = plan.operations.filter((op) => op.reason.type === "suggestedFolder" && (op.ticked || Boolean(op.error))).map((op) => op.id);
-      return runPlan(approved, (progress) => showStatus(status, describeRunProgress(progress)));
+      return runPlan(approved, showRunProgress(status, { verb: "Trashing", of: (n) => plural(n, "file") }));
     });
     view.running = false;
     if (summary) {

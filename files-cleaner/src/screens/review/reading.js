@@ -19,6 +19,7 @@ import { el, progressBar, showStatus } from "../../shared/dom.js";
 import { count, plural } from "../../shared/format.js";
 import { groupingModelsPanel, thisComputer } from "../../shared/models-panel.js";
 import { warningBlock } from "../../shared/outcomes.js";
+import { foldersNote } from "./folder-panes.js";
 
 const WAIT_TEXT = "This takes a while. Feel free to switch apps.";
 const COMPUTER = thisComputer();
@@ -100,7 +101,7 @@ function waitNote() {
 export function reading(ctx) {
   const { nav, state, view } = ctx;
   const footer = el("div");
-  let waiting = [el("h2", {}, "Suggested Folders"), el("p", { className: "status" }, "Reading the files…")];
+  let waiting = [el("h2", {}, "Suggested Folders"), el("p", { className: "pane-note muted" }, foldersNote(ctx.rootName)), el("p", { className: "status" }, "Reading the files…")];
   // Cancel waits for the reading to stop before going Home; Stop groups what was read.
   let analysing = false;
   let cancelled = false;
@@ -123,7 +124,7 @@ export function reading(ctx) {
   function waitFor(phase, nodes) {
     state.waitFor(phase);
     if (phase !== "reading") ctx.sidebar.showProgress("");
-    waiting = [el("h2", {}, "Suggested Folders"), ...nodes];
+    waiting = [el("h2", {}, "Suggested Folders"), el("p", { className: "pane-note muted" }, foldersNote(ctx.rootName)), ...nodes];
     ctx.redraw.section("folders");
   }
 

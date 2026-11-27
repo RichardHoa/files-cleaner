@@ -16,6 +16,9 @@ function basisText(folder, existingName) {
   return "";
 }
 
+export const foldersNote = (rootName) =>
+  `Folders for the loose files in ${rootName}. Each file is moved into the folder shown; nothing is trashed unless you mark it.`;
+
 export function folderPanes(ctx) {
   const { state } = ctx;
   const panels = new WeakMap();
@@ -46,7 +49,7 @@ export function folderPanes(ctx) {
       return ctx.selection.copyMenu(node, path);
     };
     const head = el("h2", {}, `${UNSORTED} (${count(state.left.size)})`);
-    const stay = el("p", { className: "unsorted-note muted" }, "These stay where they are. No folder is made.");
+    const stay = el("p", { className: "unsorted-note muted" }, "Loose files no folder took. They stay where they are.");
     if (state.choices.length > 0) return [head, stay, ...leftLists([...state.left], row)];
     return [
       head,
@@ -145,6 +148,7 @@ export function folderPanes(ctx) {
       { className: "folder-panel" },
       el("div", { className: "folder-panel-head" }, icon("folder"), name, size, actions),
       nameError,
+      el("p", { className: "pane-note muted" }, foldersNote(ctx.rootName)),
       basis,
       el("label", { className: "folder-location" }, el("span", { className: "muted" }, "Location"), location),
       locationError,

@@ -70,6 +70,32 @@ export function relativeTime(millis, now = Date.now()) {
   return "just now";
 }
 
+// A guess this early swings wildly, and finer rounding would jump about with each report.
+
+/** In ms. */
+const WARM_UP = 3000;
+/** In Operations. */
+const RATE_WINDOW = 50;
+
+/** `samples` are `{ at, finished }` with `at` in ms, oldest first. "" while there's no fair guess. */
+export function timeLeft(startedAt, samples, total) {
+  const last = samples.at(-1);
+  if (!last || last.at - startedAt < WARM_UP) return "";
+  const from = samples.findLast((sample) => sample.finished <= last.finished - RATE_WINDOW) ?? samples[0];
+  if (last.finished <= from.finished || last.at <= from.at) return "";
+  const minutes = Math.round(((total - last.finished) * (last.at - from.at)) / (last.finished - from.finished) / 60_000);
+  if (minutes < 1) return "less than a minute left";
+  if (minutes < 60) return `about ${minutes} min left`;
+  return `about ${Math.round(minutes / 60)} hr left`;
+}
+
+/** Keeps just enough for `timeLeft`, so a long Run doesn't pile them up. */
+export function addSample(samples, sample) {
+  const kept = [...samples, sample];
+  while (kept.length > 2 && kept[1].finished <= sample.finished - RATE_WINDOW) kept.shift();
+  return kept;
+}
+
 /** A disk root has no parent, so it is its own name. */
 export function splitPath(path, separator) {
   const trimmed = path.length > 1 && path.endsWith(separator) ? path.slice(0, -1) : path;

@@ -1,7 +1,7 @@
 import { describeError, listSessions, pathSeparator, undo } from "../../shared/api.js";
 import { busy, el } from "../../shared/dom.js";
 import { count, formatDate, formatSize, plural, splitPath } from "../../shared/format.js";
-import { undoSections } from "../../shared/outcomes.js";
+import { showRunProgress, undoSections } from "../../shared/outcomes.js";
 
 const PER_PAGE = 10;
 
@@ -103,7 +103,9 @@ function sessionRow(session, open, undone) {
   button.disabled = session.leftToUndo === 0;
   const message = el("p", { className: "status" });
   button.addEventListener("click", async () => {
-    const result = await busy(message, [button], "Undoing…", () => undo(session.id));
+    const result = await busy(message, [button], "Putting back…", () =>
+      undo(session.id, null, showRunProgress(message, { verb: "Putting back", of: (n) => plural(n, "item") })),
+    );
     if (result) undone(result);
   });
 

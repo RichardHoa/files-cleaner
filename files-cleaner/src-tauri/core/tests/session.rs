@@ -8,7 +8,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use common::{
     build_plan, build_suggested_folders_plan, drop_outcomes, empty_config, journal_database,
     journal_dir, real_path, redo_operations, retry_operations, run, run_with_progress, scan_root,
-    undo, undo_operations, write,
+    undo, undo_operations, undo_with_progress, write,
 };
 use files_cleaner_core::{
     delete_all_sessions, list_sessions, lock_sessions, scan, session_details, FileChoice,
@@ -164,6 +164,32 @@ fn a_run_reports_its_progress_ending_with_every_operation_finished() {
         (last.finished, last.current.as_path()),
         (300, plan.root.as_path())
     );
+}
+
+#[test]
+fn an_undo_reports_its_progress_ending_with_every_operation_finished() {
+    let dir = scan_root();
+    set_modified(&write(dir.path(), "keep.txt", "same"), 9_000);
+    for i in 0..50 {
+        set_modified(&write(dir.path(), &format!("copy {i}.txt"), "same"), 1_000);
+    }
+    let journal = journal_dir();
+    let plan = plan_for(dir.path());
+    let summary = run(&plan, &all_ids(&plan), journal.path()).unwrap();
+
+    let mut reports = Vec::new();
+    let undone = undo_with_progress(
+        summary.session_id.as_deref().unwrap(),
+        journal.path(),
+        |p| reports.push(p),
+    )
+    .unwrap();
+
+    assert_eq!(undone.done.len(), 50);
+    assert_eq!(reports[0].finished, 0);
+    assert!(reports.windows(2).all(|w| w[0].finished <= w[1].finished));
+    let last = reports.last().unwrap();
+    assert_eq!((last.finished, last.total), (50, 50));
 }
 
 #[test]

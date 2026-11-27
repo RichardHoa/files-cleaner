@@ -79,7 +79,7 @@ export function progressBar(className = "") {
 export function showStatus(node, text, isError = false) {
   node.textContent = text;
   node.classList.toggle("error", isError);
-  node.classList.remove("warning-block");
+  node.classList.remove("warning-block", "progress-line");
 }
 
 /** Replaces the progress: a whole step failed, not just one action. */

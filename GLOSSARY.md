@@ -128,6 +128,10 @@ _Avoid_: log, history file
 Reversing completed Operations of a Session, in reverse order, using its Journal: all of them at once, or only the ones the user picks. A file the user has emptied from the System Trash can't be recovered.
 _Avoid_: rollback, revert
 
+**Cancel** (a Session):
+Stopping a Session while it is still being carried out and putting back everything it did so far, once the Operation under way has finished. If everything goes back, no Session is kept; if some files can't, the Session stays, partly undone, with a Note on each. Cancelling has no partial form: there is no stopping that keeps what was done.
+_Avoid_: stop, abort
+
 **Redo**:
 Carrying out an undone Operation again, putting the item back where its Session put it (or in the System Trash again, for a Trash); skipped if the item changed since Undo put it back.
 _Avoid_: reapply, replay

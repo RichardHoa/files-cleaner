@@ -104,7 +104,7 @@ flowchart LR
 
 ## Cross-Cutting Concerns
 
-**Progress.** Long commands (scan, duplicates, analysis, run) take a Tauri `Channel` and report progress on it; the UI turns that into a status line.
+**Progress.** Long commands (scan, duplicates, analysis, run, Undo, Redo, Retry) take a Tauri `Channel` and report progress on it; the UI turns that into a status line, and works out the time left itself.
 
 **Storage.** All app data sits in the OS's app data folder: `journal.sqlite` (Sessions), `cards.sqlite` (the grouping cache), the Grouping Models, and a few small JSON files (config, Recent Scan Roots, onboarding). Settings are changed only from the Settings screen.
 

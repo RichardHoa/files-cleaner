@@ -48,12 +48,24 @@ export function runPlan(approved, onProgress) {
   return invoke("run_plan", { approved, onProgress: channel });
 }
 
-/** All of them if `operationIds` is left out. */
-export const undo = (sessionId, operationIds) => invoke("undo", { sessionId, operationIds });
+/** All of them if `operationIds` is null. Progress comes as a Run's does. */
+export function undo(sessionId, operationIds, onProgress) {
+  const channel = new Channel();
+  channel.onmessage = onProgress;
+  return invoke("undo", { sessionId, operationIds, onProgress: channel });
+}
 
-export const redoOperations = (sessionId, operationIds) => invoke("redo_operations", { sessionId, operationIds });
+export function redoOperations(sessionId, operationIds, onProgress) {
+  const channel = new Channel();
+  channel.onmessage = onProgress;
+  return invoke("redo_operations", { sessionId, operationIds, onProgress: channel });
+}
 
-export const retryOperations = (sessionId, operationIds) => invoke("retry_operations", { sessionId, operationIds });
+export function retryOperations(sessionId, operationIds, onProgress) {
+  const channel = new Channel();
+  channel.onmessage = onProgress;
+  return invoke("retry_operations", { sessionId, operationIds, onProgress: channel });
+}
 
 export const sessionDetails = (sessionId) => invoke("session_details", { sessionId });
 

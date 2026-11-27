@@ -1,5 +1,6 @@
-import { el } from "./dom.js";
-import { count, plural, splitPath, trashPlace } from "./format.js";
+import { pathSeparator } from "./api.js";
+import { el, showStatus } from "./dom.js";
+import { addSample, count, plural, splitPath, timeLeft, trashPlace } from "./format.js";
 
 /** Failed and unrecoverable show only if any. */
 export function describeSummary(summary, done) {
@@ -78,8 +79,34 @@ export function warningBlock(text, onShow = null) {
   return node;
 }
 
-export function describeRunProgress({ finished, total, current }) {
-  return `Moving ${count(finished)} of ${plural(total, "item")}…\n${current}`;
+/** `of` names the total, as in "2,040 copies". */
+export function describeRunProgress({ finished, total }, { verb, of }, left = "") {
+  return `${verb} ${count(finished)} of ${of(total)}${left ? ` · ${left}` : ""}`;
+}
+
+/**
+ * Two lines that keep their size whatever the path, so a long one can't push the screen about.
+ * The path is cut in its middle: the file name always shows.
+ */
+export function showRunProgress(node, words) {
+  const startedAt = Date.now();
+  let samples = [];
+  return (progress) => {
+    samples = addSample(samples, { at: Date.now(), finished: progress.finished });
+    const { name, parent } = splitPath(progress.current, pathSeparator);
+    const folder = parent && !parent.endsWith(pathSeparator) ? `${parent}${pathSeparator}` : parent;
+    showStatus(node, "");
+    node.classList.add("progress-line");
+    node.append(
+      el("span", { className: "progress-line-count" }, describeRunProgress(progress, words, timeLeft(startedAt, samples, progress.total))),
+      el(
+        "span",
+        { className: "path progress-line-path", title: progress.current },
+        el("span", { className: "progress-line-folder" }, folder),
+        el("span", { className: "progress-line-name" }, name),
+      ),
+    );
+  };
 }
 
 export function undoSections(summary, separator) {

@@ -207,7 +207,8 @@
   background: color-mix(in srgb, var(--text) 15%, transparent);
 }
 
-.unsorted-note {
+.unsorted-note,
+.pane-note {
   margin: 0 0 var(--space-2);
   font-size: var(--font-sm);
 }
@@ -442,6 +443,22 @@
   margin: 0;
 }
 
+.duplicate-copy-where {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  min-width: 0;
+}
+
+.duplicate-copy-tag {
+  flex: none;
+}
+
+.duplicate-copy.trash .duplicate-copy-tag,
+.duplicate-copy.trash .folder-file-date {
+  color: var(--muted);
+}
+
 .duplicate-copy-folder {
   min-width: 0;
   overflow: hidden;
@@ -480,6 +497,10 @@
 .review-run-status {
   margin: var(--space-1) 0 0;
   text-align: end;
+}
+
+.review-run-status .progress-line-path {
+  justify-content: flex-end;
 }
 
 .review-run-status:empty {

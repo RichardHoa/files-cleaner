@@ -69,6 +69,39 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+/* Sized by its container alone, so no path can widen it or wrap it onto more lines. */
+.status.progress-line {
+  display: grid;
+  inline-size: 100%;
+  contain: inline-size;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+.progress-line-count {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.progress-line-path {
+  display: flex;
+  min-inline-size: 0;
+}
+
+.progress-line-folder {
+  flex: 0 1 auto;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.progress-line-name {
+  flex: 0 0 auto;
+  max-inline-size: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .status.error {
   color: var(--error);
 }

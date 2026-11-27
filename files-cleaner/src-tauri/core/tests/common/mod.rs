@@ -168,6 +168,20 @@ pub fn undo(session_id: &str, journal: &Path) -> Result<Summary, SessionError> {
     core::undo(session_id, journal, &FakeTrash::new(journal))
 }
 
+pub fn undo_with_progress(
+    session_id: &str,
+    journal: &Path,
+    on_progress: impl FnMut(RunProgress),
+) -> Result<Summary, SessionError> {
+    core::undo_with_progress(
+        session_id,
+        None,
+        journal,
+        &FakeTrash::new(journal),
+        on_progress,
+    )
+}
+
 pub fn undo_operations(
     session_id: &str,
     operation_ids: &[String],

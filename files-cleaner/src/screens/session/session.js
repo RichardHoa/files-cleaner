@@ -26,7 +26,7 @@ import {
   visibleFiles,
 } from "../../shared/format.js";
 import { showMenu } from "../../shared/menus.js";
-import { describeSummary, describeWarning, warningBlock } from "../../shared/outcomes.js";
+import { describeSummary, describeWarning, showRunProgress, warningBlock } from "../../shared/outcomes.js";
 
 const GROUP_COUNTS = {
   moved: (n) => `${count(n)} moved`,
@@ -42,7 +42,8 @@ const ACTIONS = {
     tickLabel: (name) => `Put back ${name}`,
     busy: "Putting back…",
     done: "put back",
-    call: (sessionId, ids) => undo(sessionId, ids),
+    progress: "Putting back",
+    call: (sessionId, ids, onProgress) => undo(sessionId, ids, onProgress),
   },
   redo: {
     bulk: (n) => `Move ${plural(n, "file")} again`,
@@ -50,7 +51,8 @@ const ACTIONS = {
     tickLabel: (name) => `Move ${name} again`,
     busy: "Moving…",
     done: "moved again",
-    call: (sessionId, ids) => redoOperations(sessionId, ids),
+    progress: "Moving",
+    call: (sessionId, ids, onProgress) => redoOperations(sessionId, ids, onProgress),
   },
   retry: {
     bulk: (n) => `Try ${plural(n, "file")} again`,
@@ -58,7 +60,8 @@ const ACTIONS = {
     tickLabel: (name) => `Try ${name} again`,
     busy: "Trying again…",
     done: "done",
-    call: (sessionId, ids) => retryOperations(sessionId, ids),
+    progress: "Retrying",
+    call: (sessionId, ids, onProgress) => retryOperations(sessionId, ids, onProgress),
   },
 };
 
@@ -100,7 +103,7 @@ export function render(root, nav, sessionId, from, result) {
     showStatus(status, label);
     let result;
     try {
-      result = await call();
+      result = await call(showRunProgress(status, { verb: ACTIONS[action].progress, of: (n) => plural(n, "item") }));
     } catch (error) {
       for (const control of enabled) control.disabled = false;
       showStatus(status, describeError(error), true);
@@ -120,7 +123,7 @@ export function render(root, nav, sessionId, from, result) {
 
     const putAll = el("button", { type: "button", className: "primary" }, "Put all back");
     putAll.hidden = !groups.some((g) => g.group === "moved" || g.group === "trashed");
-    putAll.addEventListener("click", () => act("Putting back…", () => undo(sessionId), "undo"));
+    putAll.addEventListener("click", () => act("Putting back…", (onProgress) => undo(sessionId, null, onProgress), "undo"));
     const header = el(
       "header",
       { className: "plan-head" },
@@ -215,7 +218,7 @@ export function render(root, nav, sessionId, from, result) {
     bulk.addEventListener("click", () => {
       const action = groupAction(group);
       const ids = [...ticked];
-      act(action.busy, () => action.call(sessionId, ids), actionFor(group.operations.find(actionOf)));
+      act(action.busy, (onProgress) => action.call(sessionId, ids, onProgress), actionFor(group.operations.find(actionOf)));
     });
     const bulkBar = el("div", { className: "session-bulk" }, bulk);
     const pane = el("aside", { className: "plan-pane", ariaLabel: "Selected file" });
@@ -341,7 +344,7 @@ export function render(root, nav, sessionId, from, result) {
       }
       if (action) {
         const one = el("button", { type: "button" }, action.single);
-        one.addEventListener("click", () => act(action.busy, () => action.call(sessionId, [op.id]), actionFor(op)));
+        one.addEventListener("click", () => act(action.busy, (onProgress) => action.call(sessionId, [op.id], onProgress), actionFor(op)));
         buttons.push(one);
       }
       pane.replaceChildren(

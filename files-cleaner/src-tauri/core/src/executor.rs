@@ -184,18 +184,24 @@ pub fn run_with_progress(
 
     let mut summary = Summary::new(header.id.clone());
     let mut progress = Progress::new(total, on_progress);
-    let operations = operations.inspect(|op| progress.starting(&op.source));
-    apply_each(&mut journal, &mut summary, Phase::Run, operations, |op| {
-        if let Some(note) = blocked.get(op.id.as_str()) {
-            // A Trash is only blocked by the System Trash.
-            let skipped = NotDone::skipped(*note);
-            return Err(match op.kind {
-                OperationKind::Trash => skipped.because(NoteKind::TrashRefused),
-                _ => skipped,
-            });
-        }
-        run_one(op, trash)
-    })?;
+    apply_each(
+        &mut journal,
+        &mut summary,
+        &mut progress,
+        Phase::Run,
+        operations,
+        |op| {
+            if let Some(note) = blocked.get(op.id.as_str()) {
+                // A Trash is only blocked by the System Trash.
+                let skipped = NotDone::skipped(*note);
+                return Err(match op.kind {
+                    OperationKind::Trash => skipped.because(NoteKind::TrashRefused),
+                    _ => skipped,
+                });
+            }
+            run_one(op, trash)
+        },
+    )?;
     journal.append(&Record::Finished)?;
     if summary.done.is_empty() {
         journal.discard()?;
@@ -284,7 +290,7 @@ impl<F: FnMut(RunProgress)> Progress<F> {
         self.finished += 1;
     }
 
-    fn finish(mut self, root: &Path) {
+    fn finish(&mut self, root: &Path) {
         (self.report)(RunProgress {
             finished: self.total,
             total: self.total,
@@ -300,7 +306,7 @@ pub fn undo(
     journal_dir: &Path,
     trash: &dyn OsTrash,
 ) -> Result<Summary, SessionError> {
-    undo_selected(session_id, None, journal_dir, trash)
+    undo_with_progress(session_id, None, journal_dir, trash, |_| {})
 }
 
 pub fn undo_operations(
@@ -309,27 +315,36 @@ pub fn undo_operations(
     journal_dir: &Path,
     trash: &dyn OsTrash,
 ) -> Result<Summary, SessionError> {
-    let only: HashSet<&str> = operation_ids.iter().map(String::as_str).collect();
-    undo_selected(session_id, Some(&only), journal_dir, trash)
+    undo_with_progress(session_id, Some(operation_ids), journal_dir, trash, |_| {})
 }
 
-fn undo_selected(
+/// All of the Session's done Operations when `operation_ids` is `None`.
+pub fn undo_with_progress(
     session_id: &str,
-    only: Option<&HashSet<&str>>,
+    operation_ids: Option<&[String]>,
     journal_dir: &Path,
     trash: &dyn OsTrash,
+    on_progress: impl FnMut(RunProgress),
 ) -> Result<Summary, SessionError> {
     let _lock = lock_sessions(journal_dir)?;
     let (session, mut journal) = reopen(journal_dir, session_id, trash)?;
+    let only: Option<HashSet<&str>> =
+        operation_ids.map(|ids| ids.iter().map(String::as_str).collect());
 
     let newer = NewerSessions::read(journal.journals(), &session.header.id)?;
+    let operations: Vec<&JournaledOperation> = session
+        .in_state(OperationState::Done, only.as_ref())
+        .rev()
+        .collect();
     let mut summary = Summary::new(session.header.id.clone());
+    let mut progress = Progress::new(operations.len(), on_progress);
     let mut settled: HashSet<String> = HashSet::new();
     apply_each(
         &mut journal,
         &mut summary,
+        &mut progress,
         Phase::Undo,
-        session.in_state(OperationState::Done, only).rev(),
+        operations.into_iter(),
         |op| {
             let result = undo_one(&session, &newer, &settled, op, trash);
             if !matches!(&result, Err(not_done) if not_done.outcome == OutcomeKind::Skipped) {
@@ -338,6 +353,7 @@ fn undo_selected(
             result.map(|()| None)
         },
     )?;
+    progress.finish(&session.header.scan_root);
     Ok(summary)
 }
 
@@ -483,23 +499,38 @@ fn key(path: &Path) -> String {
     path.to_string_lossy().to_lowercase()
 }
 
-/// In the order they first ran, as later Operations may depend on earlier ones.
 pub fn redo_operations(
     session_id: &str,
     operation_ids: &[String],
     journal_dir: &Path,
     trash: &dyn OsTrash,
 ) -> Result<Summary, SessionError> {
+    redo_with_progress(session_id, operation_ids, journal_dir, trash, |_| {})
+}
+
+/// In the order they first ran, as later Operations may depend on earlier ones.
+pub fn redo_with_progress(
+    session_id: &str,
+    operation_ids: &[String],
+    journal_dir: &Path,
+    trash: &dyn OsTrash,
+    on_progress: impl FnMut(RunProgress),
+) -> Result<Summary, SessionError> {
     let _lock = lock_sessions(journal_dir)?;
     let (session, mut journal) = reopen(journal_dir, session_id, trash)?;
     let only: HashSet<&str> = operation_ids.iter().map(String::as_str).collect();
 
+    let operations: Vec<&JournaledOperation> = session
+        .in_state(OperationState::Undone, Some(&only))
+        .collect();
     let mut summary = Summary::new(session.header.id.clone());
+    let mut progress = Progress::new(operations.len(), on_progress);
     apply_each(
         &mut journal,
         &mut summary,
+        &mut progress,
         Phase::Redo,
-        session.in_state(OperationState::Undone, Some(&only)),
+        operations.into_iter(),
         |op| match op.kind {
             OperationKind::CreateFolder => create_folder(recorded(op)?)
                 .map(|()| None)
@@ -520,41 +551,57 @@ pub fn redo_operations(
             }
         },
     )?;
+    progress.finish(&session.header.scan_root);
     Ok(summary)
 }
 
-/// Journaled as another Run pass of the same Session, so one Undo still
-/// reverses it all.
 pub fn retry_operations(
     session_id: &str,
     operation_ids: &[String],
     journal_dir: &Path,
     trash: &dyn OsTrash,
 ) -> Result<Summary, SessionError> {
+    retry_with_progress(session_id, operation_ids, journal_dir, trash, |_| {})
+}
+
+/// Journaled as another Run pass of the same Session, so one Undo still
+/// reverses it all.
+pub fn retry_with_progress(
+    session_id: &str,
+    operation_ids: &[String],
+    journal_dir: &Path,
+    trash: &dyn OsTrash,
+    on_progress: impl FnMut(RunProgress),
+) -> Result<Summary, SessionError> {
     let _lock = lock_sessions(journal_dir)?;
     let (session, mut journal) = reopen(journal_dir, session_id, trash)?;
     let only: HashSet<&str> = operation_ids.iter().map(String::as_str).collect();
 
-    let operations = session
-        .operations
-        .iter()
-        .filter(|op| {
-            matches!(op.state, OperationState::Skipped | OperationState::Failed)
-                && only.contains(op.id.as_str())
-        })
-        .map(|op| {
-            to_run(
-                &op.id,
-                op.kind,
-                &op.source,
-                op.destination.as_deref(),
-                op.planned,
-            )
-        });
+    let retried = |op: &&JournaledOperation| {
+        matches!(op.state, OperationState::Skipped | OperationState::Failed)
+            && only.contains(op.id.as_str())
+    };
+    let total = session.operations.iter().filter(retried).count();
+    let operations = session.operations.iter().filter(retried).map(|op| {
+        to_run(
+            &op.id,
+            op.kind,
+            &op.source,
+            op.destination.as_deref(),
+            op.planned,
+        )
+    });
     let mut summary = Summary::new(session.header.id.clone());
-    apply_each(&mut journal, &mut summary, Phase::Run, operations, |op| {
-        run_one(op, trash)
-    })?;
+    let mut progress = Progress::new(total, on_progress);
+    apply_each(
+        &mut journal,
+        &mut summary,
+        &mut progress,
+        Phase::Run,
+        operations,
+        |op| run_one(op, trash),
+    )?;
+    progress.finish(&session.header.scan_root);
     Ok(summary)
 }
 
@@ -638,17 +685,22 @@ fn send_to_trash(trash: &dyn OsTrash, op: &JournaledOperation) -> Result<PathBuf
 fn apply_each<T: Borrow<JournaledOperation>>(
     journal: &mut Journal,
     summary: &mut Summary,
+    progress: &mut Progress<impl FnMut(RunProgress)>,
     phase: Phase,
     operations: impl Iterator<Item = T>,
     mut attempt: impl FnMut(&JournaledOperation) -> Result<Option<PathBuf>, NotDone>,
 ) -> io::Result<()> {
     for op in operations {
         let op = op.borrow();
+        progress.starting(&op.source);
+
         journal.append(&op.intent(phase))?;
+
         let (outcome, note, kind, landed) = match attempt(op) {
             Ok(landed) => (OutcomeKind::Done, None, None, landed),
             Err(not_done) => (not_done.outcome, Some(not_done.note), not_done.kind, None),
         };
+
         journal.append(&Record::Outcome {
             operation_id: op.id.clone(),
             phase,
@@ -656,6 +708,7 @@ fn apply_each<T: Borrow<JournaledOperation>>(
             reason: note.clone(),
             landed: landed.clone(),
         })?;
+
         summary.push(
             outcome,
             Outcome {

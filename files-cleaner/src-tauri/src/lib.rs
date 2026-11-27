@@ -305,16 +305,25 @@ async fn run_plan(
     .await
 }
 
+/// Progress is reported the way a Run reports it. There is no Cancel.
 #[tauri::command]
 async fn undo(
     app: AppHandle,
     session_id: String,
     operation_ids: Option<Vec<String>>,
+    on_progress: Channel<RunProgress>,
 ) -> Result<Summary, CommandError> {
     let journal_dir = journal_dir(&app)?;
-    blocking(move || match operation_ids {
-        Some(ids) => core::undo_operations(&session_id, &ids, &journal_dir, &SystemTrash),
-        None => core::undo(&session_id, &journal_dir, &SystemTrash),
+    blocking(move || {
+        core::undo_with_progress(
+            &session_id,
+            operation_ids.as_deref(),
+            &journal_dir,
+            &SystemTrash,
+            |progress| {
+                let _ = on_progress.send(progress);
+            },
+        )
     })
     .await
 }
@@ -324,10 +333,21 @@ async fn redo_operations(
     app: AppHandle,
     session_id: String,
     operation_ids: Vec<String>,
+    on_progress: Channel<RunProgress>,
 ) -> Result<Summary, CommandError> {
     let journal_dir = journal_dir(&app)?;
-    blocking(move || core::redo_operations(&session_id, &operation_ids, &journal_dir, &SystemTrash))
-        .await
+    blocking(move || {
+        core::redo_with_progress(
+            &session_id,
+            &operation_ids,
+            &journal_dir,
+            &SystemTrash,
+            |progress| {
+                let _ = on_progress.send(progress);
+            },
+        )
+    })
+    .await
 }
 
 #[tauri::command]
@@ -335,10 +355,19 @@ async fn retry_operations(
     app: AppHandle,
     session_id: String,
     operation_ids: Vec<String>,
+    on_progress: Channel<RunProgress>,
 ) -> Result<Summary, CommandError> {
     let journal_dir = journal_dir(&app)?;
     blocking(move || {
-        core::retry_operations(&session_id, &operation_ids, &journal_dir, &SystemTrash)
+        core::retry_with_progress(
+            &session_id,
+            &operation_ids,
+            &journal_dir,
+            &SystemTrash,
+            |progress| {
+                let _ = on_progress.send(progress);
+            },
+        )
     })
     .await
 }

@@ -4,7 +4,7 @@ import { buildReviewPlan, pathSeparator, runPlan } from "../../shared/api.js";
 import { busy, drawMore, el, icon, showStatus, showWarning } from "../../shared/dom.js";
 import { formatDate, formatSize, trashPlace } from "../../shared/format.js";
 import { withShortcut } from "../../shared/menus.js";
-import { describeNothingDone, describeRunProgress, describeWarning } from "../../shared/outcomes.js";
+import { describeNothingDone, describeWarning, showRunProgress } from "../../shared/outcomes.js";
 import { copyFolder, filedCopy, planDuplicates, trashedCopies, trashedCopiesIn } from "./review-choices.js";
 import { copiesText, fileName } from "./selection.js";
 
@@ -27,13 +27,18 @@ export function duplicatesPane(ctx) {
     });
     return [
       el("h2", {}, "Duplicates"),
+      el(
+        "p",
+        { className: "pane-note muted" },
+        `Files with exactly the same contents, wherever they are. Ticked copies are kept; unticked copies go to the ${trashPlace(pathSeparator)}, where you can restore them.`,
+      ),
       trashNowRow(trashed, trashedSize),
       status,
       el(
         "div",
         { className: "duplicate-columns muted", ariaHidden: "true" },
         el("span", {}, "Keep"),
-        el("span", {}, "Folder"),
+        el("span", { title: "The folder this copy is in now." }, "Folder"),
         el("span", {}, "Modified"),
       ),
       el("ul", { className: "duplicate-groups", ariaLabel: "Duplicate Groups" }, ...state.duplicates.slice(0, shown).map(duplicateGroup)),
@@ -62,7 +67,7 @@ export function duplicatesPane(ctx) {
     const summary = await busy(status, [trashNow], "Trashing copies…", async () => {
       const plan = await buildReviewPlan(planDuplicates(state.duplicates), []);
       const approved = plan.operations.filter((op) => op.reason.type === "duplicate" && (op.ticked || Boolean(op.error))).map((op) => op.id);
-      return runPlan(approved, (progress) => showStatus(status, describeRunProgress(progress)));
+      return runPlan(approved, showRunProgress(status, { verb: "Trashing", of: copiesText }));
     });
     view.running = false;
     if (summary) {
@@ -95,6 +100,8 @@ export function duplicatesPane(ctx) {
 
   function duplicateCopy(duplicate, copy) {
     const kept = duplicate.copies.get(copy.path) === "keep";
+    // Only once it really sits in a Suggested Folder, or the tag would say what won't happen.
+    const filed = copy.path === filedCopy(duplicate) && !state.left.has(copy.path);
     const folder = copyFolder(copy) || ctx.rootName;
     const keep = el("input", { type: "checkbox", className: "duplicate-copy-keep", checked: kept, ariaLabel: `Keep the copy in ${folder}` });
     keep.addEventListener("change", () => {
@@ -107,7 +114,19 @@ export function duplicatesPane(ctx) {
       "li",
       { className: `duplicate-copy ${kept ? "keep" : "trash"}` },
       keep,
-      el("span", { className: "path duplicate-copy-folder", title: copy.path }, folder),
+      el(
+        "span",
+        { className: "duplicate-copy-where" },
+        el("span", { className: "path duplicate-copy-folder", title: copy.path }, folder),
+        el("span", { className: "pill duplicate-copy-tag" }, kept ? "Keep" : "Trash"),
+        filed
+          ? el(
+              "span",
+              { className: "pill duplicate-copy-tag", title: "This copy is also moved into a Suggested Folder; the other kept copies stay put." },
+              "Filed",
+            )
+          : "",
+      ),
       el("span", { className: "muted folder-file-date" }, formatDate(copy.modified)),
     );
     return ctx.selection.selectable(row, copy.path);
